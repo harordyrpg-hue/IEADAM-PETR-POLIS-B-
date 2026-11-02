@@ -22,6 +22,7 @@ interface AppContextType {
   firebaseUser: FirebaseUser | null;
   authLoading: boolean;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   registerWithEmail: (name: string, email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -143,7 +144,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const refreshStats = useCallback(async () => {
-    if (!auth.currentUser) return;
     try {
       const stats = await api.getStorageStats();
       setStorageStats(stats);
@@ -153,7 +153,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const refreshFolders = useCallback(async () => {
-    if (!auth.currentUser) return;
     try {
       const data = await api.getFolders();
       setFolders(data);
@@ -163,7 +162,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const refreshEvents = useCallback(async () => {
-    if (!auth.currentUser) return;
     try {
       const data = await api.getEvents();
       setEvents(data);
@@ -172,8 +170,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  // Listen to Firebase Authentication state changes
+  // Listen to Firebase Authentication state changes & restore session
   useEffect(() => {
+    // 1. Check local session immediately to avoid flash of login screen
+    const storedUser = api.getCurrentSessionUser();
+    if (storedUser) {
+      setUser(storedUser);
+      setAuthLoading(false);
+      refreshStats();
+      refreshFolders();
+      refreshEvents();
+    }
+
     const unsubscribe = api.onAuthStateChanged(async (fbUser) => {
       setFirebaseUser(fbUser);
       if (fbUser) {
@@ -185,14 +193,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setUser(null);
           } else {
             setUser(profile);
+            try {
+              localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+            } catch {}
             await Promise.all([refreshStats(), refreshFolders(), refreshEvents()]);
           }
         } catch (err) {
           console.error('Failed to load user profile from Firestore:', err);
-          setUser(null);
+          const fallback = api.getCurrentSessionUser();
+          if (fallback) setUser(fallback);
         }
       } else {
-        setUser(null);
+        const localSession = api.getCurrentSessionUser();
+        if (localSession) {
+          setUser(localSession);
+        } else {
+          setUser(null);
+        }
       }
       setAuthLoading(false);
     });
@@ -202,7 +219,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Real-time synchronization across all team members
   useEffect(() => {
-    if (!user || !firebaseUser || !auth.currentUser) {
+    if (!user) {
       setAllFiles([]);
       return;
     }
@@ -229,7 +246,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubFolders();
       unsubEvents();
     };
-  }, [user, firebaseUser]);
+  }, [user]);
 
   // Dynamically compute real-time storage stats from allFiles
   useEffect(() => {
@@ -298,6 +315,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     notify(`Bem-vindo, ${profile.name}!`, 'success');
   };
 
+  const loginWithGoogle = async () => {
+    const profile = await api.loginWithGoogle();
+    setUser(profile);
+    notify(`Bem-vindo, ${profile.name}!`, 'success');
+  };
+
   const registerWithEmail = async (name: string, email: string, pass: string) => {
     const profile = await api.registerWithEmail(name, email, pass);
     setUser(profile);
@@ -349,6 +372,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         firebaseUser,
         authLoading,
         loginWithEmail,
+        loginWithGoogle,
         registerWithEmail,
         logout,
         resetPassword,
