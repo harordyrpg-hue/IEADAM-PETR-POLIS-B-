@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'pedro.martinss225@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin')
+      );
+    }
+
+    function canManageChurch() {
+      return isSuperAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.canManageChurchPage == true
+      );
+    }
+
+    // 1. User Profiles & Team RBAC
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSuperAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow update: if isSuperAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    // 2. Media Files & Folders
+    match /files/{fileId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /folders/{folderId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /shares/{shareId} {
+      allow read: if true; // Public access via share token
+      allow write: if isSignedIn();
+    }
+
+    match /activities/{activityId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    // ==================================================
+    // 3. PUBLIC CHURCH PAGE (ISOLATED & HARDENED)
+    // ==================================================
+
+    // Church Profile & Institutional Info (public read, write for church managers)
+    match /church_settings/{docId} {
+      allow read: if true;
+      allow write: if canManageChurch();
+    }
+
+    // Church Announcements (public read if published, write for church managers)
+    match /church_announcements/{announcementId} {
+      allow read: if (resource != null && resource.data.status == 'published') || canManageChurch();
+      allow write: if canManageChurch();
+    }
+
+    // Church Events & Service Schedule (public read if published, write for church managers)
+    match /church_events/{eventId} {
+      allow read: if (resource != null && resource.data.status == 'published') || canManageChurch();
+      allow write: if canManageChurch();
+    }
+
+    // Church Articles & Devotionals (public read if published, write for church managers)
+    match /church_articles/{articleId} {
+      allow read: if (resource != null && resource.data.status == 'published') || canManageChurch();
+      allow write: if canManageChurch();
+    }
+
+    // Church Photo & Video Albums (public read if published, write for church managers)
+    match /church_albums/{albumId} {
+      allow read: if (resource != null && resource.data.status == 'published') || canManageChurch();
+      allow write: if canManageChurch();
+    }
+
+    // Church Downloads (public read if published, write for church managers)
+    match /church_downloads/{downloadId} {
+      allow read: if (resource != null && resource.data.status == 'published') || canManageChurch();
+      // Allow atomic increment of download count by visitors
+      allow update: if canManageChurch() || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['downloadCount'])
+      );
+      allow create, delete: if canManageChurch();
+    }
+  }
+}

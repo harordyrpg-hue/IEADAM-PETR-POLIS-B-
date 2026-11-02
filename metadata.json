@@ -1,0 +1,6 @@
+{
+  "name": "PT-B Mídia",
+  "description": "Central de Arquivos e Mídias - Armazenamento, organização e compartilhamento profissional para equipe de mídia de igreja.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

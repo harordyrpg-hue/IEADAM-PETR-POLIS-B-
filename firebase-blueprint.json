@@ -1,0 +1,188 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with roles and permissions",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 120 },
+        "email": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "enum": ["super_admin", "media_admin", "media_member"] },
+        "roleLabel": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "enum": ["active", "blocked"] },
+        "avatar": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email", "role", "status"]
+    },
+    "Folder": {
+      "title": "Folder",
+      "description": "Folder hierarchy for organizing media assets",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 150 },
+        "parentId": { "type": "string", "maxLength": 128 },
+        "color": { "type": "string", "maxLength": 30 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "isFavorite": { "type": "boolean" },
+        "inTrash": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerUid", "inTrash"]
+    },
+    "FileRecord": {
+      "title": "FileRecord",
+      "description": "Metadata for uncompressed original media files in Cloud Storage",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 255 },
+        "originalName": { "type": "string", "maxLength": 255 },
+        "extension": { "type": "string", "maxLength": 20 },
+        "mimeType": { "type": "string", "maxLength": 100 },
+        "size": { "type": "number" },
+        "type": { "type": "string", "enum": ["photo", "video", "art", "audio", "document", "archive", "other"] },
+        "storagePath": { "type": "string", "maxLength": 500 },
+        "downloadUrl": { "type": "string", "maxLength": 2000 },
+        "thumbnailUrl": { "type": "string", "maxLength": 2000 },
+        "folderId": { "type": "string", "maxLength": 128 },
+        "eventId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "ownerName": { "type": "string", "maxLength": 120 },
+        "isFavorite": { "type": "boolean" },
+        "inTrash": { "type": "boolean" },
+        "trashedAt": { "type": "string", "format": "date-time" },
+        "tags": { "type": "array" },
+        "resolution": { "type": "string", "maxLength": 50 },
+        "duration": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "size", "type", "storagePath", "ownerUid", "inTrash"]
+    },
+    "ChurchEvent": {
+      "title": "ChurchEvent",
+      "description": "Church media event (culto, conferência, batismo)",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "date": { "type": "string", "maxLength": 20 },
+        "category": { "type": "string", "maxLength": 100 },
+        "coverUrl": { "type": "string", "maxLength": 2000 },
+        "responsibles": { "type": "array" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "date", "category"]
+    },
+    "ShareLink": {
+      "title": "ShareLink",
+      "description": "Secure sharing links for media assets",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string", "maxLength": 128 },
+        "resourceType": { "type": "string", "enum": ["file", "folder", "event"] },
+        "resourceId": { "type": "string", "maxLength": 128 },
+        "resourceName": { "type": "string", "maxLength": 255 },
+        "allowDownload": { "type": "boolean" },
+        "requireAuth": { "type": "boolean" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["token", "resourceType", "resourceId", "resourceName", "allowDownload"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "Audit activity log entry",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 120 },
+        "action": { "type": "string", "maxLength": 50 },
+        "actionLabel": { "type": "string", "maxLength": 150 },
+        "targetType": { "type": "string", "maxLength": 50 },
+        "targetName": { "type": "string", "maxLength": 255 },
+        "details": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userName", "action", "actionLabel", "targetName"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Church system configurations and storage quota",
+      "type": "object",
+      "properties": {
+        "churchName": { "type": "string", "maxLength": 150 },
+        "churchSubtitle": { "type": "string", "maxLength": 200 },
+        "storageEngine": { "type": "string", "maxLength": 50 },
+        "totalQuotaBytes": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["churchName"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User accounts and access control profiles"
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Admin access markers"
+    },
+    "/folders/{folderId}": {
+      "schema": { "$ref": "#/entities/Folder" },
+      "description": "Folder hierarchy"
+    },
+    "/files/{fileId}": {
+      "schema": { "$ref": "#/entities/FileRecord" },
+      "description": "File records storing Cloud Storage references and metadata"
+    },
+    "/events/{eventId}": {
+      "schema": { "$ref": "#/entities/ChurchEvent" },
+      "description": "Church media events"
+    },
+    "/shares/{shareId}": {
+      "schema": { "$ref": "#/entities/ShareLink" },
+      "description": "Shared access tokens"
+    },
+    "/activities/{activityId}": {
+      "schema": { "$ref": "#/entities/Activity" },
+      "description": "Audit trail log"
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/SystemSettings" },
+      "description": "System settings document"
+    },
+    "/church_settings/{docId}": {
+      "schema": { "$ref": "#/entities/ChurchProfile" },
+      "description": "Public church profile and institutional information"
+    },
+    "/church_announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/ChurchAnnouncement" },
+      "description": "Church public announcements and bulletins"
+    },
+    "/church_events/{eventId}": {
+      "schema": { "$ref": "#/entities/ChurchPublicEvent" },
+      "description": "Church public service schedule and upcoming events"
+    },
+    "/church_articles/{articleId}": {
+      "schema": { "$ref": "#/entities/ChurchArticle" },
+      "description": "Church articles and devotionals"
+    },
+    "/church_albums/{albumId}": {
+      "schema": { "$ref": "#/entities/ChurchAlbum" },
+      "description": "Church photo albums and YouTube video links"
+    },
+    "/church_downloads/{downloadId}": {
+      "schema": { "$ref": "#/entities/ChurchDownload" },
+      "description": "Church downloadable public study materials, bulletins, and sheet music"
+    }
+  }
+}
