@@ -146,7 +146,7 @@ export const api = {
     if (auth.currentUser) {
       return {
         uid: auth.currentUser.uid,
-        displayName: auth.currentUser.displayName || auth.currentUser.email || 'Membro da Mídia',
+        displayName: auth.currentUser.displayName || auth.currentUser.email || 'Usuário',
         email: auth.currentUser.email || '',
       };
     }
@@ -154,56 +154,28 @@ export const api = {
     if (session) {
       return {
         uid: session.uid,
-        displayName: session.name || session.email || 'Membro da Mídia',
+        displayName: session.name || session.email || 'Usuário',
         email: session.email || '',
         user: session,
       };
     }
     return {
-      uid: 'admin_pedro_henrique',
-      displayName: 'Pedro Henrique',
-      email: 'pedro.martinss225@gmail.com',
+      uid: 'unauthenticated',
+      displayName: 'Não Autenticado',
+      email: '',
     };
   },
 
-  async loginWithGmailDirect(gmailAddress: string, displayName?: string): Promise<User> {
-    const cleanEmail = gmailAddress.trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      throw new Error('Informe um endereço de e-mail válido.');
-    }
-
-    const isPedro = cleanEmail === 'pedro.martinss225@gmail.com';
-    const uid = isPedro ? 'admin_pedro_henrique' : `usr_gmail_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
-
-    const profile = await api.getUserProfile(uid, cleanEmail);
-    if (displayName && (!profile.name || profile.name === cleanEmail.split('@')[0])) {
-      profile.name = displayName;
-    }
-
-    if (profile.status === 'blocked') {
-      throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
-    }
-
+  async loginWithGoogle(): Promise<User> {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
     try {
-      localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-      await setDoc(doc(db, 'users', uid), profile, { merge: true });
-      if (isPedro) {
-        await setDoc(doc(db, 'admins', uid), { uid, email: cleanEmail, role: 'super_admin' }, { merge: true });
-      }
-    } catch (e) {
-      console.warn('Profile local storage / sync note:', e);
-    }
-
-    return profile;
-  },
-
-  async loginWithGoogle(fallbackEmail?: string, displayName?: string): Promise<User> {
-    // 1. Attempt standard Google OAuth via popup
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
       const cred = await signInWithPopup(auth, provider);
-      const profile = await api.getUserProfile(cred.user.uid, cred.user.email || '');
+      if (!cred.user || !cred.user.uid) {
+        throw new Error('Falha ao obter credenciais da conta Google.');
+      }
+      const email = cred.user.email || '';
+      const profile = await api.getUserProfile(cred.user.uid, email);
       if (profile.status === 'blocked') {
         await signOut(auth);
         throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
@@ -212,20 +184,24 @@ export const api = {
         localStorage.setItem('ptb_session_user', JSON.stringify(profile));
       } catch {}
       return profile;
-    } catch (popupErr: any) {
-      console.warn('Firebase signInWithPopup note:', popupErr?.code || popupErr?.message);
-
-      // Seamless fallback: when browser sandbox/iframe or domain restrictions prevent the popup,
-      // authenticate the user with their Gmail directly so login succeeds without interruption.
-      const targetEmail =
-        fallbackEmail && fallbackEmail.includes('@')
-          ? fallbackEmail.trim().toLowerCase()
-          : 'pedro.martinss225@gmail.com';
-
-      return await api.loginWithGmailDirect(
-        targetEmail,
-        targetEmail === 'pedro.martinss225@gmail.com' ? 'Pedro Henrique' : displayName
-      );
+    } catch (err: any) {
+      console.warn('Google sign-in note:', err?.code || err?.message);
+      if (err?.code === 'auth/popup-closed-by-user') {
+        throw new Error('O login com o Google foi cancelado.');
+      }
+      if (err?.code === 'auth/popup-blocked') {
+        throw new Error('A janela do Google foi bloqueada pelo navegador. Permita pop-ups para este site.');
+      }
+      if (err?.code === 'auth/cancelled-popup-request') {
+        throw new Error('Operação de login cancelada.');
+      }
+      if (err?.code === 'auth/unauthorized-domain') {
+        throw new Error('Este domínio não está autorizado no Firebase para login Google. Utilize o login por e-mail e senha.');
+      }
+      if (err?.message && err.message.includes('suspensa')) {
+        throw err;
+      }
+      throw new Error(err?.message || 'Falha ao autenticar com o Google.');
     }
   },
 
@@ -233,49 +209,10 @@ export const api = {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = pass.trim();
 
-    // 1. Pedro Henrique Super Admin credentials check
-    if (cleanEmail === 'pedro.martinss225@gmail.com') {
-      try {
-        if (cleanPass) {
-          const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
-          const profile = await api.getUserProfile(cred.user.uid, cleanEmail);
-          try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-          } catch {}
-          return profile;
-        }
-      } catch (authErr: any) {
-        console.warn('Firebase auth attempt note:', authErr?.message);
-      }
-
-      // Smooth authentication for Pedro Henrique Super Admin
-      const uid = auth.currentUser?.uid || 'admin_pedro_henrique';
-      const superAdminProfile: User = {
-        uid,
-        id: uid,
-        name: 'Pedro Henrique',
-        email: 'pedro.martinss225@gmail.com',
-        role: 'super_admin',
-        roleLabel: 'Super Administrador',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
-        status: 'active',
-        canManageChurchPage: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      try {
-        localStorage.setItem('ptb_session_user', JSON.stringify(superAdminProfile));
-        await setDoc(doc(db, 'users', uid), superAdminProfile, { merge: true });
-        await setDoc(doc(db, 'admins', uid), { uid, email: cleanEmail, role: 'super_admin' }, { merge: true });
-      } catch (syncErr) {
-        console.warn('Admin profile sync note:', syncErr);
-      }
-
-      return superAdminProfile;
+    if (!cleanEmail || !cleanPass) {
+      throw new Error('Informe e-mail e senha.');
     }
 
-    // 2. Standard authentication through Firebase Auth for team members
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
       const profile = await api.getUserProfile(cred.user.uid, cred.user.email || cleanEmail);
@@ -292,57 +229,53 @@ export const api = {
         throw err;
       }
 
-      // Check if user exists in Firestore users collection
-      try {
-        const q = query(collection(db, 'users'), where('email', '==', cleanEmail));
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          const u = snap.docs[0].data() as User;
-          if (u.status === 'blocked') {
-            throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
-          }
-          try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(u));
-          } catch {}
-          return u;
-        }
-      } catch {}
-
-      // If new team member, register smoothly
-      if (cleanPass.length >= 4) {
-        const newUid = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        const memberProfile: User = {
-          uid: newUid,
-          id: newUid,
-          name: cleanEmail.split('@')[0],
-          email: cleanEmail,
-          role: 'media_member',
-          roleLabel: 'Membro da Mídia',
-          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
-          status: 'active',
-          canManageChurchPage: false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
+      // If initial Super Admin account is logging in for the very first time and not yet registered in Auth:
+      if (
+        cleanEmail === 'pedro.martinss225@gmail.com' &&
+        (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-credential')
+      ) {
         try {
-          await setDoc(doc(db, 'users', newUid), memberProfile);
-          localStorage.setItem('ptb_session_user', JSON.stringify(memberProfile));
-        } catch {}
-        return memberProfile;
+          const cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
+          const profile = await api.getUserProfile(cred.user.uid, cleanEmail);
+          try {
+            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+          } catch {}
+          return profile;
+        } catch (createErr: any) {
+          if (createErr?.code === 'auth/email-already-in-use') {
+            throw new Error('E-mail ou senha incorretos.');
+          }
+          console.warn('Initial admin setup note:', createErr?.message);
+        }
       }
 
-      throw new Error('E-mail ou senha incorretos.');
+      if (
+        err?.code === 'auth/invalid-credential' ||
+        err?.code === 'auth/user-not-found' ||
+        err?.code === 'auth/wrong-password'
+      ) {
+        throw new Error('E-mail ou senha incorretos.');
+      }
+      if (err?.code === 'auth/too-many-requests') {
+        throw new Error('Muitas tentativas sem sucesso. Aguarde alguns minutos antes de tentar novamente.');
+      }
+      if (err?.code === 'auth/user-disabled') {
+        throw new Error('Esta conta foi desativada pelo Administrador.');
+      }
+
+      throw new Error(err?.message || 'E-mail ou senha incorretos.');
     }
   },
 
   async registerWithEmail(name: string, email: string, pass: string): Promise<User> {
-    const isInitialAdmin = email.trim().toLowerCase() === 'pedro.martinss225@gmail.com';
+    const cleanEmail = email.trim().toLowerCase();
+    const isInitialAdmin = cleanEmail === 'pedro.martinss225@gmail.com';
     if (!isInitialAdmin) {
-      throw new Error('Cadastro público desabilitado por segurança. Somente o Super Administrador pode cadastrar novos membros da equipe.');
+      throw new Error('Cadastro público desabilitado. Novos membros devem ser cadastrados pelo Super Administrador no painel de equipe.');
     }
 
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass.trim());
       const uid = cred.user.uid;
       const role: UserRole = 'super_admin';
       const roleLabels: Record<UserRole, string> = {
@@ -355,7 +288,7 @@ export const api = {
         uid,
         id: uid,
         name: name.trim() || 'Pr. Pedro Martins',
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         role,
         roleLabel: roleLabels[role],
         avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
@@ -377,27 +310,14 @@ export const api = {
       } catch {}
 
       return newUserProfile;
-    } catch {
-      // Fallback if email-password is not enabled in Firebase
-      const uid = 'admin_pedro_henrique';
-      const newUserProfile: User = {
-        uid,
-        id: uid,
-        name: name.trim() || 'Pedro Henrique',
-        email: email.trim().toLowerCase(),
-        role: 'super_admin',
-        roleLabel: 'Super Administrador',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
-        status: 'active',
-        canManageChurchPage: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      try {
-        await setDoc(doc(db, 'users', uid), newUserProfile, { merge: true });
-        localStorage.setItem('ptb_session_user', JSON.stringify(newUserProfile));
-      } catch {}
-      return newUserProfile;
+    } catch (err: any) {
+      if (err?.code === 'auth/email-already-in-use') {
+        throw new Error('Este e-mail já está cadastrado.');
+      }
+      if (err?.code === 'auth/weak-password') {
+        throw new Error('A senha deve ter pelo menos 6 caracteres.');
+      }
+      throw new Error(err?.message || 'Falha ao registrar conta.');
     }
   },
 
@@ -420,7 +340,9 @@ export const api = {
 
   async getUserProfile(uid: string, fallbackEmail: string = ''): Promise<User> {
     const userRef = doc(db, 'users', uid);
-    const isInitialAdmin = fallbackEmail.toLowerCase() === 'pedro.martinss225@gmail.com' || auth.currentUser?.email?.toLowerCase() === 'pedro.martinss225@gmail.com';
+    const effectiveEmail = (fallbackEmail || auth.currentUser?.email || '').trim().toLowerCase();
+    const isInitialAdmin = effectiveEmail === 'pedro.martinss225@gmail.com';
+
     try {
       const snap = await getDoc(userRef);
       if (snap.exists()) {
@@ -430,7 +352,8 @@ export const api = {
           ...u,
           id: u.id || uid,
           uid: u.uid || uid,
-          role: isSuper ? 'super_admin' : u.role,
+          email: u.email || effectiveEmail,
+          role: isSuper ? 'super_admin' : (u.role || 'media_member'),
           roleLabel: isSuper ? 'Super Administrador' : (u.roleLabel || 'Membro da Mídia'),
           canManageChurchPage: isSuper ? true : (u.canManageChurchPage ?? false),
         };
@@ -442,11 +365,11 @@ export const api = {
       const newUserProfile: User = {
         uid,
         id: uid,
-        name: auth.currentUser?.displayName || (isInitialAdmin ? 'Pedro Henrique' : fallbackEmail.split('@')[0]),
-        email: fallbackEmail || auth.currentUser?.email || '',
+        name: auth.currentUser?.displayName || (isInitialAdmin ? 'Pedro Henrique' : (effectiveEmail ? effectiveEmail.split('@')[0] : 'Membro da Mídia')),
+        email: effectiveEmail,
         role,
         roleLabel,
-        avatar: auth.currentUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+        avatar: auth.currentUser?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
         status: 'active',
         canManageChurchPage: isInitialAdmin,
         createdAt: new Date().toISOString(),
@@ -469,11 +392,11 @@ export const api = {
       return {
         uid,
         id: uid,
-        name: auth.currentUser?.displayName || (isSuper ? 'Pedro Henrique' : 'Membro'),
-        email: auth.currentUser?.email || fallbackEmail,
+        name: auth.currentUser?.displayName || (isSuper ? 'Pedro Henrique' : (effectiveEmail ? effectiveEmail.split('@')[0] : 'Membro da Mídia')),
+        email: effectiveEmail,
         role: isSuper ? 'super_admin' : 'media_member',
         roleLabel: isSuper ? 'Super Administrador' : 'Membro da Mídia',
-        avatar: auth.currentUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+        avatar: auth.currentUser?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
         status: 'active',
         canManageChurchPage: isSuper,
         createdAt: new Date().toISOString(),
@@ -494,48 +417,13 @@ export const api = {
       });
       if (list.length > 0) return list;
 
-      // Fallback default team roster if Firestore collection is initially sparse
-      return [
-        {
-          uid: 'admin_pedro_henrique',
-          id: 'admin_pedro_henrique',
-          name: 'Pedro Henrique',
-          email: 'pedro.martinss225@gmail.com',
-          role: 'super_admin',
-          roleLabel: 'Super Administrador',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
-          status: 'active',
-          canManageChurchPage: true,
-          createdAt: new Date().toISOString(),
-        },
-        {
-          uid: 'member_lucas_ferreira',
-          id: 'member_lucas_ferreira',
-          name: 'Lucas Ferreira',
-          email: 'lucas.som@igreja.com',
-          role: 'media_admin',
-          roleLabel: 'Áudio & Transmissão',
-          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&h=200&q=80',
-          status: 'active',
-          canManageChurchPage: false,
-          createdAt: new Date().toISOString(),
-        },
-        {
-          uid: 'member_ana_beatriz',
-          id: 'member_ana_beatriz',
-          name: 'Ana Beatriz',
-          email: 'ana.midia@igreja.com',
-          role: 'media_member',
-          roleLabel: 'Projeção & Redes',
-          avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80',
-          status: 'active',
-          canManageChurchPage: false,
-          createdAt: new Date().toISOString(),
-        },
-      ];
+      // Only return current user if authenticated, no fake accounts
+      const current = api.getCurrentSessionUser();
+      return current ? [current] : [];
     } catch (error) {
       console.warn('Could not list users:', error);
-      return [];
+      const current = api.getCurrentSessionUser();
+      return current ? [current] : [];
     }
   },
 
@@ -1766,29 +1654,8 @@ export const api = {
           id: 'lead-1',
           name: 'Pr. Pedro Martins',
           role: 'Pastor Titular & Ministério Pastoral',
-          bio: 'Dedicado ao ensino expositivo das Escrituras, ao aconselhamento bíblico e à visão estratégica da igreja.',
+          bio: 'Dedicado ao ensino expositivo das Escrituras, ao aconselhamento bíblico e à visão da igreja.',
           photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-        },
-        {
-          id: 'lead-2',
-          name: 'Pr. Lucas Ferreira',
-          role: 'Pastor Adjunto de Jovens e Família',
-          bio: 'Lidera os ministérios de juventude, adolescentes e apoio aos casais, fomentando o discipulado geracional.',
-          photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-        },
-        {
-          id: 'lead-3',
-          name: 'Diácono Marcos Silva',
-          role: 'Presidente do Corpo Diaconal',
-          bio: 'Supervisiona a assistência social da igreja, a recepção e a manutenção do templo para honra do Senhor.',
-          photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80',
-        },
-        {
-          id: 'lead-4',
-          name: 'Ana Beatriz Ramos',
-          role: 'Ministério de Louvor e Artes',
-          bio: 'Coordena o louvor congregacional, equipes musicais e a comunicação visual da liturgia bíblica.',
-          photoUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80',
         },
       ],
       serviceTimes: [
@@ -2167,163 +2034,9 @@ export const api = {
     } catch {}
   },
 
-  // Seed default samples if the church collections are empty
+  // No automatic seeding - users create and publish their own content
   async seedInitialChurchDataIfEmpty(): Promise<void> {
-    try {
-      const snap = await getDocs(collection(db, 'church_announcements'));
-      if (!snap.empty) return; // Already initialized
-
-      const effective = api.getEffectiveUser();
-      const authorName = effective.displayName || 'Pr. Pedro Martins';
-      const authorUid = effective.uid || 'admin_pedro_henrique';
-
-      // 1. Initial Announcements
-      await api.createChurchAnnouncement({
-        title: 'Culto de Celebração & Santa Ceia do Senhor',
-        content: 'Neste próximo domingo teremos nossa celebração especial com a ministração da Ceia do Senhor. Venha com seu coração preparado para render graças e comunhão fraterna!',
-        category: 'Culto Especial',
-        date: new Date().toISOString().split('T')[0],
-        isPinned: true,
-        status: 'published',
-        imageUrl: 'https://images.unsplash.com/photo-1544427920-c49ccfb85579?auto=format&fit=crop&w=1200&q=80',
-        authorName,
-        authorUid,
-      });
-
-      await api.createChurchAnnouncement({
-        title: 'Inscrições Abertas para o Retiro Espiritual 2026',
-        content: 'Já estão disponíveis as inscrições para o Retiro de Famílias e Jovens. Procure a secretaria após o culto ou faça seu cadastro na área de downloads baixando a ficha informativa.',
-        category: 'Eventos & Família',
-        date: new Date().toISOString().split('T')[0],
-        isPinned: false,
-        status: 'published',
-        imageUrl: 'https://images.unsplash.com/photo-1511632765486-a01980e01a18?auto=format&fit=crop&w=1200&q=80',
-        authorName,
-        authorUid,
-      });
-
-      // 2. Initial Events
-      const today = new Date();
-      const nextSunday = new Date(today);
-      nextSunday.setDate(today.getDate() + ((7 - today.getDay()) % 7 || 7));
-      const nextWed = new Date(nextSunday);
-      nextWed.setDate(nextSunday.getDate() + 3);
-
-      await api.createChurchPublicEvent({
-        title: 'Culto da Família & Escola Bíblica Dominical',
-        description: 'Um domingo abençoado com aprendizado bíblico aprofundado às 9h e culto solene às 18h30.',
-        date: nextSunday.toISOString().split('T')[0],
-        time: '18:30',
-        location: 'Templo Principal - Av. Jorge Montenegro Barros',
-        category: 'Culto de Celebração',
-        bannerUrl: 'https://images.unsplash.com/photo-1438232992991-995b7058bbb3?auto=format&fit=crop&w=1000&q=80',
-        status: 'published',
-        authorName,
-        authorUid,
-      });
-
-      await api.createChurchPublicEvent({
-        title: 'Vigília de Oração e Intercessão',
-        description: 'Noite de clamor pelas famílias, pelos enfermos e pelo avanço missionário da igreja.',
-        date: nextWed.toISOString().split('T')[0],
-        time: '19:30',
-        location: 'Templo Principal',
-        category: 'Oração',
-        bannerUrl: 'https://images.unsplash.com/photo-1478147427282-58a87a120781?auto=format&fit=crop&w=1000&q=80',
-        status: 'published',
-        authorName,
-        authorUid,
-      });
-
-      // 3. Initial Article
-      await api.createChurchArticle({
-        title: 'A Suficiência da Graça em Meio às Tribulações',
-        summary: 'Uma reflexão pastoral sobre como a promessa de Cristo em 2 Coríntios 12 sustenta a caminhada do cristão em tempos de incerteza.',
-        content: `### A Graça Que Sustenta
-
-No livro de 2 Coríntios 12:9, o apóstolo Paulo registra uma das mais consoladoras respostas divinas diante do sofrimento humano: *"A minha graça te basta, porque o meu poder se aperfeiçoa na fraqueza."*
-
-Muitas vezes em nossas vidas enfrentamos tempestades que parecem insuperáveis: lutas financeiras, enfermidades ou dilemas familiares. Nossa inclinação natural é pedir a remoção imediata da dor. No entanto, o Evangelho nos ensina que Deus não desperdiça nenhuma lágrima.
-
-#### Três Princípios Para o Seu Dia a Dia:
-1. **Confiança Inabalável**: Saber que o Senhor está no controle de cada detalhe da nossa história nos liberta do desespero.
-2. **Dependência Constante**: A oração não é um recurso de emergência, mas a respiração diária do discípulo de Jesus.
-3. **Comunhão na Igreja**: Não fomos chamados para caminhar sozinhos. Na família da fé encontramos oração mútua e sustento.
-
-Que nesta semana você possa descansar na certeza de que a graça de Deus é abundante, viva e suficiente para cada uma de suas necessidades!`,
-        author: 'Pr. Pedro Martins',
-        category: 'Devocional',
-        tags: ['Graça', 'Fé', 'Esperança', 'Oração'],
-        coverImageUrl: 'https://images.unsplash.com/photo-1504052434569-70ad5836ab65?auto=format&fit=crop&w=1200&q=80',
-        status: 'published',
-        publishedAt: new Date().toISOString(),
-        authorUid,
-      });
-
-      // 4. Initial Album
-      await api.createChurchAlbum({
-        title: 'Celebração de Batismo nas Águas & Comunhão',
-        description: 'Registros emocionantes dos novos irmãos professando publicamente sua fé em Cristo Jesus.',
-        date: new Date().toISOString().split('T')[0],
-        category: 'Batismo',
-        coverUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1000&q=80',
-        photos: [
-          {
-            id: 'ph-1',
-            url: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=80',
-            caption: 'Momento de oração com os batizandos',
-          },
-          {
-            id: 'ph-2',
-            url: 'https://images.unsplash.com/photo-1544427920-c49ccfb85579?auto=format&fit=crop&w=1200&q=80',
-            caption: 'Celebração com a comunidade reunida',
-          },
-          {
-            id: 'ph-3',
-            url: 'https://images.unsplash.com/photo-1438232992991-995b7058bbb3?auto=format&fit=crop&w=1200&q=80',
-            caption: 'Louvor e adoração a Deus',
-          },
-        ],
-        videos: [
-          {
-            id: 'vid-1',
-            title: 'Culto de Adoração & Mensagem Bíblica',
-            youtubeUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-            youtubeId: 'dQw4w9WgXcQ',
-          },
-        ],
-        status: 'published',
-        authorName,
-        authorUid,
-      });
-
-      // 5. Initial Download
-      await api.createChurchDownload({
-        title: 'Boletim Informativo Semanal - Edição Atual',
-        description: 'Avisos da semana, escalas de ministérios, aniversariantes e guia de oração pastoral.',
-        category: 'boletim',
-        fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-        fileSize: 450 * 1024,
-        format: 'PDF',
-        status: 'published',
-        authorName,
-        authorUid,
-      });
-
-      await api.createChurchDownload({
-        title: 'Estudo Bíblico: Panorama do Livro de Romanos',
-        description: 'Apostila complementar em PDF para acompanhamento da série expositiva de domingo.',
-        category: 'estudo',
-        fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-        fileSize: 1200 * 1024,
-        format: 'PDF',
-        status: 'published',
-        authorName,
-        authorUid,
-      });
-    } catch (err) {
-      console.warn('Initial church seed skipped or already present:', err);
-    }
+    // Intentionally empty: real users create their own announcements, events and publications
   },
 
   // ==========================================
@@ -2533,131 +2246,9 @@ Que nesta semana você possa descansar na certeza de que a graça de Deus é abu
     }
   },
 
-  // Seed default sample tasks and notes if the collections are empty
+  // No automatic seeding - team members create and manage their own tasks and schedules
   async seedInitialTeamScheduleIfEmpty(): Promise<void> {
-    try {
-      const snap = await getDocs(collection(db, 'team_tasks'));
-      if (!snap.empty) return;
-
-      const effective = api.getEffectiveUser();
-      const today = new Date();
-      const nextSunday = new Date(today);
-      nextSunday.setDate(today.getDate() + ((7 - today.getDay()) % 7 || 7));
-      const nextSundayStr = nextSunday.toISOString().split('T')[0];
-
-      const nextWed = new Date(nextSunday);
-      nextWed.setDate(nextSunday.getDate() + 3);
-      const nextWedStr = nextWed.toISOString().split('T')[0];
-
-      // 1. Initial Tasks
-      await api.createTeamTask({
-        title: 'Operação de Transmissão ao Vivo e Câmeras',
-        description: 'Gerenciar live no YouTube, cortes de câmera e controle de qualidade do streaming.',
-        category: 'transmissao',
-        dueDate: nextSundayStr,
-        dueTime: '18:15',
-        priority: 'urgente',
-        status: 'em_andamento',
-        assignedToUid: 'admin_pedro_henrique',
-        assignedToName: 'Pedro Henrique',
-        checklist: [
-          { id: 'c1', text: 'Checar link dedicado e sinal OBS', completed: true },
-          { id: 'c2', text: 'Configurar título da live e miniatura no YouTube', completed: true },
-          { id: 'c3', text: 'Realizar teste privado de transmissão 30 min antes', completed: false },
-        ],
-      });
-
-      await api.createTeamTask({
-        title: 'Alinhamento e Mixagem de Áudio do Culto',
-        description: 'Equalização do louvor, microfones da pregação e balanceamento do som ambiente e fones.',
-        category: 'som',
-        dueDate: nextSundayStr,
-        dueTime: '17:30',
-        priority: 'alta',
-        status: 'pendente',
-        assignedToUid: 'member_lucas_ferreira',
-        assignedToName: 'Lucas Ferreira',
-        checklist: [
-          { id: 'c4', text: 'Trocar pilhas dos microfones sem fio', completed: true },
-          { id: 'c5', text: 'Passagem de som com a equipe de louvor às 17h45', completed: false },
-          { id: 'c6', text: 'Verificar retorno in-ear dos músicos', completed: false },
-        ],
-      });
-
-      await api.createTeamTask({
-        title: 'Projeção de Letras e Vídeos no Painel LED',
-        description: 'Exibição da ordem do culto, letras dos louvores, avisos e passagens bíblicas.',
-        category: 'projecao',
-        dueDate: nextSundayStr,
-        dueTime: '18:00',
-        priority: 'alta',
-        status: 'pendente',
-        assignedToUid: 'member_ana_beatriz',
-        assignedToName: 'Ana Beatriz',
-        checklist: [
-          { id: 'c7', text: 'Atualizar repertório no Holyrics', completed: false },
-          { id: 'c8', text: 'Testar vídeos de comunicados e dízimos', completed: false },
-        ],
-      });
-
-      await api.createTeamTask({
-        title: 'Cobertura Fotográfica e Stories em Tempo Real',
-        description: 'Fotos dos momentos solenes e postagens nos Stories da igreja durante a celebração.',
-        category: 'fotografia',
-        dueDate: nextSundayStr,
-        dueTime: '18:30',
-        priority: 'media',
-        status: 'pendente',
-        assignedToUid: 'member_marcos_vinicius',
-        assignedToName: 'Marcos Vinicius',
-        checklist: [
-          { id: 'c9', text: 'Formatar cartões SD e limpar lentes', completed: true },
-          { id: 'c10', text: 'Subir fotos selecionadas no PT-B Mídia até às 22h', completed: false },
-        ],
-      });
-
-      await api.createTeamTask({
-        title: 'Design dos Banners e Artes da Próxima Série',
-        description: 'Criação dos posts do Instagram e cartaz para a nova série de mensagens do mês.',
-        category: 'design_redes',
-        dueDate: nextWedStr,
-        dueTime: '15:00',
-        priority: 'media',
-        status: 'pendente',
-        assignedToUid: effective.uid,
-        assignedToName: effective.displayName,
-      });
-
-      // 2. Initial Notes
-      await api.createTeamNote({
-        title: 'Padrão de Organização e Upload dos Arquivos de Culto',
-        content: 'Ao subir fotos e vídeos brutos no portal, favor selecionar o Evento correspondente (ex: Culto de Domingo). Isso agrupa automaticamente os arquivos e calcula a minutagem e armazenamento da igreja.',
-        category: 'Alinhamento',
-        color: 'amber',
-        isPinned: true,
-        tags: ['Padrão', 'Mídia', 'Arquivos'],
-      });
-
-      await api.createTeamNote({
-        title: 'Protocolo de Emergência para Queda de Conexão na Live',
-        content: 'Se houver oscilação de internet: 1. Acionar o roteador backup de dados móveis 5G. 2. Alternar para a placa de captura reserva. 3. Fixar mensagem de status no chat do YouTube.',
-        category: 'Aviso Importante',
-        color: 'rose',
-        isPinned: true,
-        tags: ['Transmissão', 'Emergência'],
-      });
-
-      await api.createTeamNote({
-        title: 'Ideias de Conteúdo para o Mês de Celebração',
-        content: 'Vídeo rápido de bastidores da equipe de som e mídia; depoimento curto de 1 minuto em formato Reels; contagem regressiva para o congresso anual.',
-        category: 'Ideias de Mídia',
-        color: 'sky',
-        isPinned: false,
-        tags: ['Criatividade', 'Reels'],
-      });
-    } catch (err) {
-      console.warn('Initial team schedule seed skipped:', err);
-    }
+    // Intentionally empty: real team members create and manage their own work and schedules
   },
 };
 

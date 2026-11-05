@@ -37,7 +37,7 @@ export const EventModal: React.FC<EventModalProps> = ({
   const [description, setDescription] = useState(event ? event.description : '');
   const [date, setDate] = useState(event ? event.date : new Date().toISOString().split('T')[0]);
   const [category, setCategory] = useState(event ? event.category : 'Culto de Domingo');
-  const [responsibles, setResponsibles] = useState(event ? event.responsibles.join(', ') : 'Lucas Ferreira, Ana Beatriz');
+  const [responsibles, setResponsibles] = useState(event ? event.responsibles.join(', ') : '');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
@@ -162,7 +162,7 @@ export const EventModal: React.FC<EventModalProps> = ({
               type="text"
               value={responsibles}
               onChange={(e) => setResponsibles(e.target.value)}
-              placeholder="Ex: Lucas Ferreira, Ana Beatriz, João Fotógrafo"
+              placeholder="Ex: Pedro Henrique, João, Equipe de Louvor"
               className="w-full bg-neutral-800 border border-neutral-700 rounded-lg p-2.5 text-neutral-200 focus:outline-none focus:border-amber-500"
             />
           </div>

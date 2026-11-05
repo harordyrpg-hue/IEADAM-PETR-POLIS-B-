@@ -36,13 +36,6 @@ export const PublicChurchPage: React.FC = () => {
       try {
         setLoading(true);
 
-        // Seed default initial data if Firestore is empty
-        try {
-          await api.seedInitialChurchDataIfEmpty();
-        } catch {
-          // If seeding is skipped or rules prevent write, continue with existing data
-        }
-
         const [
           profileData,
           announcementsData,

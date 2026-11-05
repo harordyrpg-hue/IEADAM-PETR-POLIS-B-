@@ -692,46 +692,60 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {events.slice(0, 3).map((evt) => (
-            <div
-              key={evt.id}
-              onClick={() => {
-                setActiveTab('events');
-              }}
-              className="group relative rounded-xl overflow-hidden bg-neutral-800/40 border border-neutral-700/60 hover:border-neutral-600 cursor-pointer transition-all flex flex-col"
+        {events.length === 0 ? (
+          <div className="p-8 rounded-xl bg-neutral-800/20 border border-dashed border-neutral-800 text-center">
+            <Calendar className="w-8 h-8 text-neutral-600 mx-auto mb-2" />
+            <p className="text-xs text-neutral-400">Nenhum evento cadastrado no momento.</p>
+            <button
+              onClick={() => setIsEventModalOpen(true)}
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-400/10 text-amber-400 border border-amber-400/20 hover:bg-amber-400/20 text-xs font-medium transition-all cursor-pointer"
             >
-              <div className="relative h-32 w-full overflow-hidden">
-                <img
-                  src={evt.coverUrl}
-                  alt={evt.name}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                />
-                <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/75 text-[10px] text-amber-300 font-medium">
-                  {evt.category}
-                </span>
-                <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/75 text-[10px] text-neutral-200 font-mono-numbers">
-                  {formatDate(evt.date)}
-                </span>
-              </div>
-              <div className="p-3 flex-1 flex flex-col justify-between">
-                <div>
-                  <h4 className="font-semibold text-neutral-200 text-xs group-hover:text-amber-300 transition-colors line-clamp-1">
-                    {evt.name}
-                  </h4>
-                  <p className="text-[11px] text-neutral-400 mt-1 line-clamp-2">
-                    {evt.description}
-                  </p>
+              <CalendarPlus className="w-3.5 h-3.5" />
+              <span>Criar primeiro evento</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {events.slice(0, 3).map((evt) => (
+              <div
+                key={evt.id}
+                onClick={() => {
+                  setActiveTab('events');
+                }}
+                className="group relative rounded-xl overflow-hidden bg-neutral-800/40 border border-neutral-700/60 hover:border-neutral-600 cursor-pointer transition-all flex flex-col"
+              >
+                <div className="relative h-32 w-full overflow-hidden">
+                  <img
+                    src={evt.coverUrl}
+                    alt={evt.name}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                  <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/75 text-[10px] text-amber-300 font-medium">
+                    {evt.category}
+                  </span>
+                  <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/75 text-[10px] text-neutral-200 font-mono-numbers">
+                    {formatDate(evt.date)}
+                  </span>
                 </div>
-                <div className="mt-3 pt-2 border-t border-neutral-700/40 flex items-center justify-between text-[10px] text-neutral-400 font-mono-numbers">
-                  <span>{evt.responsibles ? evt.responsibles.join(', ') : 'Mídia'}</span>
-                  <span className="text-amber-400">Ver arquivos →</span>
+                <div className="p-3 flex-1 flex flex-col justify-between">
+                  <div>
+                    <h4 className="font-semibold text-neutral-200 text-xs group-hover:text-amber-300 transition-colors line-clamp-1">
+                      {evt.name}
+                    </h4>
+                    <p className="text-[11px] text-neutral-400 mt-1 line-clamp-2">
+                      {evt.description}
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-neutral-700/40 flex items-center justify-between text-[10px] text-neutral-400 font-mono-numbers">
+                    <span>{evt.responsibles ? evt.responsibles.join(', ') : 'Mídia'}</span>
+                    <span className="text-amber-400">Ver arquivos →</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* New Event Modal */}

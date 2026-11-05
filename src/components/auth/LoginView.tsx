@@ -18,7 +18,7 @@ export const LoginView: React.FC = () => {
     try {
       setErrorMessage(null);
       setGoogleLoading(true);
-      await loginWithGoogle(email.trim());
+      await loginWithGoogle();
     } catch (err: any) {
       console.warn('Google sign-in error:', err);
       setErrorMessage(err?.message || 'Falha ao autenticar com o Google.');
