@@ -25,7 +25,8 @@ interface AppContextType {
   firebaseUser: FirebaseUser | null;
   authLoading: boolean;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
+  loginWithGoogle: (fallbackGmail?: string, displayName?: string) => Promise<void>;
+  loginWithGmailDirect: (email: string, displayName?: string) => Promise<void>;
   registerWithEmail: (name: string, email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -344,8 +345,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     notify(`Bem-vindo, ${profile.name}!`, 'success');
   };
 
-  const loginWithGoogle = async () => {
-    const profile = await api.loginWithGoogle();
+  const loginWithGoogle = async (fallbackGmail?: string, displayName?: string) => {
+    const profile = await api.loginWithGoogle(fallbackGmail, displayName);
+    setUser(profile);
+    notify(`Bem-vindo, ${profile.name}!`, 'success');
+  };
+
+  const loginWithGmailDirect = async (email: string, displayName?: string) => {
+    const profile = await api.loginWithGmailDirect(email, displayName);
     setUser(profile);
     notify(`Bem-vindo, ${profile.name}!`, 'success');
   };
@@ -476,6 +483,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         authLoading,
         loginWithEmail,
         loginWithGoogle,
+        loginWithGmailDirect,
         registerWithEmail,
         logout,
         resetPassword,

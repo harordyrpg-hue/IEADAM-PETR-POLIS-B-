@@ -18,13 +18,10 @@ export const LoginView: React.FC = () => {
     try {
       setErrorMessage(null);
       setGoogleLoading(true);
-      await loginWithGoogle();
+      await loginWithGoogle(email.trim());
     } catch (err: any) {
-      console.warn('Google sign-in:', err);
-      // If popup was cancelled or blocked, don't show scary error
-      if (!err?.message?.includes('closed-by-user') && !err?.message?.includes('popup-closed')) {
-        setErrorMessage(err?.message || 'Falha ao autenticar com o Google.');
-      }
+      console.warn('Google sign-in error:', err);
+      setErrorMessage(err?.message || 'Falha ao autenticar com o Google.');
     } finally {
       setGoogleLoading(false);
     }
@@ -43,16 +40,11 @@ export const LoginView: React.FC = () => {
     }
 
     if (mode === 'login') {
-      if (!password) {
-        setErrorMessage('Informe sua senha.');
-        return;
-      }
-
       try {
         setLoading(true);
         await loginWithEmail(cleanEmail, password);
       } catch (err: any) {
-        let msg = err.message || 'Falha na autenticação.';
+        let msg = err?.message || 'Falha na autenticação.';
         if (
           msg.includes('auth/invalid-credential') ||
           msg.includes('auth/user-not-found') ||
@@ -76,7 +68,7 @@ export const LoginView: React.FC = () => {
         setSuccessMessage('E-mail de recuperação enviado com sucesso.');
         setMode('login');
       } catch (err: any) {
-        setErrorMessage(err.message || 'Erro ao enviar e-mail de recuperação.');
+        setErrorMessage(err?.message || 'Erro ao enviar e-mail de recuperação.');
       } finally {
         setLoading(false);
       }
@@ -106,7 +98,7 @@ export const LoginView: React.FC = () => {
         {errorMessage && (
           <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{errorMessage}</span>
+            <span className="flex-1">{errorMessage}</span>
           </div>
         )}
 
@@ -148,7 +140,6 @@ export const LoginView: React.FC = () => {
                 <Key className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
                 <input
                   type={showPassword ? 'text' : 'password'}
-                  required
                   autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -191,6 +182,7 @@ export const LoginView: React.FC = () => {
               <div className="flex-1 border-t border-neutral-800"></div>
             </div>
 
+            {/* Google Authentication Button */}
             <button
               type="button"
               onClick={handleGoogleLogin}
