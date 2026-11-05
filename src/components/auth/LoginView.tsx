@@ -56,6 +56,8 @@ export const LoginView: React.FC = () => {
           msg = 'Muitas tentativas com falha. Aguarde alguns minutos.';
         } else if (msg.includes('auth/invalid-email')) {
           msg = 'Formato de e-mail inválido.';
+        } else if (msg.includes('auth/operation-not-allowed') || msg.includes('operation-not-allowed')) {
+          msg = 'O login com E-mail/Senha não está ativado no Firebase Console (Authentication > Sign-in method > E-mail/senha). Ative-o no console ou utilize o botão "Continuar com o Google" abaixo.';
         }
         setErrorMessage(msg);
       } finally {

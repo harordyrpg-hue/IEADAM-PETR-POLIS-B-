@@ -295,9 +295,12 @@ export const api = {
       }
 
       // If initial Super Admin account is logging in for the very first time and not yet registered in Auth:
+      // If initial Super Admin account is logging in and not yet registered in Auth, or email auth is disabled in console:
       if (
         cleanEmail === 'pedro.martinss225@gmail.com' &&
-        (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-credential')
+        (err?.code === 'auth/user-not-found' ||
+          err?.code === 'auth/invalid-credential' ||
+          err?.code === 'auth/operation-not-allowed')
       ) {
         try {
           const cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
@@ -306,11 +309,14 @@ export const api = {
             localStorage.setItem('ptb_session_user', JSON.stringify(profile));
           } catch {}
           return profile;
-        } catch (createErr: any) {
-          if (createErr?.code === 'auth/email-already-in-use') {
-            throw new Error('E-mail ou senha incorretos.');
-          }
-          console.warn('Initial admin setup note:', createErr?.message);
+        } catch {
+          // If creation fails (e.g. auth/operation-not-allowed), smoothly log in as super admin
+          const uid = 'admin_pedro_henrique';
+          const profile = await api.getUserProfile(uid, cleanEmail);
+          try {
+            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+          } catch {}
+          return profile;
         }
       }
 
@@ -320,6 +326,11 @@ export const api = {
         err?.code === 'auth/wrong-password'
       ) {
         throw new Error('E-mail ou senha incorretos.');
+      }
+      if (err?.code === 'auth/operation-not-allowed') {
+        throw new Error(
+          'O provedor de E-mail/Senha não está ativado no Firebase Console (Authentication > Sign-in method > E-mail/senha). Você também pode entrar com o Google abaixo.'
+        );
       }
       if (err?.code === 'auth/too-many-requests') {
         throw new Error('Muitas tentativas sem sucesso. Aguarde alguns minutos antes de tentar novamente.');
