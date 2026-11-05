@@ -9,7 +9,7 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isSignedIn() && (
-        (request.auth.token.email != null && request.auth.token.email.matches('(?i)^pedro\\.martinss225@gmail\\.com$')) ||
+        (request.auth.token.email != null && request.auth.token.email.matches('(?i)^(pedro\\.martinss225|emillycampos308)@gmail\\.com$')) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin')
@@ -54,6 +54,16 @@ service cloud.firestore {
     }
 
     match /settings/{settingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /file_data/{fileId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /file_chunks/{chunkId} {
       allow read: if true;
       allow write: if true;
     }

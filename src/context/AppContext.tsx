@@ -196,6 +196,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       refreshEvents();
     }
 
+    // 2. Check for redirect authentication result (mobile devices)
+    api.checkRedirectAuth().then((redirectProfile) => {
+      if (redirectProfile) {
+        setUser(redirectProfile);
+        notify(`Bem-vindo, ${redirectProfile.name}!`, 'success');
+        refreshStats();
+        refreshFolders();
+        refreshEvents();
+      }
+    }).catch((err) => {
+      console.warn('Redirect auth check note:', err);
+    });
+
     const unsubscribe = api.onAuthStateChanged(async (fbUser) => {
       setFirebaseUser(fbUser);
       if (fbUser) {
@@ -343,8 +356,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loginWithGoogle = async () => {
     const profile = await api.loginWithGoogle();
-    setUser(profile);
-    notify(`Bem-vindo, ${profile.name}!`, 'success');
+    if (profile) {
+      setUser(profile);
+      notify(`Bem-vindo, ${profile.name}!`, 'success');
+    }
   };
 
   const registerWithEmail = async (name: string, email: string, pass: string) => {

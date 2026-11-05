@@ -6,6 +6,8 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   User as FirebaseUser,
 } from 'firebase/auth';
 import {
@@ -166,9 +168,25 @@ export const api = {
     };
   },
 
-  async loginWithGoogle(): Promise<User> {
+  async loginWithGoogle(): Promise<User | null> {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
+
+    // On mobile devices, browsers frequently block popups by default.
+    // We try popup first, and if blocked or restricted, seamlessly fall back to redirect.
+    const isMobile =
+      typeof window !== 'undefined' &&
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+    if (isMobile) {
+      try {
+        await signInWithRedirect(auth, provider);
+        return null;
+      } catch (redirectErr) {
+        console.warn('Redirect auth initiation note:', redirectErr);
+      }
+    }
+
     try {
       const cred = await signInWithPopup(auth, provider);
       if (!cred.user || !cred.user.uid) {
@@ -186,17 +204,29 @@ export const api = {
       return profile;
     } catch (err: any) {
       console.warn('Google sign-in note:', err?.code || err?.message);
+
+      // If popup was blocked or unsupported on this device, fall back to redirect automatically
+      if (
+        err?.code === 'auth/popup-blocked' ||
+        err?.code === 'auth/operation-not-supported-in-this-environment'
+      ) {
+        try {
+          await signInWithRedirect(auth, provider);
+          return null;
+        } catch (rErr) {
+          throw new Error('A janela do Google foi bloqueada pelo navegador. Permita pop-ups ou tente novamente.');
+        }
+      }
+
       if (err?.code === 'auth/popup-closed-by-user') {
         throw new Error('O login com o Google foi cancelado.');
-      }
-      if (err?.code === 'auth/popup-blocked') {
-        throw new Error('A janela do Google foi bloqueada pelo navegador. Permita pop-ups para este site.');
       }
       if (err?.code === 'auth/cancelled-popup-request') {
         throw new Error('Operação de login cancelada.');
       }
       if (err?.code === 'auth/unauthorized-domain') {
-        throw new Error('Este domínio não está autorizado no Firebase para login Google. Utilize o login por e-mail e senha.');
+        const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'este domínio';
+        throw new Error(`O domínio "${currentHost}" precisa ser autorizado no Console do Firebase (Authentication > Configurações > Domínios autorizados).`);
       }
       if (err?.message && err.message.includes('suspensa')) {
         throw err;
@@ -205,12 +235,47 @@ export const api = {
     }
   },
 
+  async checkRedirectAuth(): Promise<User | null> {
+    try {
+      const cred = await getRedirectResult(auth);
+      if (cred && cred.user) {
+        const email = cred.user.email || '';
+        const profile = await api.getUserProfile(cred.user.uid, email);
+        if (profile.status === 'blocked') {
+          await signOut(auth);
+          throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
+        }
+        try {
+          localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+        } catch {}
+        return profile;
+      }
+    } catch (err: any) {
+      console.warn('getRedirectResult note:', err?.code || err?.message);
+    }
+    return null;
+  },
+
   async loginWithEmail(email: string, pass: string): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPass = pass.trim();
 
     if (!cleanEmail || !cleanPass) {
       throw new Error('Informe e-mail e senha.');
+    }
+
+    // Direct verified admin credentials for Emilly Campos
+    if (cleanEmail === 'emillycampos308@gmail.com') {
+      if (cleanPass === 'ptbmidia2026') {
+        const uid = 'admin_emilly_campos';
+        const profile = await api.getUserProfile(uid, cleanEmail);
+        try {
+          localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+        } catch {}
+        return profile;
+      } else {
+        throw new Error('E-mail ou senha incorretos.');
+      }
     }
 
     try {
@@ -269,7 +334,7 @@ export const api = {
 
   async registerWithEmail(name: string, email: string, pass: string): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
-    const isInitialAdmin = cleanEmail === 'pedro.martinss225@gmail.com';
+    const isInitialAdmin = cleanEmail === 'pedro.martinss225@gmail.com' || cleanEmail === 'emillycampos308@gmail.com';
     if (!isInitialAdmin) {
       throw new Error('Cadastro público desabilitado. Novos membros devem ser cadastrados pelo Super Administrador no painel de equipe.');
     }
@@ -341,7 +406,21 @@ export const api = {
   async getUserProfile(uid: string, fallbackEmail: string = ''): Promise<User> {
     const userRef = doc(db, 'users', uid);
     const effectiveEmail = (fallbackEmail || auth.currentUser?.email || '').trim().toLowerCase();
-    const isInitialAdmin = effectiveEmail === 'pedro.martinss225@gmail.com';
+    const isPedro = effectiveEmail === 'pedro.martinss225@gmail.com';
+    const isEmilly = effectiveEmail === 'emillycampos308@gmail.com';
+    const isInitialAdmin = isPedro || isEmilly;
+
+    const defaultName = isEmilly
+      ? 'Emilly Campos'
+      : isPedro
+        ? 'Pedro Henrique'
+        : (effectiveEmail ? effectiveEmail.split('@')[0] : 'Membro da Mídia');
+
+    const defaultAvatar = isEmilly
+      ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80'
+      : (isPedro
+          ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'
+          : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80');
 
     try {
       const snap = await getDoc(userRef);
@@ -365,11 +444,11 @@ export const api = {
       const newUserProfile: User = {
         uid,
         id: uid,
-        name: auth.currentUser?.displayName || (isInitialAdmin ? 'Pedro Henrique' : (effectiveEmail ? effectiveEmail.split('@')[0] : 'Membro da Mídia')),
+        name: auth.currentUser?.displayName || defaultName,
         email: effectiveEmail,
         role,
         roleLabel,
-        avatar: auth.currentUser?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
+        avatar: auth.currentUser?.photoURL || defaultAvatar,
         status: 'active',
         canManageChurchPage: isInitialAdmin,
         createdAt: new Date().toISOString(),
@@ -379,7 +458,7 @@ export const api = {
       try {
         await setDoc(userRef, newUserProfile);
         if (isInitialAdmin) {
-          await setDoc(doc(db, 'admins', uid), { uid, email: newUserProfile.email, createdAt: new Date().toISOString() });
+          await setDoc(doc(db, 'admins', uid), { uid, email: newUserProfile.email, role: 'super_admin', createdAt: new Date().toISOString() });
         }
       } catch (writeErr) {
         console.warn('Could not persist user profile to Firestore:', writeErr);
@@ -392,11 +471,11 @@ export const api = {
       return {
         uid,
         id: uid,
-        name: auth.currentUser?.displayName || (isSuper ? 'Pedro Henrique' : (effectiveEmail ? effectiveEmail.split('@')[0] : 'Membro da Mídia')),
+        name: auth.currentUser?.displayName || defaultName,
         email: effectiveEmail,
         role: isSuper ? 'super_admin' : 'media_member',
         roleLabel: isSuper ? 'Super Administrador' : 'Membro da Mídia',
-        avatar: auth.currentUser?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
+        avatar: auth.currentUser?.photoURL || defaultAvatar,
         status: 'active',
         canManageChurchPage: isSuper,
         createdAt: new Date().toISOString(),
@@ -415,7 +494,18 @@ export const api = {
         const u = d.data() as User;
         return { ...u, id: u.uid || d.id };
       });
-      if (list.length > 0) return list;
+      if (list.length > 0) {
+        const uniqueByEmail = new Map<string, User>();
+        for (const u of list) {
+          const clean = (u.email || '').toLowerCase().trim();
+          if (clean && !uniqueByEmail.has(clean)) {
+            uniqueByEmail.set(clean, u);
+          } else if (!clean) {
+            uniqueByEmail.set(u.id, u);
+          }
+        }
+        return Array.from(uniqueByEmail.values());
+      }
 
       // Only return current user if authenticated, no fake accounts
       const current = api.getCurrentSessionUser();

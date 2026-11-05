@@ -220,9 +220,12 @@ export const SettingsView: React.FC = () => {
               </div>
 
               <div>
-                <span className="text-neutral-500 block">Super Administrador Oficial</span>
-                <span className="text-amber-400 font-medium select-all">
+                <span className="text-neutral-500 block">Super Administradores Oficiais</span>
+                <span className="text-amber-400 font-medium select-all block">
                   pedro.martinss225@gmail.com
+                </span>
+                <span className="text-amber-400 font-medium select-all block mt-0.5">
+                  emillycampos308@gmail.com
                 </span>
               </div>
             </div>
