@@ -68,13 +68,13 @@ export const SharedResourceView: React.FC<SharedResourceViewProps> = ({ token, o
 
   const { share, resource } = data;
 
-  const handleDownload = () => {
-    if (share.resourceType === 'file') {
-      api.triggerDownload(`/api/files/${resource.id}/download`);
-    } else if (share.resourceType === 'folder') {
-      api.triggerDownload(`/api/folders/${resource.folder.id}/download`);
-    } else if (share.resourceType === 'event') {
-      api.triggerDownload(`/api/events/${resource.event.id}/download`);
+  const handleDownload = async () => {
+    if (share.resourceType === 'file' && resource) {
+      api.triggerDownload(resource.downloadUrl, resource.name);
+    } else if (share.resourceType === 'folder' && resource?.folder) {
+      await api.downloadFolderZip(resource.folder);
+    } else if (share.resourceType === 'event' && resource?.event) {
+      await api.downloadEventZip(resource.event);
     }
   };
 

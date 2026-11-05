@@ -66,9 +66,12 @@ export const EventsView: React.FC = () => {
     }
   }, [activeEventId]);
 
-  const handleDownloadFullEventZip = (evtId: string, eventName: string) => {
+  const handleDownloadFullEventZip = async (evtId: string, eventName: string) => {
     notify(`Compactando todos os arquivos de "${eventName}" em ZIP organizado...`, 'info');
-    api.triggerDownload(`/api/events/${evtId}/download`);
+    const evt = events.find((e) => e.id === evtId);
+    if (evt) {
+      await api.downloadEventZip(evt);
+    }
   };
 
   const handleDeleteEvent = async (evtId: string) => {

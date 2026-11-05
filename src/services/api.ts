@@ -612,64 +612,103 @@ export const api = {
 
     const cleanFileName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
     let downloadUrl = '';
-    let storagePath = `files/${currentUser.uid}/${fileId}/${cleanFileName}`;
+    let storagePath = `/uploads/${fileId}_${cleanFileName}`;
 
+    const startTime = Date.now();
+
+    // 1. High-Speed direct upload via XMLHttpRequest with real-time progress and speed metrics
     try {
-      // 1. Attempt upload to Firebase Cloud Storage if available
-      const fileStorageRef = ref(storage, storagePath);
-      const uploadTask = uploadBytesResumable(fileStorageRef, file, {
-        contentType: file.type || 'application/octet-stream',
-        customMetadata: {
-          originalName: file.name,
-          uploadedBy: currentUser.uid,
-        },
-      });
+      const uploadResult = await new Promise<{ downloadUrl: string; filename: string }>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload', true);
+        xhr.setRequestHeader('x-filename', encodeURIComponent(file.name));
+        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+        xhr.timeout = 45000;
 
-      const startTime = Date.now();
-      let lastLoaded = 0;
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && onProgress) {
+            const percent = Math.min(99, Math.round((e.loaded / e.total) * 100));
+            const elapsed = Math.max(0.1, (Date.now() - startTime) / 1000);
+            const speedMb = (e.loaded / (1024 * 1024)) / elapsed;
+            onProgress(percent, `${speedMb.toFixed(1)} MB/s`);
+          }
+        };
 
-      await new Promise<void>((resolve, reject) => {
-        uploadTask.on(
-          'state_changed',
-          (snapshot) => {
-            const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-            const elapsed = (Date.now() - startTime) / 1000;
-            const bytesPerSec = elapsed > 0 ? (snapshot.bytesTransferred - lastLoaded) / 0.5 : 0;
-            lastLoaded = snapshot.bytesTransferred;
-            const speedMb = (bytesPerSec / (1024 * 1024)).toFixed(1);
-            if (onProgress) {
-              onProgress(progress, `${speedMb} MB/s`);
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const res = JSON.parse(xhr.responseText);
+              resolve(res);
+            } catch (pErr) {
+              reject(pErr);
             }
-          },
-          (error) => reject(error),
-          () => resolve()
-        );
+          } else {
+            reject(new Error(`Servidor respondeu com status ${xhr.status}`));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Erro de conexão ao enviar arquivo.'));
+        xhr.ontimeout = () => reject(new Error('Tempo limite de upload excedido.'));
+
+        xhr.send(file);
       });
 
-      downloadUrl = await getDownloadURL(fileStorageRef);
-    } catch (storageError) {
-      console.warn('Firebase Cloud Storage fallback to dedicated media storage:', storageError);
-
-      // 2. Seamless server direct storage
-      if (onProgress) onProgress(50, 'Gravando arquivo...');
-      const arrayBuffer = await file.arrayBuffer();
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': file.type || 'application/octet-stream',
-          'x-filename': encodeURIComponent(file.name),
-        },
-        body: arrayBuffer,
-      });
-
-      if (!res.ok) {
-        throw new Error('Falha ao armazenar o arquivo.');
-      }
-
-      const data = await res.json();
-      downloadUrl = data.downloadUrl;
-      storagePath = `/uploads/${data.filename}`;
+      downloadUrl = uploadResult.downloadUrl;
+      storagePath = `/uploads/${uploadResult.filename}`;
       if (onProgress) onProgress(100, 'Concluído');
+    } catch (uploadErr) {
+      console.warn('Direct upload fallback to Firestore direct media storage:', uploadErr);
+
+      // 2. Seamless serverless fallback: Store original directly in Firestore (e.g. Vercel deployment)
+      if (file.size <= 900 * 1024) {
+        if (onProgress) onProgress(40, 'Processando...');
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        if (onProgress) onProgress(80, 'Armazenando...');
+        downloadUrl = dataUrl;
+        storagePath = `firestore://file_data/${fileId}`;
+        if (onProgress) onProgress(100, 'Concluído');
+      } else {
+        // Larger files on serverless: chunk into 650KB Firestore slices
+        if (onProgress) onProgress(20, 'Preparando blocos...');
+        const arrayBuffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        const CHUNK_SIZE = 650 * 1024;
+        const totalChunks = Math.ceil(bytes.length / CHUNK_SIZE);
+
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(bytes.length, start + CHUNK_SIZE);
+          const chunkSlice = bytes.slice(start, end);
+          let binary = '';
+          for (let b = 0; b < chunkSlice.length; b++) {
+            binary += String.fromCharCode(chunkSlice[b]);
+          }
+          const base64Chunk = btoa(binary);
+
+          await setDoc(doc(db, 'file_chunks', `${fileId}_chunk_${i}`), {
+            fileId,
+            chunkIndex: i,
+            totalChunks,
+            data: base64Chunk,
+            createdAt: new Date().toISOString(),
+          });
+
+          if (onProgress) {
+            const pct = Math.round(((i + 1) / totalChunks) * 95);
+            onProgress(pct, 'Enviando blocos...');
+          }
+        }
+
+        downloadUrl = `chunked://${fileId}`;
+        storagePath = `firestore://file_chunks/${fileId}`;
+        if (onProgress) onProgress(100, 'Concluído');
+      }
     }
 
     const newRecord: FileRecord = {
@@ -1511,7 +1550,91 @@ export const api = {
   // ==========================================
   // 9. DOWNLOAD HELPERS (REAL ORIGINAL STORAGE DOWNLOAD)
   // ==========================================
-  async triggerDownload(url: string, filename?: string) {
+  async triggerDownload(urlOrRecord: string | FileRecord, customFilename?: string) {
+    let url = typeof urlOrRecord === 'string' ? urlOrRecord : urlOrRecord.downloadUrl;
+    let filename = customFilename || (typeof urlOrRecord === 'object' ? urlOrRecord.name : '');
+
+    // 1. If it's a route like /api/files/:id/download, extract the fileId and get real downloadUrl
+    if (url.includes('/api/files/') && url.includes('/download')) {
+      const match = url.match(/\/api\/files\/([^/]+)\/download/);
+      if (match && match[1]) {
+        const fileId = match[1];
+        try {
+          const docSnap = await getDoc(doc(db, 'files', fileId));
+          if (docSnap.exists()) {
+            const data = docSnap.data() as FileRecord;
+            url = data.downloadUrl || url;
+            if (!filename) filename = data.name;
+          }
+        } catch {}
+      }
+    }
+
+    // 2. If chunked storage from Firestore:
+    if (url.startsWith('chunked://')) {
+      const fileId = url.replace('chunked://', '');
+      try {
+        const q = query(collection(db, 'file_chunks'), where('fileId', '==', fileId));
+        const snap = await getDocs(q);
+        const sortedDocs = snap.docs
+          .map((d) => d.data() as { chunkIndex: number; data: string })
+          .sort((a, b) => a.chunkIndex - b.chunkIndex);
+
+        const byteArrays: Uint8Array[] = [];
+        for (const docItem of sortedDocs) {
+          const bstr = atob(docItem.data);
+          const u8arr = new Uint8Array(bstr.length);
+          for (let i = 0; i < bstr.length; i++) {
+            u8arr[i] = bstr.charCodeAt(i);
+          }
+          byteArrays.push(u8arr);
+        }
+        const blob = new Blob(byteArrays as any, { type: 'application/octet-stream' });
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename || 'arquivo_original';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          URL.revokeObjectURL(blobUrl);
+          a.remove();
+        }, 1000);
+        return;
+      } catch (chunkErr) {
+        console.warn('Error downloading chunked file:', chunkErr);
+      }
+    }
+
+    // 3. If Data URL:
+    if (url.startsWith('data:')) {
+      try {
+        const arr = url.split(',');
+        const mime = arr[0].match(/:(.*?);/)?.[1] || 'application/octet-stream';
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) {
+          u8arr[n] = bstr.charCodeAt(n);
+        }
+        const blob = new Blob([u8arr] as any, { type: mime });
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename || 'arquivo_original';
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          URL.revokeObjectURL(blobUrl);
+          link.remove();
+        }, 1000);
+        return;
+      } catch (dataUrlErr) {
+        console.warn('Data URL download error:', dataUrlErr);
+      }
+    }
+
+    // 4. If relative /uploads/ URL or HTTP URL:
     try {
       const response = await fetch(url);
       if (response.ok) {
@@ -1524,22 +1647,27 @@ export const api = {
         link.click();
         setTimeout(() => {
           URL.revokeObjectURL(blobUrl);
-          if (link.parentNode) link.parentNode.removeChild(link);
-        }, 300);
+          link.remove();
+        }, 1000);
         return;
       }
     } catch {}
 
+    // 5. Fallback for mobile direct attachment
+    const directUrl = url.startsWith('/uploads/')
+      ? `/api/download?url=${encodeURIComponent(url)}&name=${encodeURIComponent(filename || '')}`
+      : url;
+
     const link = document.createElement('a');
-    link.href = url;
+    link.href = directUrl;
+    link.download = filename || 'arquivo_original';
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
-    if (filename) link.download = filename;
     document.body.appendChild(link);
     link.click();
     setTimeout(() => {
-      if (link.parentNode) link.parentNode.removeChild(link);
-    }, 300);
+      link.remove();
+    }, 1000);
   },
 
   async downloadMultipleZip(items: (FileRecord | string)[], zipName: string = 'PTB_Midia_Arquivos') {

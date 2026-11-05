@@ -48,6 +48,42 @@ app.post('/api/upload', express.raw({ type: '*/*', limit: '250mb' }), (req, res)
   });
 });
 
+// Dedicated direct download endpoint with Content-Disposition attachment for mobile devices
+app.get('/api/download', (req, res) => {
+  const fileUrl = (req.query.url as string) || '';
+  const customName = (req.query.name as string) || '';
+
+  if (fileUrl.startsWith('/uploads/')) {
+    const fileName = path.basename(fileUrl);
+    const filePath = path.join(UPLOADS_DIR, fileName);
+    if (fs.existsSync(filePath)) {
+      return res.download(filePath, customName || fileName);
+    }
+  }
+
+  if (fileUrl) {
+    return res.redirect(fileUrl);
+  }
+  res.status(404).send('Arquivo não encontrado.');
+});
+
+// Fallback endpoint for /api/files/:id/download
+app.get('/api/files/:id/download', (req, res) => {
+  const { id } = req.params;
+  const customName = req.query.name as string;
+
+  try {
+    const files = fs.readdirSync(UPLOADS_DIR);
+    const match = files.find((f) => f.includes(id) || (customName && f.endsWith(customName)));
+    if (match) {
+      const filePath = path.join(UPLOADS_DIR, match);
+      return res.download(filePath, customName || match);
+    }
+  } catch {}
+
+  res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
+});
+
 // Basic health check endpoint
 app.get('/api/health', (_req, res) => {
   res.json({

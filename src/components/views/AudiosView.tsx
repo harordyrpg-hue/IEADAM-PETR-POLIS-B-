@@ -47,7 +47,7 @@ export const AudiosView: React.FC = () => {
 
   const handleDownload = (e: React.MouseEvent, audio: FileRecord) => {
     e.stopPropagation();
-    api.triggerDownload(`/api/files/${audio.id}/download`);
+    api.triggerDownload(audio.downloadUrl, audio.name);
     notify(`Iniciando download do arquivo de áudio original (${formatBytes(audio.size)})`, 'info');
   };
 

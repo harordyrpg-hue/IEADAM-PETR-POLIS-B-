@@ -49,7 +49,7 @@ export const PhotosView: React.FC = () => {
 
   const handleDownload = (e: React.MouseEvent, photo: FileRecord) => {
     e.stopPropagation();
-    api.triggerDownload(`/api/files/${photo.id}/download`);
+    api.triggerDownload(photo.downloadUrl, photo.name);
     notify(`Iniciando download da foto original em resolução máxima (${photo.resolution || 'RAW/Hi-Res'})`, 'info');
   };
 

@@ -44,7 +44,7 @@ export const PhotoLightbox: React.FC = () => {
   if (!lightboxFile) return null;
 
   const handleDownload = () => {
-    api.triggerDownload(`/api/files/${lightboxFile.id}/download`);
+    api.triggerDownload(lightboxFile.downloadUrl, lightboxFile.name);
     notify(`Iniciando download da foto original em resolução máxima (${lightboxFile.resolution || 'alta resolução'})`, 'info');
   };
 

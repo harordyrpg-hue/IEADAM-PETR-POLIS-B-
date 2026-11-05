@@ -46,7 +46,7 @@ export const ArtsView: React.FC = () => {
 
   const handleDownload = (e: React.MouseEvent, art: FileRecord) => {
     e.stopPropagation();
-    api.triggerDownload(`/api/files/${art.id}/download`);
+    api.triggerDownload(art.downloadUrl, art.name);
     notify(`Iniciando download da arte original em 300 DPI / vetor (${formatBytes(art.size)})`, 'info');
   };
 

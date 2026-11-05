@@ -164,9 +164,12 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
     }
   };
 
-  const handleDownloadFolderZip = (folderId: string) => {
+  const handleDownloadFolderZip = async (folderId: string) => {
     notify('Gerando arquivo ZIP da pasta...', 'info');
-    api.triggerDownload(`/api/folders/${folderId}/download`);
+    const folder = folders.find((f) => f.id === folderId);
+    if (folder) {
+      await api.downloadFolderZip(folder);
+    }
   };
 
   const handleSortToggle = (field: 'name' | 'size' | 'date' | 'type') => {

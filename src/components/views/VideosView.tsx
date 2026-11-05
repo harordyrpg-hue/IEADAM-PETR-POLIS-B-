@@ -47,7 +47,7 @@ export const VideosView: React.FC = () => {
 
   const handleDownload = (e: React.MouseEvent, video: FileRecord) => {
     e.stopPropagation();
-    api.triggerDownload(`/api/files/${video.id}/download`);
+    api.triggerDownload(video.downloadUrl, video.name);
     notify(`Iniciando download do vídeo original (${formatBytes(video.size)})`, 'info');
   };
 

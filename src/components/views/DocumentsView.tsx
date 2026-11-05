@@ -46,7 +46,7 @@ export const DocumentsView: React.FC = () => {
 
   const handleDownload = (e: React.MouseEvent, doc: FileRecord) => {
     e.stopPropagation();
-    api.triggerDownload(`/api/files/${doc.id}/download`);
+    api.triggerDownload(doc.downloadUrl, doc.name);
     notify(`Iniciando download do documento original: ${doc.name}`, 'info');
   };
 
