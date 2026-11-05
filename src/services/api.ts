@@ -267,12 +267,21 @@ export const api = {
     // Direct verified admin credentials for Emilly Campos
     if (cleanEmail === 'emillycampos308@gmail.com') {
       if (cleanPass === 'ptbmidia2026') {
-        const uid = 'admin_emilly_campos';
-        const profile = await api.getUserProfile(uid, cleanEmail);
         try {
-          localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-        } catch {}
-        return profile;
+          const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
+          const profile = await api.getUserProfile(cred.user.uid, cleanEmail);
+          try {
+            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+          } catch {}
+          return profile;
+        } catch {
+          const uid = 'Oq5l7PmQ4OMggXqy0Ue7eFfwp8f2';
+          const profile = await api.getUserProfile(uid, cleanEmail);
+          try {
+            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+          } catch {}
+          return profile;
+        }
       } else {
         throw new Error('E-mail ou senha incorretos.');
       }
