@@ -58,6 +58,17 @@ service cloud.firestore {
       allow write: if true;
     }
 
+    // Team Schedule, Tasks & Collaborative Notes (Real-time team workspace)
+    match /team_tasks/{taskId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /team_notes/{noteId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
     // ==================================================
     // 3. PUBLIC CHURCH PAGE & CHURCH MANAGEMENT
     // ==================================================

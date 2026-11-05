@@ -22,6 +22,7 @@ import { ArtsView } from './components/views/ArtsView.js';
 import { AudiosView } from './components/views/AudiosView.js';
 import { DocumentsView } from './components/views/DocumentsView.js';
 import { EventsView } from './components/views/EventsView.js';
+import { ScheduleView } from './components/views/ScheduleView.js';
 import { RecentsView } from './components/views/RecentsView.js';
 import { FavoritesView } from './components/views/FavoritesView.js';
 import { SharesView } from './components/views/SharesView.js';
@@ -118,6 +119,8 @@ const MainLayout: React.FC = () => {
         return <DocumentsView />;
       case 'events':
         return <EventsView />;
+      case 'schedule':
+        return <ScheduleView />;
       case 'recents':
         return <RecentsView />;
       case 'favorites':

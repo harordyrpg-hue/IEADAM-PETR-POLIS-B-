@@ -16,6 +16,15 @@ import {
   ShieldCheck,
   CheckCircle2,
   Calendar,
+  CalendarDays,
+  CheckSquare,
+  Square,
+  StickyNote,
+  Pin,
+  Users,
+  ArrowRight,
+  Tag,
+  Radio,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { formatBytes, formatDate, formatDateTime } from '../../utils/formatters.js';
@@ -36,9 +45,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
     refreshStats,
     refreshEvents,
     events,
+    teamTasks,
+    teamNotes,
+    toggleTaskComplete,
   } = useApp();
 
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [taskFilter, setTaskFilter] = useState<'all' | 'mine'>('all');
 
   useEffect(() => {
     refreshStats();
@@ -152,7 +165,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
         <h2 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
           Acesso Rápido
         </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <button
+            onClick={() => setActiveTab('schedule')}
+            className="flex items-center gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 hover:border-amber-400 hover:bg-amber-500/20 transition-all text-left group"
+          >
+            <div className="p-2 rounded-lg bg-amber-400 text-neutral-950 group-hover:scale-105 transition-transform shadow-xs">
+              <CalendarDays className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-amber-300 block">
+                Central de Agenda
+              </span>
+              <span className="text-[10px] text-amber-200/70 block">
+                Escalas e notas
+              </span>
+            </div>
+          </button>
+
           <button
             onClick={() => openUpload()}
             className="flex items-center gap-2.5 p-3 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-amber-500/50 hover:bg-neutral-800/80 transition-all text-left group"
@@ -212,6 +242,281 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
               Ver vídeos
             </span>
           </button>
+        </div>
+      </div>
+
+      {/* 2.5 Real-time Team Schedule & Collaborative Notes Hub */}
+      <div className="p-5 sm:p-6 rounded-2xl bg-neutral-900 border border-neutral-800 shadow-xl space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              <CalendarDays className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h3 className="text-base font-bold text-neutral-100">
+                  Central de Agenda & Escalas da Equipe
+                </h3>
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Tempo Real
+                </span>
+              </div>
+              <p className="text-xs text-neutral-400 mt-0.5">
+                Organização de trabalhos, afazeres por membro para cada culto e anotações colaborativas.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab('schedule')}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white text-xs font-semibold border border-neutral-700 transition-all"
+            >
+              <span>Abrir Central Completa</span>
+              <ArrowRight className="w-3.5 h-3.5 text-amber-400" />
+            </button>
+          </div>
+        </div>
+
+        {/* Two-Column Grid: Tasks/Escalas vs Team Notes */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* Left Column: Escalas e Afazeres (7 cols) */}
+          <div className="lg:col-span-7 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-neutral-300">
+                  Afazeres & Escalas
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-neutral-800 text-[10px] text-neutral-400 font-mono-numbers">
+                  {teamTasks.filter((t) => t.status !== 'concluido').length} pendentes
+                </span>
+              </div>
+
+              {/* Filter: All vs Mine */}
+              <div className="flex items-center bg-neutral-950 p-0.5 rounded-lg border border-neutral-800 text-[11px]">
+                <button
+                  onClick={() => setTaskFilter('all')}
+                  className={`px-2.5 py-1 rounded-md transition-colors ${
+                    taskFilter === 'all'
+                      ? 'bg-amber-400 text-neutral-950 font-bold'
+                      : 'text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  Todos ({teamTasks.length})
+                </button>
+                <button
+                  onClick={() => setTaskFilter('mine')}
+                  className={`px-2.5 py-1 rounded-md transition-colors ${
+                    taskFilter === 'mine'
+                      ? 'bg-amber-400 text-neutral-950 font-bold'
+                      : 'text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  Minhas ({teamTasks.filter((t) => t.assignedToEmail === user?.email).length})
+                </button>
+              </div>
+            </div>
+
+            {/* Tasks List */}
+            <div className="space-y-2">
+              {(() => {
+                const filtered = teamTasks.filter((t) =>
+                  taskFilter === 'mine' ? t.assignedToEmail === user?.email : true
+                );
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="p-6 rounded-xl bg-neutral-950/60 border border-neutral-800 text-center">
+                      <p className="text-xs text-neutral-400">
+                        {taskFilter === 'mine'
+                          ? 'Nenhuma escala ou afazer atribuído a você no momento.'
+                          : 'Nenhum afazer cadastrado. Crie um novo na Central de Agenda.'}
+                      </p>
+                      <button
+                        onClick={() => setActiveTab('schedule')}
+                        className="mt-2 text-xs text-amber-400 hover:underline font-medium"
+                      >
+                        Gerenciar escalas da equipe →
+                      </button>
+                    </div>
+                  );
+                }
+
+                // Show top 4 tasks (pending first)
+                const sorted = [...filtered].sort((a, b) => {
+                  if (a.status === 'concluido' && b.status !== 'concluido') return 1;
+                  if (a.status !== 'concluido' && b.status === 'concluido') return -1;
+                  return (a.dueDate || '').localeCompare(b.dueDate || '');
+                });
+
+                const getCategoryLabel = (cat: string) => {
+                  const map: Record<string, string> = {
+                    transmissao: 'Transmissão',
+                    som: 'Som',
+                    projecao: 'Projeção',
+                    fotografia: 'Fotografia',
+                    video: 'Vídeo',
+                    design_redes: 'Design & Redes',
+                    iluminacao: 'Iluminação',
+                    outro: 'Geral',
+                  };
+                  return map[cat] || cat;
+                };
+
+                return sorted.slice(0, 4).map((task) => {
+                  const isCompleted = task.status === 'concluido';
+                  return (
+                    <div
+                      key={task.id}
+                      className={`flex items-start justify-between gap-3 p-3 rounded-xl border transition-all ${
+                        isCompleted
+                          ? 'bg-neutral-950/40 border-neutral-800/50 opacity-60'
+                          : 'bg-neutral-950/80 border-neutral-800 hover:border-neutral-700'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                        <button
+                          onClick={() => toggleTaskComplete(task.id, task.status)}
+                          className="mt-0.5 text-neutral-400 hover:text-amber-400 transition-colors shrink-0"
+                          title={isCompleted ? 'Marcar como pendente' : 'Marcar como concluída'}
+                        >
+                          {isCompleted ? (
+                            <CheckSquare className="w-4 h-4 text-emerald-400" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </button>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={`text-xs font-semibold ${
+                                isCompleted ? 'line-through text-neutral-500' : 'text-neutral-200'
+                              }`}
+                            >
+                              {task.title}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-neutral-800 text-neutral-300">
+                              {getCategoryLabel(task.category)}
+                            </span>
+                            {task.priority === 'urgente' && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-400 border border-red-500/20">
+                                URGENTE
+                              </span>
+                            )}
+                          </div>
+
+                          {task.description && (
+                            <p className="text-[11px] text-neutral-400 truncate mt-0.5">
+                              {task.description}
+                            </p>
+                          )}
+
+                          <div className="flex items-center gap-3 mt-1.5 text-[10px] text-neutral-400 flex-wrap">
+                            <span className="text-neutral-300 font-medium">
+                              👤 {task.assignedToName || 'Equipe'}
+                            </span>
+                            {task.dueDate && (
+                              <span>
+                                📅 {formatDate(task.dueDate)} {task.dueTime ? `às ${task.dueTime}` : ''}
+                              </span>
+                            )}
+                            {task.eventName && (
+                              <span className="text-amber-400/90 truncate max-w-[150px]">
+                                ⛪ {task.eventName}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                          isCompleted
+                            ? 'bg-emerald-500/10 text-emerald-400'
+                            : task.status === 'em_andamento'
+                            ? 'bg-blue-500/10 text-blue-400'
+                            : 'bg-amber-500/10 text-amber-400'
+                        }`}
+                      >
+                        {isCompleted
+                          ? 'Concluído'
+                          : task.status === 'em_andamento'
+                          ? 'Em andamento'
+                          : 'Pendente'}
+                      </span>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+
+          {/* Right Column: Collaborative Notes & Checklist (5 cols) */}
+          <div className="lg:col-span-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <StickyNote className="w-4 h-4 text-amber-400" />
+                <span className="text-xs font-semibold text-neutral-300">
+                  Mural de Anotações & Avisos
+                </span>
+              </div>
+              <button
+                onClick={() => setActiveTab('schedule')}
+                className="text-[11px] text-amber-400 hover:underline font-medium"
+              >
+                Ver todas ({teamNotes.length})
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {teamNotes.length === 0 ? (
+                <div className="p-6 rounded-xl bg-neutral-950/60 border border-neutral-800 text-center">
+                  <p className="text-xs text-neutral-400">Nenhuma anotação registrada pela equipe.</p>
+                  <button
+                    onClick={() => setActiveTab('schedule')}
+                    className="mt-2 text-xs text-amber-400 hover:underline font-medium"
+                  >
+                    Criar primeira anotação →
+                  </button>
+                </div>
+              ) : (
+                teamNotes.slice(0, 3).map((note) => (
+                  <div
+                    key={note.id}
+                    onClick={() => setActiveTab('schedule')}
+                    className="p-3 rounded-xl bg-neutral-950/80 border border-neutral-800 hover:border-neutral-700 transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {note.isPinned && (
+                          <Pin className="w-3 h-3 text-amber-400 shrink-0 fill-amber-400" />
+                        )}
+                        <h4 className="text-xs font-bold text-neutral-200 group-hover:text-amber-300 transition-colors truncate">
+                          {note.title}
+                        </h4>
+                      </div>
+                      <span className="text-[10px] text-neutral-500 font-mono-numbers shrink-0">
+                        {formatDate(note.createdAt)}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-neutral-400 line-clamp-2 leading-relaxed">
+                      {note.content}
+                    </p>
+
+                    <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-neutral-800/80 text-[10px] text-neutral-500">
+                      <span>Por: {note.authorName}</span>
+                      <span className="px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300 text-[9px]">
+                        {note.category}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </div>
 

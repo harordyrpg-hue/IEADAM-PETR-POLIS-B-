@@ -25,6 +25,7 @@ import {
   Radio,
   UserPlus,
   Church,
+  CalendarDays,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { ViewTab } from '../../types.js';
@@ -45,6 +46,7 @@ export const Sidebar: React.FC = () => {
     activeTab,
     setActiveTab,
     storageStats,
+    teamTasks,
     mobileMenuOpen,
     setMobileMenuOpen,
     user,
@@ -62,11 +64,14 @@ export const Sidebar: React.FC = () => {
   const canManageChurch = isSuperAdmin || user?.canManageChurchPage === true;
   const roleStyle = user ? getRoleBadgeStyle(user.role) : { label: '', textClass: '', borderClass: '' };
 
+  const pendingTasksCount = teamTasks.filter((t) => t.status !== 'concluido').length;
+
   const navSections: { title: string; superAdminOnly?: boolean; items: NavItem[] }[] = [
     {
       title: 'Principal',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: 'schedule', label: 'Central de Agenda', icon: CalendarDays, badge: pendingTasksCount },
         { id: 'files', label: 'Meus arquivos', icon: FolderOpen, badge: storageStats?.counts.totalFiles },
       ],
     },

@@ -58,6 +58,11 @@ import {
   ChurchArticle,
   ChurchAlbum,
   ChurchDownload,
+  TeamTask,
+  TeamNote,
+  TeamTaskCategory,
+  TeamTaskPriority,
+  TeamTaskStatus,
 } from '../types.js';
 
 // Helper to determine media category from extension and MIME type
@@ -427,16 +432,56 @@ export const api = {
   },
 
   // ==========================================
-  // 2. USER MANAGEMENT (SUPER ADMIN)
+  // 2. USER MANAGEMENT (SUPER ADMIN & TEAM)
   // ==========================================
   async getUsers(): Promise<User[]> {
-    if (!auth.currentUser) return [];
     try {
       const snap = await getDocs(collection(db, 'users'));
-      return snap.docs.map((d) => {
+      const list = snap.docs.map((d) => {
         const u = d.data() as User;
         return { ...u, id: u.uid || d.id };
       });
+      if (list.length > 0) return list;
+
+      // Fallback default team roster if Firestore collection is initially sparse
+      return [
+        {
+          uid: 'admin_pedro_henrique',
+          id: 'admin_pedro_henrique',
+          name: 'Pedro Henrique',
+          email: 'pedro.martinss225@gmail.com',
+          role: 'super_admin',
+          roleLabel: 'Super Administrador',
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+          status: 'active',
+          canManageChurchPage: true,
+          createdAt: new Date().toISOString(),
+        },
+        {
+          uid: 'member_lucas_ferreira',
+          id: 'member_lucas_ferreira',
+          name: 'Lucas Ferreira',
+          email: 'lucas.som@igreja.com',
+          role: 'media_admin',
+          roleLabel: 'Áudio & Transmissão',
+          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&h=200&q=80',
+          status: 'active',
+          canManageChurchPage: false,
+          createdAt: new Date().toISOString(),
+        },
+        {
+          uid: 'member_ana_beatriz',
+          id: 'member_ana_beatriz',
+          name: 'Ana Beatriz',
+          email: 'ana.midia@igreja.com',
+          role: 'media_member',
+          roleLabel: 'Projeção & Redes',
+          avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80',
+          status: 'active',
+          canManageChurchPage: false,
+          createdAt: new Date().toISOString(),
+        },
+      ];
     } catch (error) {
       console.warn('Could not list users:', error);
       return [];
@@ -2227,6 +2272,340 @@ Que nesta semana você possa descansar na certeza de que a graça de Deus é abu
       });
     } catch (err) {
       console.warn('Initial church seed skipped or already present:', err);
+    }
+  },
+
+  // ==========================================
+  // 12. CENTRAL DE AGENDA, ESCALAS & TAREFAS DA EQUIPE (REAL-TIME)
+  // ==========================================
+  /**
+   * Real-time listener for Team Tasks and Member Assignments.
+   * Updates instantaneously whenever any member adds, updates or completes a task.
+   */
+  subscribeTeamTasks(callback: (tasks: TeamTask[]) => void): () => void {
+    const tasksRef = collection(db, 'team_tasks');
+    return onSnapshot(
+      tasksRef,
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => {
+          const t = d.data() as TeamTask;
+          return {
+            ...t,
+            id: t.id || d.id,
+          };
+        });
+        // Sort by date ascending, then urgency
+        const priorityWeight = { urgente: 4, alta: 3, media: 2, baixa: 1 };
+        list.sort((a, b) => {
+          // Completed tasks go lower
+          if (a.status === 'concluido' && b.status !== 'concluido') return 1;
+          if (a.status !== 'concluido' && b.status === 'concluido') return -1;
+          const diffDate = a.dueDate.localeCompare(b.dueDate);
+          if (diffDate !== 0) return diffDate;
+          return (priorityWeight[b.priority] || 0) - (priorityWeight[a.priority] || 0);
+        });
+        callback(list);
+      },
+      (error) => {
+        console.warn('Real-time team tasks subscription sync:', error);
+      }
+    );
+  },
+
+  async getTeamTasks(): Promise<TeamTask[]> {
+    try {
+      const snap = await getDocs(collection(db, 'team_tasks'));
+      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as TeamTask));
+      return list;
+    } catch (err) {
+      console.warn('Could not load team tasks:', err);
+      return [];
+    }
+  },
+
+  async createTeamTask(data: Partial<TeamTask>): Promise<TeamTask> {
+    const effective = api.getEffectiveUser();
+    const taskId = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const task: TeamTask = {
+      id: taskId,
+      title: data.title || 'Novo Afazer',
+      description: data.description || '',
+      category: data.category || 'transmissao',
+      eventId: data.eventId || null,
+      eventName: data.eventName || null,
+      assignedToUid: data.assignedToUid || effective.uid,
+      assignedToName: data.assignedToName || effective.displayName,
+      assignedToEmail: data.assignedToEmail || effective.email,
+      assignedToAvatar: data.assignedToAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+      dueDate: data.dueDate || new Date().toISOString().split('T')[0],
+      dueTime: data.dueTime || '18:00',
+      priority: data.priority || 'media',
+      status: data.status || 'pendente',
+      createdByUid: effective.uid,
+      createdByName: effective.displayName,
+      checklist: data.checklist || [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDoc(doc(db, 'team_tasks', taskId), removeUndefinedValues(task));
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'create_task',
+        actionLabel: 'Escalou novo afazer de equipe',
+        targetType: 'task',
+        targetName: task.title,
+        details: `${task.assignedToName} · ${task.dueDate}`,
+      });
+      return task;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `team_tasks/${taskId}`);
+    }
+  },
+
+  async updateTeamTask(id: string, updates: Partial<TeamTask>): Promise<void> {
+    try {
+      await updateDoc(doc(db, 'team_tasks', id), removeUndefinedValues({
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `team_tasks/${id}`);
+    }
+  },
+
+  async toggleTaskComplete(id: string, currentStatus: TeamTaskStatus): Promise<void> {
+    const isCompleted = currentStatus === 'concluido';
+    const newStatus: TeamTaskStatus = isCompleted ? 'pendente' : 'concluido';
+    await api.updateTeamTask(id, {
+      status: newStatus,
+      completedAt: newStatus === 'concluido' ? new Date().toISOString() : null,
+    });
+  },
+
+  async deleteTeamTask(id: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, 'team_tasks', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `team_tasks/${id}`);
+    }
+  },
+
+  // ==========================================
+  // 13. TRABALHO DE ANOTAÇÃO COLABORATIVA DA EQUIPE (REAL-TIME)
+  // ==========================================
+  /**
+   * Real-time listener for Team Collaborative Notes & Alignments.
+   */
+  subscribeTeamNotes(callback: (notes: TeamNote[]) => void): () => void {
+    const notesRef = collection(db, 'team_notes');
+    return onSnapshot(
+      notesRef,
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => {
+          const n = d.data() as TeamNote;
+          return {
+            ...n,
+            id: n.id || d.id,
+          };
+        });
+        // Sort: pinned first, then newest updated
+        list.sort((a, b) => {
+          if (a.isPinned && !b.isPinned) return -1;
+          if (!a.isPinned && b.isPinned) return 1;
+          return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
+        });
+        callback(list);
+      },
+      (error) => {
+        console.warn('Real-time team notes subscription sync:', error);
+      }
+    );
+  },
+
+  async getTeamNotes(): Promise<TeamNote[]> {
+    try {
+      const snap = await getDocs(collection(db, 'team_notes'));
+      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as TeamNote));
+      return list;
+    } catch (err) {
+      console.warn('Could not load team notes:', err);
+      return [];
+    }
+  },
+
+  async createTeamNote(data: Partial<TeamNote>): Promise<TeamNote> {
+    const effective = api.getEffectiveUser();
+    const noteId = `note_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const note: TeamNote = {
+      id: noteId,
+      title: data.title || 'Nova Anotação',
+      content: data.content || '',
+      category: data.category || 'Alinhamento',
+      color: data.color || 'amber',
+      isPinned: !!data.isPinned,
+      authorUid: effective.uid,
+      authorName: effective.displayName,
+      relatedEventId: data.relatedEventId || null,
+      relatedEventName: data.relatedEventName || null,
+      tags: data.tags || ['Equipe'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDoc(doc(db, 'team_notes', noteId), removeUndefinedValues(note));
+      return note;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `team_notes/${noteId}`);
+    }
+  },
+
+  async updateTeamNote(id: string, updates: Partial<TeamNote>): Promise<void> {
+    try {
+      await updateDoc(doc(db, 'team_notes', id), removeUndefinedValues({
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `team_notes/${id}`);
+    }
+  },
+
+  async deleteTeamNote(id: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, 'team_notes', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `team_notes/${id}`);
+    }
+  },
+
+  // Seed default sample tasks and notes if the collections are empty
+  async seedInitialTeamScheduleIfEmpty(): Promise<void> {
+    try {
+      const snap = await getDocs(collection(db, 'team_tasks'));
+      if (!snap.empty) return;
+
+      const effective = api.getEffectiveUser();
+      const today = new Date();
+      const nextSunday = new Date(today);
+      nextSunday.setDate(today.getDate() + ((7 - today.getDay()) % 7 || 7));
+      const nextSundayStr = nextSunday.toISOString().split('T')[0];
+
+      const nextWed = new Date(nextSunday);
+      nextWed.setDate(nextSunday.getDate() + 3);
+      const nextWedStr = nextWed.toISOString().split('T')[0];
+
+      // 1. Initial Tasks
+      await api.createTeamTask({
+        title: 'Operação de Transmissão ao Vivo e Câmeras',
+        description: 'Gerenciar live no YouTube, cortes de câmera e controle de qualidade do streaming.',
+        category: 'transmissao',
+        dueDate: nextSundayStr,
+        dueTime: '18:15',
+        priority: 'urgente',
+        status: 'em_andamento',
+        assignedToUid: 'admin_pedro_henrique',
+        assignedToName: 'Pedro Henrique',
+        checklist: [
+          { id: 'c1', text: 'Checar link dedicado e sinal OBS', completed: true },
+          { id: 'c2', text: 'Configurar título da live e miniatura no YouTube', completed: true },
+          { id: 'c3', text: 'Realizar teste privado de transmissão 30 min antes', completed: false },
+        ],
+      });
+
+      await api.createTeamTask({
+        title: 'Alinhamento e Mixagem de Áudio do Culto',
+        description: 'Equalização do louvor, microfones da pregação e balanceamento do som ambiente e fones.',
+        category: 'som',
+        dueDate: nextSundayStr,
+        dueTime: '17:30',
+        priority: 'alta',
+        status: 'pendente',
+        assignedToUid: 'member_lucas_ferreira',
+        assignedToName: 'Lucas Ferreira',
+        checklist: [
+          { id: 'c4', text: 'Trocar pilhas dos microfones sem fio', completed: true },
+          { id: 'c5', text: 'Passagem de som com a equipe de louvor às 17h45', completed: false },
+          { id: 'c6', text: 'Verificar retorno in-ear dos músicos', completed: false },
+        ],
+      });
+
+      await api.createTeamTask({
+        title: 'Projeção de Letras e Vídeos no Painel LED',
+        description: 'Exibição da ordem do culto, letras dos louvores, avisos e passagens bíblicas.',
+        category: 'projecao',
+        dueDate: nextSundayStr,
+        dueTime: '18:00',
+        priority: 'alta',
+        status: 'pendente',
+        assignedToUid: 'member_ana_beatriz',
+        assignedToName: 'Ana Beatriz',
+        checklist: [
+          { id: 'c7', text: 'Atualizar repertório no Holyrics', completed: false },
+          { id: 'c8', text: 'Testar vídeos de comunicados e dízimos', completed: false },
+        ],
+      });
+
+      await api.createTeamTask({
+        title: 'Cobertura Fotográfica e Stories em Tempo Real',
+        description: 'Fotos dos momentos solenes e postagens nos Stories da igreja durante a celebração.',
+        category: 'fotografia',
+        dueDate: nextSundayStr,
+        dueTime: '18:30',
+        priority: 'media',
+        status: 'pendente',
+        assignedToUid: 'member_marcos_vinicius',
+        assignedToName: 'Marcos Vinicius',
+        checklist: [
+          { id: 'c9', text: 'Formatar cartões SD e limpar lentes', completed: true },
+          { id: 'c10', text: 'Subir fotos selecionadas no PT-B Mídia até às 22h', completed: false },
+        ],
+      });
+
+      await api.createTeamTask({
+        title: 'Design dos Banners e Artes da Próxima Série',
+        description: 'Criação dos posts do Instagram e cartaz para a nova série de mensagens do mês.',
+        category: 'design_redes',
+        dueDate: nextWedStr,
+        dueTime: '15:00',
+        priority: 'media',
+        status: 'pendente',
+        assignedToUid: effective.uid,
+        assignedToName: effective.displayName,
+      });
+
+      // 2. Initial Notes
+      await api.createTeamNote({
+        title: 'Padrão de Organização e Upload dos Arquivos de Culto',
+        content: 'Ao subir fotos e vídeos brutos no portal, favor selecionar o Evento correspondente (ex: Culto de Domingo). Isso agrupa automaticamente os arquivos e calcula a minutagem e armazenamento da igreja.',
+        category: 'Alinhamento',
+        color: 'amber',
+        isPinned: true,
+        tags: ['Padrão', 'Mídia', 'Arquivos'],
+      });
+
+      await api.createTeamNote({
+        title: 'Protocolo de Emergência para Queda de Conexão na Live',
+        content: 'Se houver oscilação de internet: 1. Acionar o roteador backup de dados móveis 5G. 2. Alternar para a placa de captura reserva. 3. Fixar mensagem de status no chat do YouTube.',
+        category: 'Aviso Importante',
+        color: 'rose',
+        isPinned: true,
+        tags: ['Transmissão', 'Emergência'],
+      });
+
+      await api.createTeamNote({
+        title: 'Ideias de Conteúdo para o Mês de Celebração',
+        content: 'Vídeo rápido de bastidores da equipe de som e mídia; depoimento curto de 1 minuto em formato Reels; contagem regressiva para o congresso anual.',
+        category: 'Ideias de Mídia',
+        color: 'sky',
+        isPinned: false,
+        tags: ['Criatividade', 'Reels'],
+      });
+    } catch (err) {
+      console.warn('Initial team schedule seed skipped:', err);
     }
   },
 };

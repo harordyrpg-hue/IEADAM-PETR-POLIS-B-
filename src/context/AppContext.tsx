@@ -7,6 +7,9 @@ import {
   ChurchEvent,
   StorageStats,
   ViewTab,
+  TeamTask,
+  TeamNote,
+  TeamTaskStatus,
 } from '../types.js';
 import { api } from '../services/api.js';
 import { auth } from '../services/firebase.js';
@@ -39,6 +42,15 @@ interface AppContextType {
   refreshFolders: () => Promise<void>;
   events: ChurchEvent[];
   refreshEvents: () => Promise<void>;
+  teamTasks: TeamTask[];
+  teamNotes: TeamNote[];
+  createTeamTask: (data: Partial<TeamTask>) => Promise<TeamTask>;
+  updateTeamTask: (id: string, updates: Partial<TeamTask>) => Promise<void>;
+  toggleTaskComplete: (id: string, currentStatus: TeamTaskStatus) => Promise<void>;
+  deleteTeamTask: (id: string) => Promise<void>;
+  createTeamNote: (data: Partial<TeamNote>) => Promise<TeamNote>;
+  updateTeamNote: (id: string, updates: Partial<TeamNote>) => Promise<void>;
+  deleteTeamNote: (id: string) => Promise<void>;
   activeFolderId: string | null;
   setActiveFolderId: (id: string | null) => void;
   activeEventId: string | null;
@@ -94,6 +106,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [events, setEvents] = useState<ChurchEvent[]>([]);
+  const [teamTasks, setTeamTasks] = useState<TeamTask[]>([]);
+  const [teamNotes, setTeamNotes] = useState<TeamNote[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -241,10 +255,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setEvents(eventsList);
     });
 
+    // 4. Real-time Team Tasks & Scales sync
+    const unsubTasks = api.subscribeTeamTasks((tasksList) => {
+      setTeamTasks(tasksList);
+    });
+
+    // 5. Real-time Team Collaborative Notes sync
+    const unsubNotes = api.subscribeTeamNotes((notesList) => {
+      setTeamNotes(notesList);
+    });
+
+    // Seed initial schedule samples if empty
+    api.seedInitialTeamScheduleIfEmpty().catch(() => {});
+
     return () => {
       unsubFiles();
       unsubFolders();
       unsubEvents();
+      unsubTasks();
+      unsubNotes();
     };
   }, [user]);
 
@@ -365,6 +394,80 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSelectedFileIds([]);
   };
 
+  // Team Schedule & Task Actions
+  const createTeamTask = async (data: Partial<TeamTask>): Promise<TeamTask> => {
+    try {
+      const task = await api.createTeamTask(data);
+      notify(`Afazer "${task.title}" adicionado à escala!`, 'success');
+      return task;
+    } catch (err: any) {
+      notify('Erro ao criar afazer na agenda.', 'error');
+      throw err;
+    }
+  };
+
+  const updateTeamTask = async (id: string, updates: Partial<TeamTask>): Promise<void> => {
+    try {
+      await api.updateTeamTask(id, updates);
+      notify('Afazer atualizado!', 'success');
+    } catch (err: any) {
+      notify('Erro ao atualizar afazer.', 'error');
+      throw err;
+    }
+  };
+
+  const toggleTaskComplete = async (id: string, currentStatus: TeamTaskStatus): Promise<void> => {
+    try {
+      await api.toggleTaskComplete(id, currentStatus);
+      notify(currentStatus === 'concluido' ? 'Afazer reaberto.' : 'Afazer concluído com sucesso!', 'success');
+    } catch (err: any) {
+      notify('Erro ao alterar status do afazer.', 'error');
+      throw err;
+    }
+  };
+
+  const deleteTeamTask = async (id: string): Promise<void> => {
+    try {
+      await api.deleteTeamTask(id);
+      notify('Afazer removido da escala.', 'info');
+    } catch (err: any) {
+      notify('Erro ao remover afazer.', 'error');
+      throw err;
+    }
+  };
+
+  // Team Collaborative Notes Actions
+  const createTeamNote = async (data: Partial<TeamNote>): Promise<TeamNote> => {
+    try {
+      const note = await api.createTeamNote(data);
+      notify('Anotação colaborativa criada!', 'success');
+      return note;
+    } catch (err: any) {
+      notify('Erro ao salvar anotação.', 'error');
+      throw err;
+    }
+  };
+
+  const updateTeamNote = async (id: string, updates: Partial<TeamNote>): Promise<void> => {
+    try {
+      await api.updateTeamNote(id, updates);
+      notify('Anotação atualizada!', 'success');
+    } catch (err: any) {
+      notify('Erro ao atualizar anotação.', 'error');
+      throw err;
+    }
+  };
+
+  const deleteTeamNote = async (id: string): Promise<void> => {
+    try {
+      await api.deleteTeamNote(id);
+      notify('Anotação excluída.', 'info');
+    } catch (err: any) {
+      notify('Erro ao excluir anotação.', 'error');
+      throw err;
+    }
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -389,6 +492,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshFolders,
         events,
         refreshEvents,
+        teamTasks,
+        teamNotes,
+        createTeamTask,
+        updateTeamTask,
+        toggleTaskComplete,
+        deleteTeamTask,
+        createTeamNote,
+        updateTeamNote,
+        deleteTeamNote,
         activeFolderId,
         setActiveFolderId,
         activeEventId,

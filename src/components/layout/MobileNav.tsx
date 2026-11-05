@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   LayoutDashboard,
+  CalendarDays,
   FolderOpen,
   Image as ImageIcon,
   Film,
@@ -14,9 +15,9 @@ export const MobileNav: React.FC = () => {
 
   const tabs: { id: ViewTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'dashboard', label: 'Início', icon: LayoutDashboard },
+    { id: 'schedule', label: 'Agenda', icon: CalendarDays },
     { id: 'files', label: 'Arquivos', icon: FolderOpen },
     { id: 'photos', label: 'Fotos', icon: ImageIcon },
-    { id: 'videos', label: 'Vídeos', icon: Film },
   ];
 
   return (

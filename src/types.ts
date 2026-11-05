@@ -160,6 +160,7 @@ export interface UploadQueueItem {
 export type ViewTab =
   | 'dashboard'
   | 'files'
+  | 'schedule'
   | 'photos'
   | 'videos'
   | 'arts'
@@ -319,6 +320,68 @@ export interface ChurchDownload {
   status: PublicationStatus;
   authorName: string;
   authorUid: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ==========================================
+// CENTRAL DE AGENDA, ESCALAS & ANOTAÇÕES DA EQUIPE
+// ==========================================
+export type TeamTaskCategory =
+  | 'transmissao'
+  | 'som'
+  | 'projecao'
+  | 'fotografia'
+  | 'video'
+  | 'design_redes'
+  | 'iluminacao'
+  | 'outro';
+
+export type TeamTaskPriority = 'baixa' | 'media' | 'alta' | 'urgente';
+
+export type TeamTaskStatus = 'pendente' | 'em_andamento' | 'concluido';
+
+export interface TeamTaskChecklistItem {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
+export interface TeamTask {
+  id: string;
+  title: string;
+  description?: string;
+  category: TeamTaskCategory;
+  eventId?: string | null;
+  eventName?: string | null;
+  assignedToUid: string;
+  assignedToName: string;
+  assignedToEmail?: string;
+  assignedToAvatar?: string;
+  dueDate: string; // YYYY-MM-DD
+  dueTime?: string; // HH:MM
+  priority: TeamTaskPriority;
+  status: TeamTaskStatus;
+  createdByUid: string;
+  createdByName: string;
+  completedAt?: string | null;
+  checklist?: TeamTaskChecklistItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeamNote {
+  id: string;
+  title: string;
+  content: string;
+  category?: string;
+  color?: 'amber' | 'emerald' | 'sky' | 'rose' | 'purple' | 'stone';
+  isPinned: boolean;
+  authorUid: string;
+  authorName: string;
+  relatedEventId?: string | null;
+  relatedEventName?: string | null;
+  tags?: string[];
   createdAt: string;
   updatedAt: string;
 }
