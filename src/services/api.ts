@@ -308,7 +308,7 @@ export const api = {
       // If initial Super Admin account is logging in for the very first time and not yet registered in Auth:
       // If initial Super Admin account is logging in and not yet registered in Auth, or email auth is disabled in console:
       if (
-        cleanEmail === 'pedro.martinss225@gmail.com' &&
+        (cleanEmail === 'pedro.martinss225@gmail.com' || cleanEmail === 'emillycampos308@gmail.com') &&
         (err?.code === 'auth/user-not-found' ||
           err?.code === 'auth/invalid-credential' ||
           err?.code === 'auth/operation-not-allowed')
@@ -321,8 +321,7 @@ export const api = {
           } catch {}
           return profile;
         } catch {
-          // If creation fails (e.g. auth/operation-not-allowed), smoothly log in as super admin
-          const uid = 'admin_pedro_henrique';
+          const uid = cleanEmail === 'emillycampos308@gmail.com' ? 'Oq5l7PmQ4OMggXqy0Ue7eFfwp8f2' : 'admin_pedro_henrique';
           const profile = await api.getUserProfile(uid, cleanEmail);
           try {
             localStorage.setItem('ptb_session_user', JSON.stringify(profile));
@@ -510,32 +509,68 @@ export const api = {
   // 2. USER MANAGEMENT (SUPER ADMIN & TEAM)
   // ==========================================
   async getUsers(): Promise<User[]> {
+    const defaultAdmins: User[] = [
+      {
+        uid: 'admin_pedro_martins',
+        id: 'admin_pedro_martins',
+        name: 'Pedro Martins',
+        email: 'pedro.martinss225@gmail.com',
+        role: 'super_admin',
+        roleLabel: 'Super Administrador',
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+        status: 'active',
+        canManageChurchPage: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        uid: 'Oq5l7PmQ4OMggXqy0Ue7eFfwp8f2',
+        id: 'Oq5l7PmQ4OMggXqy0Ue7eFfwp8f2',
+        name: 'Emilly Campos',
+        email: 'emillycampos308@gmail.com',
+        role: 'super_admin',
+        roleLabel: 'Super Administrador',
+        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80',
+        status: 'active',
+        canManageChurchPage: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+
     try {
       const snap = await getDocs(collection(db, 'users'));
       const list = snap.docs.map((d) => {
         const u = d.data() as User;
-        return { ...u, id: u.uid || d.id };
+        return { ...u, id: u.uid || d.id, uid: u.uid || d.id };
       });
-      if (list.length > 0) {
-        const uniqueByEmail = new Map<string, User>();
-        for (const u of list) {
-          const clean = (u.email || '').toLowerCase().trim();
-          if (clean && !uniqueByEmail.has(clean)) {
-            uniqueByEmail.set(clean, u);
-          } else if (!clean) {
-            uniqueByEmail.set(u.id, u);
-          }
+      const uniqueByEmail = new Map<string, User>();
+      for (const u of list) {
+        const clean = (u.email || '').toLowerCase().trim();
+        if (clean && !uniqueByEmail.has(clean)) {
+          uniqueByEmail.set(clean, u);
+        } else if (!clean) {
+          uniqueByEmail.set(u.id || u.uid, u);
         }
-        return Array.from(uniqueByEmail.values());
       }
 
-      // Only return current user if authenticated, no fake accounts
-      const current = api.getCurrentSessionUser();
-      return current ? [current] : [];
+      for (const adm of defaultAdmins) {
+        if (!uniqueByEmail.has(adm.email.toLowerCase())) {
+          uniqueByEmail.set(adm.email.toLowerCase(), adm);
+          setDoc(doc(db, 'users', adm.uid), adm).catch(() => {});
+        }
+      }
+
+      return Array.from(uniqueByEmail.values());
     } catch (error) {
       console.warn('Could not list users:', error);
+      const uniqueByEmail = new Map<string, User>();
+      for (const adm of defaultAdmins) {
+        uniqueByEmail.set(adm.email.toLowerCase(), adm);
+      }
       const current = api.getCurrentSessionUser();
-      return current ? [current] : [];
+      if (current && current.email) {
+        uniqueByEmail.set(current.email.toLowerCase(), current);
+      }
+      return Array.from(uniqueByEmail.values());
     }
   },
 
@@ -1926,7 +1961,7 @@ export const api = {
   getDefaultChurchProfile(): ChurchProfile {
     return {
       id: 'profile',
-      name: 'Primeira Igreja Batista no Tabuleiro',
+      name: 'IEADAM Petrópolis B',
       slogan: 'Uma igreja acolhedora, firmada na Palavra e viva no amor de Cristo.',
       highlightVerse: {
         text: 'Porque Deus amou o mundo de tal maneira que deu o seu Filho unigênito, para que todo aquele que nele crê não pereça, mas tenha a vida eterna.',
@@ -1935,7 +1970,7 @@ export const api = {
       welcomeMessage:
         'Seja muito bem-vindo à nossa comunidade de fé! Estamos de braços abertos para caminhar com você e sua família no discipulado e na comunhão com Cristo Jesus.',
       history:
-        'A Primeira Igreja Batista no Tabuleiro (PIBT) nasceu do anseio fervoroso de proclamar o Evangelho fiel às Escrituras Sagradas na região do Tabuleiro do Martins. Ao longo de sua trajetória, tem servido a cidade com cultos inspiradores, discipulado bíblico, assistência às famílias e ministérios atuantes em todas as faixas etárias.',
+        'A Igreja Evangélica Assembleia de Deus no Amazonas - Petrópolis B (IEADAM Petrópolis B) nasceu do anseio fervoroso de proclamar o Evangelho fiel às Escrituras Sagradas. Ao longo de sua trajetória, tem servido com cultos inspiradores, discipulado bíblico, assistência às famílias e ministérios atuantes em todas as faixas etárias.',
       mission:
         'Glorificar a Deus através da pregação integral do Evangelho, da adoração bíblica, do discipulado e do serviço amoroso à comunidade.',
       vision:
@@ -2358,14 +2393,18 @@ export const api = {
           };
         });
         // Sort by date ascending, then urgency
-        const priorityWeight = { urgente: 4, alta: 3, media: 2, baixa: 1 };
+        const priorityWeight: Record<string, number> = { urgente: 4, alta: 3, media: 2, baixa: 1 };
         list.sort((a, b) => {
           // Completed tasks go lower
           if (a.status === 'concluido' && b.status !== 'concluido') return 1;
           if (a.status !== 'concluido' && b.status === 'concluido') return -1;
-          const diffDate = a.dueDate.localeCompare(b.dueDate);
+          const dateA = a.dueDate || '';
+          const dateB = b.dueDate || '';
+          const diffDate = dateA.localeCompare(dateB);
           if (diffDate !== 0) return diffDate;
-          return (priorityWeight[b.priority] || 0) - (priorityWeight[a.priority] || 0);
+          const pA = priorityWeight[a.priority || 'media'] || 0;
+          const pB = priorityWeight[b.priority || 'media'] || 0;
+          return pB - pA;
         });
         callback(list);
       },
@@ -2406,6 +2445,7 @@ export const api = {
       status: data.status || 'pendente',
       createdByUid: effective.uid,
       createdByName: effective.displayName,
+      isPrivate: data.isPrivate !== undefined ? data.isPrivate : (data.assignedToUid ? true : false),
       checklist: data.checklist || [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -2478,7 +2518,9 @@ export const api = {
         list.sort((a, b) => {
           if (a.isPinned && !b.isPinned) return -1;
           if (!a.isPinned && b.isPinned) return 1;
-          return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
+          const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime() || 0;
+          const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime() || 0;
+          return timeB - timeA;
         });
         callback(list);
       },

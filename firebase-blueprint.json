@@ -125,6 +125,46 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["churchName"]
+    },
+    "TeamTask": {
+      "title": "TeamTask",
+      "description": "Team schedule assignment, task or duty",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "maxLength": 50 },
+        "eventId": { "type": "string", "maxLength": 128 },
+        "eventName": { "type": "string", "maxLength": 200 },
+        "assignedToUid": { "type": "string", "maxLength": 128 },
+        "assignedToName": { "type": "string", "maxLength": 120 },
+        "assignedToEmail": { "type": "string", "maxLength": 150 },
+        "dueDate": { "type": "string", "maxLength": 20 },
+        "dueTime": { "type": "string", "maxLength": 20 },
+        "priority": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "maxLength": 20 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "isPrivate": { "type": "boolean" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "assignedToUid", "dueDate", "status"]
+    },
+    "TeamNote": {
+      "title": "TeamNote",
+      "description": "Collaborative media team note",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 200 },
+        "content": { "type": "string", "maxLength": 5000 },
+        "authorUid": { "type": "string", "maxLength": 128 },
+        "authorName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "content", "authorUid"]
     }
   },
   "firestore": {
@@ -183,6 +223,14 @@
     "/church_downloads/{downloadId}": {
       "schema": { "$ref": "#/entities/ChurchDownload" },
       "description": "Church downloadable public study materials, bulletins, and sheet music"
+    },
+    "/team_tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/TeamTask" },
+      "description": "Team tasks and schedule assignments"
+    },
+    "/team_notes/{noteId}": {
+      "schema": { "$ref": "#/entities/TeamNote" },
+      "description": "Team collaborative board notes"
     }
   }
 }

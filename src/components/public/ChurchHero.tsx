@@ -24,7 +24,7 @@ export const ChurchHero: React.FC<ChurchHeroProps> = ({ profile }) => {
         {/* Welcome Tag */}
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-semibold tracking-wide uppercase mb-6 shadow-lg backdrop-blur-md animate-in fade-in duration-700">
           <Heart className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-          <span>Família da Fé • Tabuleiro do Martins</span>
+          <span>Família da Fé • Petrópolis B</span>
         </div>
 
         {/* Church Name and Main Title */}

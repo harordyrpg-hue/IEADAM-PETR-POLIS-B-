@@ -25,12 +25,16 @@ import {
   ArrowRight,
   Tag,
   Radio,
+  FileDown,
+  Lock,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { formatBytes, formatDate, formatDateTime } from '../../utils/formatters.js';
 import { ViewTab } from '../../types.js';
 import { EventModal } from '../events/EventModal.js';
 import { api } from '../../services/api.js';
+import { exportIndividualTaskPDF } from '../../utils/pdfGenerator.js';
+
 
 interface DashboardViewProps {
   onNewFolderClick: () => void;
@@ -318,11 +322,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
               </div>
             </div>
 
-            {/* Tasks List */}
+            {/* Tasks List with Privacy Filtering & PDF Action */}
             <div className="space-y-2">
               {(() => {
-                const filtered = teamTasks.filter((t) =>
-                  taskFilter === 'mine' ? t.assignedToEmail === user?.email : true
+                const accessibleTasks = teamTasks.filter((t) => {
+                  if (t.isPrivate) {
+                    const isSuper = user?.role === 'super_admin';
+                    const isAssignee =
+                      t.assignedToUid === user?.uid ||
+                      (user?.email && t.assignedToEmail?.toLowerCase() === user.email.toLowerCase());
+                    const isCreator = t.createdByUid === user?.uid;
+                    if (!isSuper && !isAssignee && !isCreator) return false;
+                  }
+                  return true;
+                });
+
+                const filtered = accessibleTasks.filter((t) =>
+                  taskFilter === 'mine'
+                    ? t.assignedToUid === user?.uid || (user?.email && t.assignedToEmail?.toLowerCase() === user.email.toLowerCase())
+                    : true
                 );
 
                 if (filtered.length === 0) {
@@ -400,6 +418,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-neutral-800 text-neutral-300">
                               {getCategoryLabel(task.category)}
                             </span>
+                            {task.isPrivate && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-400 border border-red-500/20">
+                                <Lock className="w-2.5 h-2.5" />
+                                <span>Privada</span>
+                              </span>
+                            )}
                             {task.priority === 'urgente' && (
                               <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-400 border border-red-500/20">
                                 URGENTE
@@ -417,6 +441,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
                             <span className="text-neutral-300 font-medium">
                               👤 {task.assignedToName || 'Equipe'}
                             </span>
+                            <span className="text-amber-400/80">
+                              Por: {task.createdByName || 'Liderança'}
+                            </span>
                             {task.dueDate && (
                               <span>
                                 📅 {formatDate(task.dueDate)} {task.dueTime ? `às ${task.dueTime}` : ''}
@@ -431,21 +458,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
                         </div>
                       </div>
 
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${
-                          isCompleted
-                            ? 'bg-emerald-500/10 text-emerald-400'
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => exportIndividualTaskPDF(task)}
+                          className="p-1 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded transition-colors"
+                          title="Baixar Ordem de Serviço em PDF desta tarefa"
+                        >
+                          <FileDown className="w-3.5 h-3.5" />
+                        </button>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                            isCompleted
+                              ? 'bg-emerald-500/10 text-emerald-400'
+                              : task.status === 'em_andamento'
+                              ? 'bg-blue-500/10 text-blue-400'
+                              : 'bg-amber-500/10 text-amber-400'
+                          }`}
+                        >
+                          {isCompleted
+                            ? 'Concluído'
                             : task.status === 'em_andamento'
-                            ? 'bg-blue-500/10 text-blue-400'
-                            : 'bg-amber-500/10 text-amber-400'
-                        }`}
-                      >
-                        {isCompleted
-                          ? 'Concluído'
-                          : task.status === 'em_andamento'
-                          ? 'Em andamento'
-                          : 'Pendente'}
-                      </span>
+                            ? 'Em andamento'
+                            : 'Pendente'}
+                        </span>
+                      </div>
                     </div>
                   );
                 });

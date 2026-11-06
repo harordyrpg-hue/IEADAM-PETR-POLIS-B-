@@ -55,6 +55,24 @@ export const FileCard: React.FC<FileCardProps> = ({
   });
 
   const [imgError, setImgError] = useState(false);
+  const [triedFallback, setTriedFallback] = useState(false);
+
+  const handleImageError = () => {
+    if (!triedFallback && file.downloadUrl && file.downloadUrl !== resolvedSource && file.downloadUrl !== file.thumbnailUrl) {
+      setTriedFallback(true);
+      api.resolveMediaUrl({ ...file, thumbnailUrl: null }).then((url) => {
+        if (url) {
+          mediaBlobCache.set(file.id, url);
+          setResolvedSource(url);
+          setImgError(false);
+        } else {
+          setImgError(true);
+        }
+      }).catch(() => setImgError(true));
+      return;
+    }
+    setImgError(true);
+  };
 
   // If the file is stored in chunked Firestore or needs resolution
   useEffect(() => {
@@ -150,7 +168,7 @@ export const FileCard: React.FC<FileCardProps> = ({
             src={activeImageSource}
             alt=""
             aria-hidden="true"
-            onError={() => setImgError(true)}
+            onError={handleImageError}
             referrerPolicy="no-referrer"
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
             loading="lazy"

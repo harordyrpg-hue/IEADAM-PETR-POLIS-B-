@@ -364,6 +364,7 @@ export interface TeamTask {
   status: TeamTaskStatus;
   createdByUid: string;
   createdByName: string;
+  isPrivate?: boolean;
   completedAt?: string | null;
   checklist?: TeamTaskChecklistItem[];
   createdAt: string;
