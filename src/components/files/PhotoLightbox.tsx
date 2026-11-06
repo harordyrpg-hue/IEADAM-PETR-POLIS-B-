@@ -25,9 +25,23 @@ export const PhotoLightbox: React.FC = () => {
   } = useApp();
 
   const [zoom, setZoom] = useState(1);
+  const [photoUrl, setPhotoUrl] = useState<string>(() => lightboxFile?.thumbnailUrl || '');
 
   useEffect(() => {
     setZoom(1);
+    if (!lightboxFile) return;
+    let isMounted = true;
+    if (lightboxFile.thumbnailUrl && !lightboxFile.thumbnailUrl.startsWith('chunked://')) {
+      setPhotoUrl(lightboxFile.thumbnailUrl);
+    }
+    api.resolveMediaUrl(lightboxFile).then((url) => {
+      if (isMounted && url) {
+        setPhotoUrl(url);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
   }, [lightboxFile]);
 
   // Handle escape key
@@ -124,8 +138,9 @@ export const PhotoLightbox: React.FC = () => {
       {/* Main Image Viewport */}
       <div className="flex-1 relative flex items-center justify-center p-4 overflow-hidden">
         <img
-          src={lightboxFile.thumbnailUrl || `/storage/originals/${lightboxFile.storageKey}`}
-          alt={lightboxFile.name}
+          src={photoUrl || lightboxFile.thumbnailUrl || ''}
+          alt=""
+          aria-hidden="true"
           referrerPolicy="no-referrer"
           className="max-w-full max-h-[80vh] object-contain transition-transform duration-200 shadow-2xl rounded-md"
           style={{ transform: `scale(${zoom})` }}

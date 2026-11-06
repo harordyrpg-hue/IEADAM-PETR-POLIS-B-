@@ -117,10 +117,11 @@ export const PhotosView: React.FC = () => {
               className="group relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 hover:border-neutral-700 cursor-pointer transition-all flex flex-col justify-between"
             >
               {/* Image Container with measured overlay */}
-              <div className="relative aspect-4/3 w-full overflow-hidden bg-black">
+              <div className="relative aspect-4/3 w-full overflow-hidden bg-black flex items-center justify-center">
                 <img
-                  src={photo.thumbnailUrl || `/storage/originals/${photo.storageKey}`}
-                  alt={photo.name}
+                  src={photo.thumbnailUrl || (photo.downloadUrl && !photo.downloadUrl.startsWith('chunked://') ? photo.downloadUrl : '/assets/images/church_conference_banner_1790831734307.jpg')}
+                  alt=""
+                  aria-hidden="true"
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   loading="lazy"

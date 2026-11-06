@@ -34,11 +34,16 @@ export const FileDetailModal: React.FC = () => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (detailFile) {
       setEditedName(detailFile.name);
       setIsEditingName(false);
+      setPreviewUrl(detailFile.thumbnailUrl && !detailFile.thumbnailUrl.startsWith('chunked://') ? detailFile.thumbnailUrl : null);
+      api.resolveMediaUrl(detailFile).then((url) => {
+        if (url) setPreviewUrl(url);
+      });
     }
   }, [detailFile]);
 
@@ -115,14 +120,15 @@ export const FileDetailModal: React.FC = () => {
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {/* Preview banner */}
-          {detailFile.thumbnailUrl ? (
+          {previewUrl ? (
             <div
               onClick={handleOpenMedia}
-              className="relative w-full h-56 bg-black rounded-xl overflow-hidden cursor-pointer group border border-neutral-800"
+              className="relative w-full h-56 bg-black rounded-xl overflow-hidden cursor-pointer group border border-neutral-800 flex items-center justify-center"
             >
               <img
-                src={detailFile.thumbnailUrl}
-                alt={detailFile.name}
+                src={previewUrl}
+                alt=""
+                aria-hidden="true"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-102"
               />

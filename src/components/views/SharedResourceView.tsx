@@ -132,7 +132,8 @@ export const SharedResourceView: React.FC<SharedResourceViewProps> = ({ token, o
               <div className="w-full h-80 rounded-xl overflow-hidden bg-black flex items-center justify-center">
                 <img
                   src={resource.thumbnailUrl}
-                  alt={resource.name}
+                  alt=""
+                  aria-hidden="true"
                   referrerPolicy="no-referrer"
                   className="max-w-full max-h-full object-contain"
                 />

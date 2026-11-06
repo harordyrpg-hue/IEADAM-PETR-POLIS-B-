@@ -105,10 +105,11 @@ export const VideosView: React.FC = () => {
               className="group rounded-2xl overflow-hidden bg-neutral-900 border border-neutral-800 hover:border-neutral-700 cursor-pointer transition-all flex flex-col justify-between"
             >
               {/* Video Thumbnail */}
-              <div className="relative aspect-video w-full overflow-hidden bg-black">
+              <div className="relative aspect-video w-full overflow-hidden bg-black flex items-center justify-center">
                 <img
-                  src={video.thumbnailUrl || '/src/assets/images/church_worship_stage_1790831714044.jpg'}
-                  alt={video.name}
+                  src={video.thumbnailUrl || (video.downloadUrl && !video.downloadUrl.startsWith('chunked://') ? video.downloadUrl : '/assets/images/church_worship_stage_1790831714044.jpg')}
+                  alt=""
+                  aria-hidden="true"
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-90 group-hover:opacity-100"
                 />

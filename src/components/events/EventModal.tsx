@@ -71,7 +71,7 @@ export const EventModal: React.FC<EventModalProps> = ({
           description: description.trim(),
           date,
           category,
-          coverUrl: '/src/assets/images/church_worship_stage_1790831714044.jpg',
+          coverUrl: '/assets/images/church_worship_stage_1790831714044.jpg',
           responsibles: parsedResponsibles,
         });
         notify('Novo evento da igreja criado com sucesso!', 'success');

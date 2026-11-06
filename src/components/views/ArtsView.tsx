@@ -104,10 +104,11 @@ export const ArtsView: React.FC = () => {
               className="group rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 hover:border-neutral-700 cursor-pointer transition-all flex flex-col justify-between"
             >
               {/* Graphic Art Preview */}
-              <div className="relative aspect-4/3 w-full overflow-hidden bg-black/60">
+              <div className="relative aspect-4/3 w-full overflow-hidden bg-black/60 flex items-center justify-center">
                 <img
-                  src={art.thumbnailUrl || '/src/assets/images/church_conference_banner_1790831734307.jpg'}
-                  alt={art.name}
+                  src={art.thumbnailUrl || (art.downloadUrl && !art.downloadUrl.startsWith('chunked://') ? art.downloadUrl : '/assets/images/church_conference_banner_1790831734307.jpg')}
+                  alt=""
+                  aria-hidden="true"
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 />

@@ -66,6 +66,8 @@ import {
   TeamTaskPriority,
   TeamTaskStatus,
 } from '../types.js';
+import { createFileThumbnail } from '../utils/thumbnail.js';
+
 
 // Helper to determine media category from extension and MIME type
 export function detectMediaCategory(fileName: string, mimeType: string): MediaCategory {
@@ -720,6 +722,14 @@ export const api = {
     const category = detectMediaCategory(file.name, file.type);
     const resolution = await getImageResolution(file);
 
+    // Generate lightweight visual thumbnail (15KB - 30KB) for instant grid preview
+    let generatedThumb: string | null = null;
+    try {
+      generatedThumb = await createFileThumbnail(file);
+    } catch (thumbErr) {
+      console.warn('Thumbnail generation note:', thumbErr);
+    }
+
     const cleanFileName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
     let downloadUrl = '';
     let storagePath = `/uploads/${fileId}_${cleanFileName}`;
@@ -821,6 +831,16 @@ export const api = {
       }
     }
 
+    // Determine final guaranteed thumbnail URL (NEVER chunked://)
+    let finalThumb = generatedThumb;
+    if (!finalThumb) {
+      if (downloadUrl.startsWith('data:image/')) {
+        finalThumb = downloadUrl;
+      } else if (downloadUrl.startsWith('http') && (category === 'photo' || category === 'art')) {
+        finalThumb = downloadUrl;
+      }
+    }
+
     const newRecord: FileRecord = {
       id: fileId,
       name: file.name,
@@ -832,7 +852,7 @@ export const api = {
       storagePath,
       storageKey: storagePath,
       downloadUrl,
-      thumbnailUrl: category === 'photo' || category === 'art' ? downloadUrl : null,
+      thumbnailUrl: finalThumb || null,
       folderId: options.folderId || null,
       eventId: options.eventId || null,
       ownerUid: currentUser.uid,
@@ -1272,7 +1292,7 @@ export const api = {
       description: data.description || '',
       date: data.date || new Date().toISOString().split('T')[0],
       category: data.category || 'Culto de Domingo',
-      coverUrl: data.coverUrl || '/src/assets/images/church_worship_stage_1790831714044.jpg',
+      coverUrl: data.coverUrl || '/assets/images/church_worship_stage_1790831714044.jpg',
       responsibles: data.responsibles || [currentUser.displayName || 'Mídia'],
       ownerUid: currentUser.uid,
       createdAt: new Date().toISOString(),
@@ -1658,8 +1678,49 @@ export const api = {
   },
 
   // ==========================================
-  // 9. DOWNLOAD HELPERS (REAL ORIGINAL STORAGE DOWNLOAD)
+  // 9. DOWNLOAD & MEDIA RESOLUTION HELPERS
   // ==========================================
+  async resolveMediaUrl(file: FileRecord): Promise<string | null> {
+    if (file.thumbnailUrl && !file.thumbnailUrl.startsWith('chunked://')) {
+      return file.thumbnailUrl;
+    }
+    const source = file.thumbnailUrl || file.downloadUrl;
+    if (!source) return null;
+
+    if (source.startsWith('data:') || source.startsWith('http') || source.startsWith('/uploads/')) {
+      return source;
+    }
+
+    if (source.startsWith('chunked://')) {
+      const fileId = source.replace('chunked://', '');
+      try {
+        const q = query(collection(db, 'file_chunks'), where('fileId', '==', fileId));
+        const snap = await getDocs(q);
+        const sortedDocs = snap.docs
+          .map((d) => d.data() as { chunkIndex: number; data: string })
+          .sort((a, b) => a.chunkIndex - b.chunkIndex);
+
+        if (sortedDocs.length === 0) return null;
+
+        const byteArrays: Uint8Array[] = [];
+        for (const docItem of sortedDocs) {
+          const bstr = atob(docItem.data);
+          const u8arr = new Uint8Array(bstr.length);
+          for (let i = 0; i < bstr.length; i++) {
+            u8arr[i] = bstr.charCodeAt(i);
+          }
+          byteArrays.push(u8arr);
+        }
+        const blob = new Blob(byteArrays as any, { type: file.mimeType || 'image/jpeg' });
+        return URL.createObjectURL(blob);
+      } catch (err) {
+        console.warn('Error resolving chunked media URL:', err);
+        return null;
+      }
+    }
+    return null;
+  },
+
   async triggerDownload(urlOrRecord: string | FileRecord, customFilename?: string) {
     let url = typeof urlOrRecord === 'string' ? urlOrRecord : urlOrRecord.downloadUrl;
     let filename = customFilename || (typeof urlOrRecord === 'object' ? urlOrRecord.name : '');
