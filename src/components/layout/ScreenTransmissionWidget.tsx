@@ -17,7 +17,7 @@ export const ScreenTransmissionWidget: React.FC = () => {
   if (!isTransmitting) return null;
 
   return (
-    <div className="hidden md:flex fixed bottom-6 right-6 z-50 flex-col bg-neutral-900 border border-rose-500/50 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-md animate-in slide-in-from-bottom-4 duration-300 w-80 text-neutral-100 select-none">
+    <div className="flex fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 flex-col bg-neutral-900 border border-rose-500/50 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-md animate-in slide-in-from-bottom-4 duration-300 w-72 sm:w-80 text-neutral-100 select-none">
       {/* Top Header Bar */}
       <div className="flex items-center justify-between px-3.5 py-2.5 bg-neutral-950/80 border-b border-neutral-800">
         <div className="flex items-center gap-2">

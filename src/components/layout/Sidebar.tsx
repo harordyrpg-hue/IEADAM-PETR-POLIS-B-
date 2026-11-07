@@ -26,6 +26,8 @@ import {
   UserPlus,
   Church,
   CalendarDays,
+  Tv,
+  Square,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { ViewTab } from '../../types.js';
@@ -57,6 +59,8 @@ export const Sidebar: React.FC = () => {
     setActiveFolderId,
     setActiveEventId,
     isRealtimeActive,
+    isTransmitting,
+    toggleTransmission,
   } = useApp();
 
   const isSuperAdmin = user?.role === 'super_admin';
@@ -261,6 +265,52 @@ export const Sidebar: React.FC = () => {
               </div>
             );
           })}
+        </div>
+
+        {/* Telão & Projeção Card */}
+        <div className="px-3 pt-2 pb-1 border-t border-neutral-800">
+          <div className="p-2.5 rounded-xl bg-neutral-950/60 border border-neutral-800">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
+                <Tv className="w-3 h-3 text-amber-400" />
+                <span>Telão & Projeção</span>
+              </span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-amber-300 font-bold border border-neutral-700">
+                PC
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                toggleTransmission();
+                if (mobileMenuOpen) setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-xs ${
+                isTransmitting
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse shadow-rose-600/30'
+                  : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-100 border border-neutral-700 hover:border-amber-500/50'
+              }`}
+              title={
+                isTransmitting
+                  ? 'Parar de transmitir agora'
+                  : 'Transmitir tela do computador para o telão/projetor'
+              }
+            >
+              {isTransmitting ? (
+                <>
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                  <span>Parar de transmitir</span>
+                </>
+              ) : (
+                <>
+                  <Tv className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Transmitir para a tela</span>
+                </>
+              )}
+            </button>
+            <span className="block text-[10px] text-neutral-400 text-center mt-1">
+              {isTransmitting ? '🔴 Transmitindo na tela' : 'Opção para computador'}
+            </span>
+          </div>
         </div>
 
         {/* Real Storage Health Box */}

@@ -27,6 +27,7 @@ import {
   Radio,
   FileDown,
   Lock,
+  Tv,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { formatBytes, formatDate, formatDateTime } from '../../utils/formatters.js';
@@ -52,6 +53,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
     teamTasks,
     teamNotes,
     toggleTaskComplete,
+    isTransmitting,
+    toggleTransmission,
   } = useApp();
 
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -183,6 +186,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
               </span>
               <span className="text-[10px] text-amber-200/70 block">
                 Escalas e notas
+              </span>
+            </div>
+          </button>
+
+          {/* Transmitir para a Tela / Telão (PC) */}
+          <button
+            onClick={() => toggleTransmission()}
+            className={`flex items-center gap-2.5 p-3 rounded-xl border transition-all text-left group cursor-pointer ${
+              isTransmitting
+                ? 'bg-rose-600/20 border-rose-500/50 hover:bg-rose-600/30 text-rose-200 animate-pulse'
+                : 'bg-neutral-900 border-neutral-800 hover:border-amber-500/50 hover:bg-neutral-800/80'
+            }`}
+            title="Transmitir tela para o telão/projetor da igreja"
+          >
+            <div className={`p-2 rounded-lg transition-transform group-hover:scale-105 ${
+              isTransmitting ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30' : 'bg-amber-500/10 text-amber-400'
+            }`}>
+              {isTransmitting ? <Square className="w-4 h-4 fill-current" /> : <Tv className="w-4 h-4" />}
+            </div>
+            <div>
+              <span className={`text-xs font-bold block ${isTransmitting ? 'text-rose-300' : 'text-neutral-200 group-hover:text-amber-300'}`}>
+                {isTransmitting ? 'Parar Transmissão' : 'Transmitir Tela'}
+              </span>
+              <span className="text-[10px] text-neutral-400 block">
+                {isTransmitting ? 'Ao vivo no telão' : 'Telão / PC'}
               </span>
             </div>
           </button>

@@ -537,7 +537,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const startTransmission = useCallback(async () => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      notify('Seu navegador não suporta transmissão para a tela.', 'error');
+      notify('Transmissão de tela: opção exclusiva para computador/notebook (conectado ao telão ou projetor da igreja).', 'info');
       return;
     }
 

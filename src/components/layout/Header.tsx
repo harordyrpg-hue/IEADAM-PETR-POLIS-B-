@@ -69,11 +69,11 @@ export const Header: React.FC = () => {
         </div>
       </div>
 
-      {/* Zone 3: Computer-only screen transmission control */}
-      <div className="hidden md:flex items-center gap-2.5 shrink-0">
+      {/* Zone 3: Screen transmission control (Telão / Projetor) */}
+      <div className="flex items-center gap-2 shrink-0">
         <button
           onClick={toggleTransmission}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-xs ${
+          className={`flex items-center gap-1.5 md:gap-2 px-2.5 sm:px-3 md:px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-xs ${
             isTransmitting
               ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-400/80 shadow-rose-600/30 animate-pulse'
               : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 hover:border-amber-500/50'
@@ -87,12 +87,14 @@ export const Header: React.FC = () => {
           {isTransmitting ? (
             <>
               <Square className="w-3.5 h-3.5 fill-current" />
-              <span>Parar de transmitir</span>
+              <span className="hidden sm:inline">Parar de transmitir</span>
+              <span className="sm:hidden">Parar</span>
             </>
           ) : (
             <>
               <Tv className="w-4 h-4 text-amber-400" />
-              <span>Transmitir para a tela</span>
+              <span className="hidden sm:inline">Transmitir para a tela</span>
+              <span className="sm:hidden">Transmitir</span>
             </>
           )}
         </button>
