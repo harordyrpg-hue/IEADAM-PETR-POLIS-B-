@@ -35,6 +35,10 @@ import {
   Globe,
   ShieldCheck,
   Check,
+  Zap,
+  Users,
+  CheckCheck,
+  Play,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import {
@@ -53,6 +57,8 @@ import {
   exportUserSchedulePDF,
   exportEventSchedulePDF,
 } from '../../utils/pdfGenerator.js';
+import { FastScheduleModal } from '../events/FastScheduleModal.js';
+import { ChurchCalendarView } from '../events/ChurchCalendarView.js';
 
 const CATEGORY_CONFIG: Record<
   TeamTaskCategory,
@@ -87,14 +93,20 @@ export const ScheduleView: React.FC = () => {
     updateTeamTask,
     toggleTaskComplete,
     deleteTeamTask,
+    createBatchTeamTasks,
+    batchUpdateTaskStatus,
+    batchDeleteTeamTasks,
     createTeamNote,
     updateTeamNote,
     deleteTeamNote,
     notify,
   } = useApp();
 
-  const [activeSubTab, setActiveSubTab] = useState<'my_schedule' | 'tasks' | 'events' | 'notes'>('my_schedule');
+  const [activeSubTab, setActiveSubTab] = useState<'my_schedule' | 'calendar' | 'tasks' | 'events' | 'notes'>('calendar');
   const [teamMembers, setTeamMembers] = useState<UserType[]>([]);
+
+  // Batch Selection State (Agile management for Super Admins)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
 
   // Filters for General Tasks tab
   const [searchQuery, setSearchQuery] = useState('');
@@ -108,6 +120,7 @@ export const ScheduleView: React.FC = () => {
   const [personalSearchQuery, setPersonalSearchQuery] = useState('');
 
   // Modals
+  const [isFastScheduleModalOpen, setIsFastScheduleModalOpen] = useState(false);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<TeamTask | null>(null);
   const [initialEventForTask, setInitialEventForTask] = useState<ChurchEvent | null>(null);
@@ -226,6 +239,25 @@ export const ScheduleView: React.FC = () => {
   const inProgressTasks = teamTasks.filter((t) => t.status === 'em_andamento').length;
   const completedTasks = teamTasks.filter((t) => t.status === 'concluido').length;
 
+  const isSuperAdmin = user?.role === 'super_admin';
+
+  const toggleTaskSelection = (taskId: string) => {
+    setSelectedTaskIds((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+    );
+  };
+
+  const selectAllFilteredTasks = () => {
+    const targetList = activeSubTab === 'my_schedule' ? filteredMyTasks : filteredTasks;
+    const targetIds = targetList.map((t) => t.id);
+    const allSelected = targetIds.length > 0 && targetIds.every((id) => selectedTaskIds.includes(id));
+    if (allSelected) {
+      setSelectedTaskIds((prev) => prev.filter((id) => !targetIds.includes(id)));
+    } else {
+      setSelectedTaskIds((prev) => Array.from(new Set([...prev, ...targetIds])));
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* 1. Page Header */}
@@ -252,6 +284,29 @@ export const ScheduleView: React.FC = () => {
 
         {/* Quick Actions */}
         <div className="flex items-center gap-2 self-start lg:self-center flex-wrap">
+          {/* Montar Calendário Direct Button */}
+          <button
+            onClick={() => setActiveSubTab('calendar')}
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer ${
+              activeSubTab === 'calendar'
+                ? 'bg-amber-400 text-neutral-950 shadow-md font-extrabold'
+                : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700'
+            }`}
+          >
+            <CalendarDays className="w-4 h-4 text-amber-400" />
+            <span>📅 Montar Calendário</span>
+          </button>
+
+          {/* Quick Church Scale Generator (⚡ Escala Rápida do Culto) */}
+          <button
+            onClick={() => setIsFastScheduleModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-neutral-950 font-extrabold rounded-xl shadow-lg shadow-amber-500/25 transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer border border-amber-300/40"
+            title="Montar e disparar a escala de todos os postos de mídia do culto em 1 clique"
+          >
+            <Zap className="w-4 h-4 fill-neutral-950" />
+            <span>⚡ Escala Rápida do Culto</span>
+          </button>
+
           {activeSubTab === 'my_schedule' && (
             <button
               onClick={() => {
@@ -260,10 +315,10 @@ export const ScheduleView: React.FC = () => {
                   notify('Gerando PDF profissional da sua escala pessoal...', 'info');
                 }
               }}
-              className="flex items-center gap-2 px-3.5 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold rounded-xl shadow-md transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer"
+              className="flex items-center gap-2 px-3.5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 font-bold rounded-xl shadow-md transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer"
             >
-              <FileDown className="w-4 h-4" />
-              <span>Baixar Minha Escala em PDF</span>
+              <FileDown className="w-4 h-4 text-amber-400" />
+              <span>Baixar Minha Escala (PDF)</span>
             </button>
           )}
 
@@ -273,9 +328,9 @@ export const ScheduleView: React.FC = () => {
               setInitialEventForTask(null);
               setIsTaskModalOpen(true);
             }}
-            className="flex items-center gap-2 px-3.5 py-2.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl shadow-md transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer"
+            className="flex items-center gap-2 px-3.5 py-2.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 font-semibold rounded-xl transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 text-amber-400" />
             <span>Novo Afazer / Escala</span>
           </button>
 
@@ -343,13 +398,25 @@ export const ScheduleView: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. Sub-Navigation Tabs with Dedicated Personal Tab */}
+      {/* 3. Sub-Navigation Tabs */}
       <div className="flex items-center gap-1.5 p-1 bg-neutral-900 border border-neutral-800 rounded-xl w-fit flex-wrap">
+        <button
+          onClick={() => setActiveSubTab('calendar')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            activeSubTab === 'calendar'
+              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
+              : 'text-neutral-400 hover:text-neutral-200'
+          }`}
+        >
+          <CalendarDays className="w-4 h-4" />
+          <span>📅 Montar Calendário & Feriados</span>
+        </button>
+
         <button
           onClick={() => setActiveSubTab('my_schedule')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
             activeSubTab === 'my_schedule'
-              ? 'bg-amber-400 text-neutral-950 shadow-sm'
+              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
@@ -361,7 +428,7 @@ export const ScheduleView: React.FC = () => {
           onClick={() => setActiveSubTab('tasks')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
             activeSubTab === 'tasks'
-              ? 'bg-amber-400 text-neutral-950 shadow-sm'
+              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
@@ -373,7 +440,7 @@ export const ScheduleView: React.FC = () => {
           onClick={() => setActiveSubTab('events')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
             activeSubTab === 'events'
-              ? 'bg-amber-400 text-neutral-950 shadow-sm'
+              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
@@ -385,7 +452,7 @@ export const ScheduleView: React.FC = () => {
           onClick={() => setActiveSubTab('notes')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
             activeSubTab === 'notes'
-              ? 'bg-amber-400 text-neutral-950 shadow-sm'
+              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
@@ -393,6 +460,13 @@ export const ScheduleView: React.FC = () => {
           <span>Mural de Anotações ({teamNotes.length})</span>
         </button>
       </div>
+
+      {/* ========================================================================= */}
+      {/* TAB: CALENDÁRIO DA IGREJA, DATAS FESTIVAS, HORÁRIOS & DOWNLOADS           */}
+      {/* ========================================================================= */}
+      {activeSubTab === 'calendar' && (
+        <ChurchCalendarView teamMembers={teamMembers} />
+      )}
 
       {/* ========================================================================= */}
       {/* 4. TAB 1 CONTENT: MINHA ESCALA PESSOAL & AFAZERES DESTINADOS              */}
@@ -504,6 +578,33 @@ export const ScheduleView: React.FC = () => {
             </div>
           </div>
 
+          {/* Quick Select Bar for Personal Tasks */}
+          {filteredMyTasks.length > 0 && (
+            <div className="flex items-center justify-between gap-2 px-1 text-xs text-neutral-400">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={selectAllFilteredTasks}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+                >
+                  <CheckCheck className="w-3.5 h-3.5 text-amber-400" />
+                  <span>
+                    {filteredMyTasks.length > 0 && filteredMyTasks.every((t) => selectedTaskIds.includes(t.id))
+                      ? 'Desmarcar Todas'
+                      : `Selecionar Todas (${filteredMyTasks.length})`}
+                  </span>
+                </button>
+                {selectedTaskIds.length > 0 && (
+                  <span className="text-amber-300 text-xs font-semibold">
+                    {selectedTaskIds.length} selecionadas
+                  </span>
+                )}
+              </div>
+              <span className="text-[11px] text-neutral-500 hidden sm:inline">
+                Ações em lote ativas no rodapé ao selecionar
+              </span>
+            </div>
+          )}
+
           {/* Personal Tasks Grid */}
           {filteredMyTasks.length === 0 ? (
             <div className="p-10 text-center bg-neutral-900 border border-neutral-800 rounded-2xl">
@@ -520,12 +621,15 @@ export const ScheduleView: React.FC = () => {
                 const CatIcon = cat.icon;
                 const isDone = task.status === 'concluido';
                 const isUrgent = task.priority === 'urgente';
+                const isSelected = selectedTaskIds.includes(task.id);
 
                 return (
                   <div
                     key={task.id}
                     className={`p-4 rounded-xl border transition-all flex flex-col justify-between group ${
-                      isDone
+                      isSelected
+                        ? 'bg-amber-950/20 border-amber-500/50 shadow-md ring-1 ring-amber-500/30'
+                        : isDone
                         ? 'bg-neutral-900/40 border-neutral-800/60 opacity-80'
                         : isUrgent
                         ? 'bg-neutral-900 border-red-500/40 hover:border-red-500/60 shadow-xs'
@@ -533,9 +637,20 @@ export const ScheduleView: React.FC = () => {
                     }`}
                   >
                     <div>
-                      {/* Top Badges: Category, Privacy & PDF Download Button */}
+                      {/* Top Badges: Checkbox, Category, Privacy & PDF Download Button */}
                       <div className="flex items-center justify-between gap-2 mb-2.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              toggleTaskSelection(task.id);
+                            }}
+                            className="w-4 h-4 rounded border-neutral-700 text-amber-500 focus:ring-0 focus:ring-offset-0 bg-neutral-800 cursor-pointer shrink-0"
+                            title="Selecionar para ações em lote"
+                          />
+
                           <span
                             className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${cat.bg} ${cat.color} ${cat.border}`}
                           >
@@ -649,8 +764,89 @@ export const ScheduleView: React.FC = () => {
                       )}
                     </div>
 
+                    {/* Quick Inline Actions & Super Admin Execution */}
+                    <div className="mt-3.5 pt-2.5 border-t border-neutral-800/70 flex items-center justify-between gap-1.5 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {task.status !== 'concluido' ? (
+                          <>
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await updateTeamTask(task.id, { status: 'concluido' });
+                                notify(`Afazer "${task.title}" concluído!`, 'success');
+                              }}
+                              className="px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Marcar como concluído agora"
+                            >
+                              <Check className="w-3 h-3 stroke-[3]" />
+                              <span>Concluir</span>
+                            </button>
+
+                            {task.status === 'pendente' && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await updateTeamTask(task.id, { status: 'em_andamento' });
+                                  notify(`Afazer iniciado!`, 'info');
+                                }}
+                                className="px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 border border-blue-500/30 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                                title="Iniciar tarefa"
+                              >
+                                <Play className="w-3 h-3" />
+                                <span>Iniciar</span>
+                              </button>
+                            )}
+
+                            {isSuperAdmin && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const adminName = user?.name || user?.email || 'Super Admin';
+                                  const note = `\n[⚡ Concluído pela Liderança: ${adminName} em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}]`;
+                                  await updateTeamTask(task.id, {
+                                    status: 'concluido',
+                                    description: (task.description || '') + note,
+                                  });
+                                  notify(`Tarefa concluída com autoridade de liderança!`, 'success');
+                                }}
+                                className="px-2 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 rounded text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                                title="Concluir com poder de Super Administrador em nome da equipe"
+                              >
+                                <Zap className="w-3 h-3 text-amber-400" />
+                                <span>Fazer p/ Liderança</span>
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              await updateTeamTask(task.id, { status: 'pendente' });
+                              notify(`Afazer reaberto como pendente.`, 'info');
+                            }}
+                            className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Reabrir afazer"
+                          >
+                            <span>Reabrir</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          task.status === 'concluido'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : task.status === 'em_andamento'
+                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                            : 'bg-neutral-800 text-neutral-400 border border-neutral-700'
+                        }`}
+                      >
+                        {task.status === 'concluido' ? 'Concluído' : task.status === 'em_andamento' ? 'Em Andamento' : 'Pendente'}
+                      </span>
+                    </div>
+
                     {/* Bottom Metadata: Quem Solicitou & Prazo */}
-                    <div className="mt-4 pt-3 border-t border-neutral-800/80 flex items-center justify-between gap-2 text-xs text-neutral-400">
+                    <div className="mt-3 pt-2.5 border-t border-neutral-800/80 flex items-center justify-between gap-2 text-xs text-neutral-400">
                       {/* Solicitante (Quem destinou a tarefa) */}
                       <div className="flex items-center gap-1.5 min-w-0" title={`Solicitado por: ${task.createdByName}`}>
                         <span className="text-[10px] text-neutral-500">Por:</span>
@@ -832,6 +1028,33 @@ export const ScheduleView: React.FC = () => {
             </div>
           </div>
 
+          {/* Quick Select Bar for General Tasks */}
+          {filteredTasks.length > 0 && (
+            <div className="flex items-center justify-between gap-2 px-1 text-xs text-neutral-400">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={selectAllFilteredTasks}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+                >
+                  <CheckCheck className="w-3.5 h-3.5 text-amber-400" />
+                  <span>
+                    {filteredTasks.length > 0 && filteredTasks.every((t) => selectedTaskIds.includes(t.id))
+                      ? 'Desmarcar Todas'
+                      : `Selecionar Todas (${filteredTasks.length})`}
+                  </span>
+                </button>
+                {selectedTaskIds.length > 0 && (
+                  <span className="text-amber-300 text-xs font-semibold">
+                    {selectedTaskIds.length} selecionadas
+                  </span>
+                )}
+              </div>
+              <span className="text-[11px] text-neutral-500 hidden sm:inline">
+                Super Administradores podem selecionar em lote e concluir ou assumir qualquer escala imediatamente.
+              </span>
+            </div>
+          )}
+
           {/* Tasks Grid */}
           {filteredTasks.length === 0 ? (
             <div className="p-12 text-center bg-neutral-900 border border-neutral-800 rounded-2xl">
@@ -848,12 +1071,15 @@ export const ScheduleView: React.FC = () => {
                 const CatIcon = cat.icon;
                 const isDone = task.status === 'concluido';
                 const isUrgent = task.priority === 'urgente';
+                const isSelected = selectedTaskIds.includes(task.id);
 
                 return (
                   <div
                     key={task.id}
                     className={`p-4 rounded-xl border transition-all flex flex-col justify-between group ${
-                      isDone
+                      isSelected
+                        ? 'bg-amber-950/20 border-amber-500/50 shadow-md ring-1 ring-amber-500/30'
+                        : isDone
                         ? 'bg-neutral-900/40 border-neutral-800/60 opacity-75'
                         : isUrgent
                         ? 'bg-neutral-900 border-red-500/40 hover:border-red-500/60 shadow-xs'
@@ -861,9 +1087,20 @@ export const ScheduleView: React.FC = () => {
                     }`}
                   >
                     <div>
-                      {/* Top Badges: Category & Privacy & Actions */}
+                      {/* Top Badges: Checkbox, Category & Privacy & Actions */}
                       <div className="flex items-center justify-between gap-2 mb-2.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              toggleTaskSelection(task.id);
+                            }}
+                            className="w-4 h-4 rounded border-neutral-700 text-amber-500 focus:ring-0 focus:ring-offset-0 bg-neutral-800 cursor-pointer shrink-0"
+                            title="Selecionar para ações em lote"
+                          />
+
                           <span
                             className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${cat.bg} ${cat.color} ${cat.border}`}
                           >
@@ -993,8 +1230,114 @@ export const ScheduleView: React.FC = () => {
                       )}
                     </div>
 
+                    {/* Quick Inline Actions & Super Admin Execution Power */}
+                    <div className="mt-3.5 pt-2.5 border-t border-neutral-800/70 flex items-center justify-between gap-1.5 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {task.status !== 'concluido' ? (
+                          <>
+                            {/* Direct One-Click Finish */}
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await updateTeamTask(task.id, { status: 'concluido' });
+                                notify(`Afazer "${task.title}" concluído!`, 'success');
+                              }}
+                              className="px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Marcar como concluído agora"
+                            >
+                              <Check className="w-3 h-3 stroke-[3]" />
+                              <span>Concluir</span>
+                            </button>
+
+                            {task.status === 'pendente' && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await updateTeamTask(task.id, { status: 'em_andamento' });
+                                  notify(`Afazer em andamento!`, 'info');
+                                }}
+                                className="px-2 py-1 bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 border border-blue-500/30 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                                title="Iniciar tarefa"
+                              >
+                                <Play className="w-3 h-3" />
+                                <span>Iniciar</span>
+                              </button>
+                            )}
+
+                            {/* SUPER ADMIN POWER: "Fazer p/ Liderança" & "Assumir" */}
+                            {isSuperAdmin && (
+                              <>
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const adminName = user?.name || user?.email || 'Super Admin';
+                                    const note = `\n[⚡ Concluído pela Liderança: ${adminName} em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}]`;
+                                    await updateTeamTask(task.id, {
+                                      status: 'concluido',
+                                      description: (task.description || '') + note,
+                                    });
+                                    notify(`Tarefa concluída com autoridade de liderança!`, 'success');
+                                  }}
+                                  className="px-2 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 rounded text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                                  title="Fazer/Concluir imediatamente pela Liderança em nome de qualquer membro"
+                                >
+                                  <Zap className="w-3 h-3 text-amber-400" />
+                                  <span>Fazer p/ Liderança</span>
+                                </button>
+
+                                {task.assignedToUid !== user?.uid && (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      const adminName = user?.name || user?.email || 'Super Admin';
+                                      await updateTeamTask(task.id, {
+                                        assignedToUid: user?.uid || user?.id || '',
+                                        assignedToName: adminName,
+                                        assignedToEmail: user?.email || '',
+                                        assignedToAvatar: user?.avatar || '',
+                                        status: 'em_andamento',
+                                      });
+                                      notify(`Você assumiu esta tarefa!`, 'success');
+                                    }}
+                                    className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 rounded text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                                    title="Transferir e assumir esta tarefa para você"
+                                  >
+                                    <span>Assumir</span>
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              await updateTeamTask(task.id, { status: 'pendente' });
+                              notify(`Afazer reaberto.`, 'info');
+                            }}
+                            className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Reabrir afazer"
+                          >
+                            <span>Reabrir</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          task.status === 'concluido'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : task.status === 'em_andamento'
+                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                            : 'bg-neutral-800 text-neutral-400 border border-neutral-700'
+                        }`}
+                      >
+                        {task.status === 'concluido' ? 'Concluído' : task.status === 'em_andamento' ? 'Em Andamento' : 'Pendente'}
+                      </span>
+                    </div>
+
                     {/* Bottom Info: Destinatário & Solicitante (Quem destinou) */}
-                    <div className="mt-4 pt-3 border-t border-neutral-800/80 space-y-1.5 text-xs text-neutral-400">
+                    <div className="mt-3 pt-2.5 border-t border-neutral-800/80 space-y-1.5 text-xs text-neutral-400">
                       <div className="flex items-center justify-between gap-2">
                         {/* Destinatário */}
                         <div className="flex items-center gap-1.5 min-w-0">
@@ -1350,7 +1693,117 @@ export const ScheduleView: React.FC = () => {
             }
             setIsTaskModalOpen(false);
           }}
+          onSaveBatch={async (batchData) => {
+            await createBatchTeamTasks(batchData);
+            setIsTaskModalOpen(false);
+          }}
         />
+      )}
+
+      {/* Modal: Fast Church Service Schedule (⚡ Escala Rápida do Culto) */}
+      {isFastScheduleModalOpen && (
+        <FastScheduleModal
+          isOpen={isFastScheduleModalOpen}
+          onClose={() => setIsFastScheduleModalOpen(false)}
+          teamMembers={teamMembers}
+          existingEvents={events}
+          onSuccess={() => {
+            setIsFastScheduleModalOpen(false);
+          }}
+        />
+      )}
+
+      {/* Floating Agile Batch Action Bar for Super Admins */}
+      {selectedTaskIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-neutral-900 border border-amber-500/40 rounded-2xl shadow-2xl p-3 px-5 flex items-center gap-3 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-200 flex-wrap max-w-[95vw]">
+          <span className="font-bold text-xs text-amber-300 whitespace-nowrap">
+            {selectedTaskIds.length} {selectedTaskIds.length === 1 ? 'tarefa selecionada' : 'tarefas selecionadas'}
+          </span>
+          <div className="h-4 w-px bg-neutral-700 hidden sm:block" />
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              onClick={async () => {
+                await batchUpdateTaskStatus(selectedTaskIds, 'concluido');
+                setSelectedTaskIds([]);
+              }}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>Concluir Todas</span>
+            </button>
+
+            <button
+              onClick={async () => {
+                await batchUpdateTaskStatus(selectedTaskIds, 'em_andamento');
+                setSelectedTaskIds([]);
+              }}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Em Andamento</span>
+            </button>
+
+            <button
+              onClick={async () => {
+                await batchUpdateTaskStatus(selectedTaskIds, 'pendente');
+                setSelectedTaskIds([]);
+              }}
+              className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 rounded-lg font-medium text-xs transition-colors cursor-pointer"
+            >
+              <span>Pendente</span>
+            </button>
+
+            {user?.role === 'super_admin' && (
+              <button
+                onClick={async () => {
+                  try {
+                    const adminName = user?.name || user?.email || 'Super Admin';
+                    for (const id of selectedTaskIds) {
+                      await updateTeamTask(id, {
+                        assignedToUid: user?.uid || user?.id || '',
+                        assignedToName: adminName,
+                        assignedToEmail: user?.email || '',
+                        assignedToAvatar: user?.avatar || '',
+                        status: 'em_andamento',
+                      });
+                    }
+                    notify(`${selectedTaskIds.length} tarefas assumidas por você!`, 'success');
+                    setSelectedTaskIds([]);
+                  } catch (err) {
+                    notify('Erro ao assumir tarefas selecionadas.', 'error');
+                  }
+                }}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="Transferir e assumir todas as tarefas selecionadas para você"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Assumir Todas</span>
+              </button>
+            )}
+
+            {user?.role === 'super_admin' && (
+              <button
+                onClick={async () => {
+                  if (confirm(`Deseja excluir as ${selectedTaskIds.length} tarefas selecionadas?`)) {
+                    await batchDeleteTeamTasks(selectedTaskIds);
+                    setSelectedTaskIds([]);
+                  }
+                }}
+                className="px-3 py-1.5 bg-red-600/80 hover:bg-red-600 text-white rounded-lg font-semibold text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Excluir</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => setSelectedTaskIds([])}
+              className="text-xs text-neutral-400 hover:text-white underline ml-1 cursor-pointer"
+            >
+              Desmarcar
+            </button>
+          </div>
+        </div>
       )}
 
       {/* 9. Modal: Note Create / Edit */}
@@ -1385,6 +1838,7 @@ interface TaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (data: Partial<TeamTask>) => Promise<void>;
+  onSaveBatch?: (data: Partial<TeamTask>[]) => Promise<void>;
 }
 
 const TaskModal: React.FC<TaskModalProps> = ({
@@ -1395,6 +1849,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  onSaveBatch,
 }) => {
   const { user } = useApp();
 
@@ -1410,6 +1865,12 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const [priority, setPriority] = useState<TeamTaskPriority>(task?.priority || 'media');
   const [status, setStatus] = useState<TeamTaskStatus>(task?.status || 'pendente');
   const [isPrivate, setIsPrivate] = useState<boolean>(task?.isPrivate !== undefined ? task.isPrivate : true);
+
+  // Multi-member batch assignment
+  const [isMultiMember, setIsMultiMember] = useState(false);
+  const [selectedMemberUids, setSelectedMemberUids] = useState<string[]>(() =>
+    teamMembers.map((m) => m.uid)
+  );
 
   // Checklist items
   const [checklist, setChecklist] = useState<{ id: string; text: string; completed: boolean }[]>(
@@ -1448,6 +1909,32 @@ const TaskModal: React.FC<TaskModalProps> = ({
     try {
       setIsSubmitting(true);
       const chosenEvent = events.find((ev) => ev.id === selectedEventId);
+
+      // Multi-member assignment branch
+      if (!task && isMultiMember && onSaveBatch && selectedMemberUids.length > 0) {
+        const batchPayload = selectedMemberUids.map((uid) => {
+          const mem = teamMembers.find((m) => m.uid === uid) || chosenMember;
+          return {
+            title: title.trim(),
+            description: description.trim(),
+            category,
+            eventId: chosenEvent ? chosenEvent.id : null,
+            eventName: chosenEvent ? chosenEvent.name : null,
+            assignedToUid: mem.uid,
+            assignedToName: mem.name,
+            assignedToEmail: mem.email,
+            assignedToAvatar: mem.avatar,
+            dueDate,
+            dueTime,
+            priority,
+            status,
+            isPrivate: Boolean(isPrivate),
+            checklist,
+          };
+        });
+        await onSaveBatch(batchPayload);
+        return;
+      }
 
       await onSave({
         title: title.trim(),
@@ -1529,21 +2016,102 @@ const TaskModal: React.FC<TaskModalProps> = ({
               </select>
             </div>
 
-            <div>
-              <label className="block text-neutral-300 font-medium mb-1">Membro Responsável (Destinatário)</label>
-              <select
-                value={assignedToUid}
-                onChange={(e) => setAssignedToUid(e.target.value)}
-                className="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-xl text-neutral-200 focus:outline-none focus:border-amber-500 cursor-pointer"
-              >
-                {teamMembers.map((m) => (
-                  <option key={m.uid} value={m.uid}>
-                    {m.name} ({m.roleLabel || m.role})
-                  </option>
-                ))}
-              </select>
-            </div>
+            {!isMultiMember && (
+              <div>
+                <label className="block text-neutral-300 font-medium mb-1">Membro Responsável (Destinatário)</label>
+                <select
+                  value={assignedToUid}
+                  onChange={(e) => setAssignedToUid(e.target.value)}
+                  className="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-xl text-neutral-200 focus:outline-none focus:border-amber-500 cursor-pointer"
+                >
+                  {teamMembers.map((m) => (
+                    <option key={m.uid} value={m.uid}>
+                      {m.name} ({m.roleLabel || m.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
+
+          {/* Multi-member toggle (Only when creating a new task) */}
+          {!task && teamMembers.length > 1 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between p-2 rounded-xl bg-neutral-800/60 border border-neutral-700/60">
+                <div className="flex items-center gap-1.5 font-medium text-xs text-neutral-300">
+                  <Users className="w-4 h-4 text-amber-400" />
+                  <span>Atribuir para múltiplos membros da equipe</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsMultiMember(!isMultiMember)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    isMultiMember ? 'bg-amber-500 text-neutral-950 shadow-xs' : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                  }`}
+                >
+                  {isMultiMember ? '⚡ Modo em Lote Ativo' : 'Ativar Lote'}
+                </button>
+              </div>
+
+              {isMultiMember && (
+                <div className="p-3 bg-neutral-800/80 border border-amber-500/40 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-amber-300">
+                      Membros selecionados ({selectedMemberUids.length}/{teamMembers.length}):
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMemberUids(teamMembers.map((m) => m.uid))}
+                        className="text-amber-400 hover:underline cursor-pointer"
+                      >
+                        Todos
+                      </button>
+                      <span className="text-neutral-600">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMemberUids([])}
+                        className="text-neutral-400 hover:underline cursor-pointer"
+                      >
+                        Nenhum
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
+                    {teamMembers.map((m) => {
+                      const isChecked = selectedMemberUids.includes(m.uid);
+                      return (
+                        <label
+                          key={m.uid}
+                          className={`flex items-center gap-2 p-1.5 rounded-lg border cursor-pointer transition-colors ${
+                            isChecked
+                              ? 'bg-amber-500/10 border-amber-500/50 text-neutral-100'
+                              : 'bg-neutral-800/40 border-neutral-700/60 text-neutral-400'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              setSelectedMemberUids((prev) =>
+                                isChecked ? prev.filter((id) => id !== m.uid) : [...prev, m.uid]
+                              );
+                            }}
+                            className="w-3.5 h-3.5 rounded text-amber-500 bg-neutral-900 border-neutral-700 focus:ring-0"
+                          />
+                          <span className="truncate text-xs font-medium">{m.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-neutral-400 leading-tight">
+                    * Será gerada uma tarefa individual e privada para cada membro selecionado em lote com 1 clique.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Privacy Toggle (Lock) - Explicit User Requirement */}
           <div className="p-3 bg-neutral-800/60 border border-neutral-700 rounded-xl flex items-start gap-3">

@@ -355,9 +355,16 @@ export const EventsView: React.FC = () => {
                       {evt.category}
                     </span>
 
-                    <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/80 text-[11px] text-neutral-200 font-mono-numbers">
-                      {formatDate(evt.date)}
-                    </span>
+                    <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
+                      {evt.time && (
+                        <span className="px-2 py-0.5 rounded bg-amber-400 text-neutral-950 font-extrabold text-[10px] font-mono-numbers">
+                          {evt.time}
+                        </span>
+                      )}
+                      <span className="px-2 py-0.5 rounded bg-black/80 text-[11px] text-neutral-200 font-mono-numbers">
+                        {formatDate(evt.date)}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="p-4 flex-1 flex flex-col justify-between">

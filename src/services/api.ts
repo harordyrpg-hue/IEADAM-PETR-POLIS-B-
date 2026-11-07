@@ -1326,6 +1326,10 @@ export const api = {
       name: data.name || '',
       description: data.description || '',
       date: data.date || new Date().toISOString().split('T')[0],
+      time: data.time || '',
+      location: data.location || '',
+      isFestive: Boolean(data.isFestive),
+      notes: data.notes || '',
       category: data.category || 'Culto de Domingo',
       coverUrl: data.coverUrl || '/assets/images/church_worship_stage_1790831714044.jpg',
       responsibles: data.responsibles || [currentUser.displayName || 'Mídia'],
@@ -2465,6 +2469,89 @@ export const api = {
       return task;
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `team_tasks/${taskId}`);
+    }
+  },
+
+  async createBatchTeamTasks(tasksData: Partial<TeamTask>[]): Promise<TeamTask[]> {
+    if (!tasksData || tasksData.length === 0) return [];
+    const effective = api.getEffectiveUser();
+    const batch = writeBatch(db);
+    const createdTasks: TeamTask[] = [];
+
+    for (let i = 0; i < tasksData.length; i++) {
+      const data = tasksData[i];
+      const taskId = `task_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
+      const task: TeamTask = {
+        id: taskId,
+        title: data.title || 'Novo Afazer',
+        description: data.description || '',
+        category: data.category || 'transmissao',
+        eventId: data.eventId || null,
+        eventName: data.eventName || null,
+        assignedToUid: data.assignedToUid || effective.uid,
+        assignedToName: data.assignedToName || effective.displayName,
+        assignedToEmail: data.assignedToEmail || effective.email,
+        assignedToAvatar: data.assignedToAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+        dueDate: data.dueDate || new Date().toISOString().split('T')[0],
+        dueTime: data.dueTime || '18:00',
+        priority: data.priority || 'media',
+        status: data.status || 'pendente',
+        createdByUid: effective.uid,
+        createdByName: effective.displayName,
+        isPrivate: data.isPrivate !== undefined ? data.isPrivate : (data.assignedToUid ? true : false),
+        checklist: data.checklist || [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const taskRef = doc(db, 'team_tasks', taskId);
+      batch.set(taskRef, removeUndefinedValues(task));
+      createdTasks.push(task);
+    }
+
+    try {
+      await batch.commit();
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'create_task',
+        actionLabel: 'Escalou equipe em lote (escala express)',
+        targetType: 'task',
+        targetName: `${createdTasks.length} afazeres da equipe`,
+        details: `${createdTasks[0]?.eventName || 'Escala de culto'} · ${createdTasks[0]?.dueDate}`,
+      });
+      return createdTasks;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'team_tasks/batch');
+      return [];
+    }
+  },
+
+  async batchUpdateTaskStatus(taskIds: string[], newStatus: TeamTaskStatus): Promise<void> {
+    if (!taskIds || taskIds.length === 0) return;
+    const batch = writeBatch(db);
+    const now = new Date().toISOString();
+    for (const id of taskIds) {
+      const ref = doc(db, 'team_tasks', id);
+      batch.update(ref, { status: newStatus, updatedAt: now });
+    }
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'team_tasks/batch_update');
+    }
+  },
+
+  async batchDeleteTeamTasks(taskIds: string[]): Promise<void> {
+    if (!taskIds || taskIds.length === 0) return;
+    const batch = writeBatch(db);
+    for (const id of taskIds) {
+      const ref = doc(db, 'team_tasks', id);
+      batch.delete(ref);
+    }
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'team_tasks/batch_delete');
     }
   },
 

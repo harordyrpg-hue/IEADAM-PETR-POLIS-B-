@@ -36,6 +36,8 @@ export const EventModal: React.FC<EventModalProps> = ({
   const [name, setName] = useState(event ? event.name : '');
   const [description, setDescription] = useState(event ? event.description : '');
   const [date, setDate] = useState(event ? event.date : new Date().toISOString().split('T')[0]);
+  const [time, setTime] = useState(event?.time || '19:30');
+  const [location, setLocation] = useState(event?.location || 'Templo Central');
   const [category, setCategory] = useState(event ? event.category : 'Culto de Domingo');
   const [responsibles, setResponsibles] = useState(event ? event.responsibles.join(', ') : '');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -61,6 +63,8 @@ export const EventModal: React.FC<EventModalProps> = ({
           name: name.trim(),
           description: description.trim(),
           date,
+          time,
+          location,
           category,
           responsibles: parsedResponsibles,
         });
@@ -70,6 +74,8 @@ export const EventModal: React.FC<EventModalProps> = ({
           name: name.trim(),
           description: description.trim(),
           date,
+          time,
+          location,
           category,
           coverUrl: '/assets/images/church_worship_stage_1790831714044.jpg',
           responsibles: parsedResponsibles,
@@ -140,6 +146,29 @@ export const EventModal: React.FC<EventModalProps> = ({
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-neutral-300 font-medium mb-1">Horário Específico:</label>
+              <input
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg p-2.5 text-neutral-200 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-neutral-300 font-medium mb-1">Local / Espaço:</label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="Ex: Templo Central"
+                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg p-2.5 text-neutral-200 focus:outline-none focus:border-amber-500"
+              />
             </div>
           </div>
 

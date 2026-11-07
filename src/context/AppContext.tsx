@@ -48,6 +48,9 @@ interface AppContextType {
   updateTeamTask: (id: string, updates: Partial<TeamTask>) => Promise<void>;
   toggleTaskComplete: (id: string, currentStatus: TeamTaskStatus) => Promise<void>;
   deleteTeamTask: (id: string) => Promise<void>;
+  createBatchTeamTasks: (tasksData: Partial<TeamTask>[]) => Promise<TeamTask[]>;
+  batchUpdateTaskStatus: (taskIds: string[], newStatus: TeamTaskStatus) => Promise<void>;
+  batchDeleteTeamTasks: (taskIds: string[]) => Promise<void>;
   createTeamNote: (data: Partial<TeamNote>) => Promise<TeamNote>;
   updateTeamNote: (id: string, updates: Partial<TeamNote>) => Promise<void>;
   deleteTeamNote: (id: string) => Promise<void>;
@@ -448,6 +451,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const createBatchTeamTasks = async (tasksData: Partial<TeamTask>[]): Promise<TeamTask[]> => {
+    try {
+      const created = await api.createBatchTeamTasks(tasksData);
+      notify(`Escala gerada com sucesso! ${created.length} afazeres atribuídos à equipe.`, 'success');
+      return created;
+    } catch (err: any) {
+      notify('Erro ao gerar escala da equipe em lote.', 'error');
+      throw err;
+    }
+  };
+
+  const batchUpdateTaskStatus = async (taskIds: string[], newStatus: TeamTaskStatus): Promise<void> => {
+    try {
+      await api.batchUpdateTaskStatus(taskIds, newStatus);
+      const label = newStatus === 'concluido' ? 'concluídos' : newStatus === 'em_andamento' ? 'em andamento' : 'pendentes';
+      notify(`${taskIds.length} afazeres atualizados para ${label}!`, 'success');
+    } catch (err: any) {
+      notify('Erro ao atualizar tarefas em lote.', 'error');
+      throw err;
+    }
+  };
+
+  const batchDeleteTeamTasks = async (taskIds: string[]): Promise<void> => {
+    try {
+      await api.batchDeleteTeamTasks(taskIds);
+      notify(`${taskIds.length} afazeres removidos da escala.`, 'info');
+    } catch (err: any) {
+      notify('Erro ao excluir tarefas em lote.', 'error');
+      throw err;
+    }
+  };
+
   // Team Collaborative Notes Actions
   const createTeamNote = async (data: Partial<TeamNote>): Promise<TeamNote> => {
     try {
@@ -510,6 +545,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateTeamTask,
         toggleTaskComplete,
         deleteTeamTask,
+        createBatchTeamTasks,
+        batchUpdateTaskStatus,
+        batchDeleteTeamTasks,
         createTeamNote,
         updateTeamNote,
         deleteTeamNote,

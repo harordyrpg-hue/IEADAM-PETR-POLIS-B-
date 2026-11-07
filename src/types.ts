@@ -61,10 +61,14 @@ export interface ChurchEvent {
   name: string;
   description: string;
   date: string;
+  time?: string; // e.g. "19:30" or "08:00"
+  location?: string; // e.g. "Templo Central", "Púlpito"
   category: string;
   coverUrl: string;
   responsibles: string[];
   ownerUid: string;
+  isFestive?: boolean;
+  notes?: string;
   createdAt: string;
   updatedAt?: string;
   stats?: {
