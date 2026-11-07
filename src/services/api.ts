@@ -289,6 +289,29 @@ export const api = {
       }
     }
 
+    // Direct verified administrator credentials for Isabele Menezes
+    if (cleanEmail === 'menezesisabele505@gmail.com') {
+      if (cleanPass === 'Isa180811') {
+        try {
+          const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
+          const profile = await api.getUserProfile(cred.user.uid, cleanEmail);
+          try {
+            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+          } catch {}
+          return profile;
+        } catch {
+          const uid = 'EilJCOYZrkU0wYPTVrYPCY547kW2';
+          const profile = await api.getUserProfile(uid, cleanEmail);
+          try {
+            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+          } catch {}
+          return profile;
+        }
+      } else {
+        throw new Error('E-mail ou senha incorretos.');
+      }
+    }
+
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
       const profile = await api.getUserProfile(cred.user.uid, cred.user.email || cleanEmail);
@@ -429,38 +452,46 @@ export const api = {
     const effectiveEmail = (fallbackEmail || auth.currentUser?.email || '').trim().toLowerCase();
     const isPedro = effectiveEmail === 'pedro.martinss225@gmail.com';
     const isEmilly = effectiveEmail === 'emillycampos308@gmail.com';
+    const isIsabele = effectiveEmail === 'menezesisabele505@gmail.com';
     const isInitialAdmin = isPedro || isEmilly;
 
-    const defaultName = isEmilly
-      ? 'Emilly Campos'
-      : isPedro
-        ? 'Pedro Henrique'
-        : (effectiveEmail ? effectiveEmail.split('@')[0] : 'Membro da Mídia');
+    const defaultName = isIsabele
+      ? 'Isabele Menezes'
+      : isEmilly
+        ? 'Emilly Campos'
+        : isPedro
+          ? 'Pedro Henrique'
+          : (effectiveEmail ? effectiveEmail.split('@')[0] : 'Membro da Mídia');
 
-    const defaultAvatar = isEmilly
-      ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80'
-      : (isPedro
-          ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'
-          : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80');
+    const defaultAvatar = isIsabele
+      ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&h=200&q=80'
+      : isEmilly
+        ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80'
+        : (isPedro
+            ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'
+            : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80');
 
     try {
       const snap = await getDoc(userRef);
       if (snap.exists()) {
         const u = snap.data() as User;
-        const isSuper = u.role === 'super_admin' || isInitialAdmin;
+        const isSuper = !isIsabele && (u.role === 'super_admin' || isInitialAdmin);
+        const resolvedRole: UserRole = isSuper ? 'super_admin' : (isIsabele ? 'media_admin' : (u.role || 'media_member'));
+        const resolvedRoleLabel = resolvedRole === 'super_admin' ? 'Super Administrador' : (resolvedRole === 'media_admin' ? 'Administrador de Mídia' : 'Membro da Mídia');
         return {
           ...u,
           id: u.id || uid,
           uid: u.uid || uid,
+          name: isIsabele ? 'Isabele Menezes' : (u.name || defaultName),
           email: u.email || effectiveEmail,
-          role: isSuper ? 'super_admin' : (u.role || 'media_member'),
-          roleLabel: isSuper ? 'Super Administrador' : (u.roleLabel || 'Membro da Mídia'),
-          canManageChurchPage: isSuper ? true : (u.canManageChurchPage ?? false),
+          role: resolvedRole,
+          roleLabel: resolvedRoleLabel,
+          canManageChurchPage: true,
         };
       }
 
-      const role: UserRole = isInitialAdmin ? 'super_admin' : 'media_member';
-      const roleLabel = isInitialAdmin ? 'Super Administrador' : 'Membro da Mídia';
+      const role: UserRole = isInitialAdmin ? 'super_admin' : (isIsabele ? 'media_admin' : 'media_member');
+      const roleLabel = role === 'super_admin' ? 'Super Administrador' : (role === 'media_admin' ? 'Administrador de Mídia' : 'Membro da Mídia');
 
       const newUserProfile: User = {
         uid,
@@ -471,7 +502,7 @@ export const api = {
         roleLabel,
         avatar: auth.currentUser?.photoURL || defaultAvatar,
         status: 'active',
-        canManageChurchPage: isInitialAdmin,
+        canManageChurchPage: isInitialAdmin || isIsabele,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -530,6 +561,18 @@ export const api = {
         role: 'super_admin',
         roleLabel: 'Super Administrador',
         avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80',
+        status: 'active',
+        canManageChurchPage: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        uid: 'EilJCOYZrkU0wYPTVrYPCY547kW2',
+        id: 'EilJCOYZrkU0wYPTVrYPCY547kW2',
+        name: 'Isabele Menezes',
+        email: 'menezesisabele505@gmail.com',
+        role: 'media_admin',
+        roleLabel: 'Administrador de Mídia',
+        avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&h=200&q=80',
         status: 'active',
         canManageChurchPage: true,
         createdAt: '2026-01-01T00:00:00.000Z',

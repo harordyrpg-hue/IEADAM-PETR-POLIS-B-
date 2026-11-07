@@ -69,7 +69,7 @@ export function getRoleBadgeStyle(role: string): { label: string; textClass: str
       };
     case 'media_admin':
       return {
-        label: 'Administrador de Mídia',
+        label: 'Administrador',
         textClass: 'text-blue-500 dark:text-blue-400',
         borderClass: 'border-blue-500/30',
       };
