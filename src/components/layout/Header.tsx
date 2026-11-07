@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Menu, X, Activity } from 'lucide-react';
+import { Search, Menu, X, Activity, Tv, Square } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 
 export const Header: React.FC = () => {
@@ -9,6 +9,8 @@ export const Header: React.FC = () => {
     mobileMenuOpen,
     setMobileMenuOpen,
     isRealtimeActive,
+    isTransmitting,
+    toggleTransmission,
   } = useApp();
 
   return (
@@ -65,6 +67,35 @@ export const Header: React.FC = () => {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Zone 3: Computer-only screen transmission control */}
+      <div className="hidden md:flex items-center gap-2.5 shrink-0">
+        <button
+          onClick={toggleTransmission}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-xs ${
+            isTransmitting
+              ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-400/80 shadow-rose-600/30 animate-pulse'
+              : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 hover:border-amber-500/50'
+          }`}
+          title={
+            isTransmitting
+              ? 'Parar de transmitir para a tela'
+              : 'Transmitir tela do computador para o telão, projetor ou TV da igreja'
+          }
+        >
+          {isTransmitting ? (
+            <>
+              <Square className="w-3.5 h-3.5 fill-current" />
+              <span>Parar de transmitir</span>
+            </>
+          ) : (
+            <>
+              <Tv className="w-4 h-4 text-amber-400" />
+              <span>Transmitir para a tela</span>
+            </>
+          )}
+        </button>
       </div>
     </header>
   );

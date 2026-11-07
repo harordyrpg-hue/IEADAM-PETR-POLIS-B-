@@ -92,6 +92,11 @@ interface AppContextType {
   dismissToast: (id: string) => void;
   mobileMenuOpen: boolean;
   setMobileMenuOpen: (open: boolean) => void;
+  isTransmitting: boolean;
+  transmissionStream: MediaStream | null;
+  startTransmission: () => Promise<void>;
+  stopTransmission: () => void;
+  toggleTransmission: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -515,6 +520,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Screen Transmission to Projector / External Screen (Desktop only)
+  const [isTransmitting, setIsTransmitting] = useState(false);
+  const [transmissionStream, setTransmissionStream] = useState<MediaStream | null>(null);
+
+  const stopTransmission = useCallback(() => {
+    if (transmissionStream) {
+      transmissionStream.getTracks().forEach((track) => {
+        track.stop();
+      });
+    }
+    setTransmissionStream(null);
+    setIsTransmitting(false);
+    notify('Transmissão para a tela encerrada.', 'info');
+  }, [transmissionStream, notify]);
+
+  const startTransmission = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      notify('Seu navegador não suporta transmissão para a tela.', 'error');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: 'monitor',
+        },
+        audio: false,
+      });
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          stopTransmission();
+        };
+      }
+
+      setTransmissionStream(stream);
+      setIsTransmitting(true);
+      notify('Transmissão para a tela iniciada com sucesso!', 'success');
+    } catch (err: any) {
+      if (err.name !== 'NotAllowedError') {
+        notify('Erro ao iniciar transmissão para a tela.', 'error');
+      }
+    }
+  }, [notify, stopTransmission]);
+
+  const toggleTransmission = useCallback(async () => {
+    if (isTransmitting) {
+      stopTransmission();
+    } else {
+      await startTransmission();
+    }
+  }, [isTransmitting, startTransmission, stopTransmission]);
+
+  useEffect(() => {
+    return () => {
+      if (transmissionStream) {
+        transmissionStream.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, [transmissionStream]);
+
   return (
     <AppContext.Provider
       value={{
@@ -589,6 +656,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dismissToast,
         mobileMenuOpen,
         setMobileMenuOpen,
+        isTransmitting,
+        transmissionStream,
+        startTransmission,
+        stopTransmission,
+        toggleTransmission,
       }}
     >
       {children}

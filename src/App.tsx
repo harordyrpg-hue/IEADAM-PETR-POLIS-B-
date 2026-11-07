@@ -14,6 +14,7 @@ import { PhotoLightbox } from './components/files/PhotoLightbox.js';
 import { VideoPlayerModal } from './components/files/VideoPlayerModal.js';
 import { AudioPlayerModal } from './components/files/AudioPlayerModal.js';
 import { ShareModal } from './components/files/ShareModal.js';
+import { ScreenTransmissionWidget } from './components/layout/ScreenTransmissionWidget.js';
 import { DashboardView } from './components/views/DashboardView.js';
 import { FilesManagerView } from './components/views/FilesManagerView.js';
 import { PhotosView } from './components/views/PhotosView.js';
@@ -223,6 +224,7 @@ const MainLayout: React.FC = () => {
       <VideoPlayerModal />
       <AudioPlayerModal />
       <ShareModal />
+      <ScreenTransmissionWidget />
 
       {/* Toast Notifications */}
       <div className="fixed top-20 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none">

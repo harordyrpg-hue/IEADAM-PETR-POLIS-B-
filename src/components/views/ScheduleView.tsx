@@ -100,6 +100,8 @@ export const ScheduleView: React.FC = () => {
     updateTeamNote,
     deleteTeamNote,
     notify,
+    isTransmitting,
+    toggleTransmission,
   } = useApp();
 
   const [activeSubTab, setActiveSubTab] = useState<'my_schedule' | 'calendar' | 'tasks' | 'events' | 'notes'>('calendar');
@@ -305,6 +307,24 @@ export const ScheduleView: React.FC = () => {
           >
             <Zap className="w-4 h-4 fill-neutral-950" />
             <span>⚡ Escala Rápida do Culto</span>
+          </button>
+
+          {/* Transmissão para a Tela (Exclusivo para Computador) */}
+          <button
+            onClick={() => toggleTransmission()}
+            className={`hidden md:flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer border ${
+              isTransmitting
+                ? 'bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border-rose-500/50 shadow-md shadow-rose-950/40 animate-pulse'
+                : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border-neutral-700'
+            }`}
+            title={
+              isTransmitting
+                ? 'Parar de transmitir a tela do computador'
+                : 'Transmitir tela do computador para o telão/projetor da igreja'
+            }
+          >
+            <Tv className={`w-4 h-4 ${isTransmitting ? 'text-rose-400' : 'text-amber-400'}`} />
+            <span>{isTransmitting ? '⏹ Parar de transmitir' : '📺 Transmitir para a tela'}</span>
           </button>
 
           {activeSubTab === 'my_schedule' && (
