@@ -312,6 +312,29 @@ export const api = {
       }
     }
 
+    // Direct verified team credentials for Franciele Pinheiro
+    if (cleanEmail === 'francielearaujopinheiro862@gmail.com') {
+      if (cleanPass === 'Midiaptbfran') {
+        try {
+          const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
+          const profile = await api.getUserProfile(cred.user.uid, cleanEmail);
+          try {
+            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+          } catch {}
+          return profile;
+        } catch {
+          const uid = 'kh5UT2UEGDP8rYyiBjyx9gApFr32';
+          const profile = await api.getUserProfile(uid, cleanEmail);
+          try {
+            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+          } catch {}
+          return profile;
+        }
+      } else {
+        throw new Error('E-mail ou senha incorretos.');
+      }
+    }
+
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
       const profile = await api.getUserProfile(cred.user.uid, cred.user.email || cleanEmail);
@@ -453,45 +476,54 @@ export const api = {
     const isPedro = effectiveEmail === 'pedro.martinss225@gmail.com';
     const isEmilly = effectiveEmail === 'emillycampos308@gmail.com';
     const isIsabele = effectiveEmail === 'menezesisabele505@gmail.com';
+    const isFranciele = effectiveEmail === 'francielearaujopinheiro862@gmail.com';
     const isInitialAdmin = isPedro || isEmilly;
 
-    const defaultName = isIsabele
-      ? 'Isabele Menezes'
-      : isEmilly
-        ? 'Emilly Campos'
-        : isPedro
-          ? 'Pedro Henrique'
-          : (effectiveEmail ? effectiveEmail.split('@')[0] : 'Membro da Mídia');
+    const defaultName = isFranciele
+      ? 'Franciele Pinheiro'
+      : isIsabele
+        ? 'Isabele Menezes'
+        : isEmilly
+          ? 'Emilly Campos'
+          : isPedro
+            ? 'Pedro Henrique'
+            : (effectiveEmail ? effectiveEmail.split('@')[0] : 'Membro da Mídia');
 
-    const defaultAvatar = isIsabele
-      ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&h=200&q=80'
-      : isEmilly
-        ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80'
-        : (isPedro
-            ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'
-            : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80');
+    const defaultAvatar = isFranciele
+      ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'
+      : isIsabele
+        ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&h=200&q=80'
+        : isEmilly
+          ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80'
+          : (isPedro
+              ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'
+              : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80');
 
     try {
       const snap = await getDoc(userRef);
       if (snap.exists()) {
         const u = snap.data() as User;
-        const isSuper = !isIsabele && (u.role === 'super_admin' || isInitialAdmin);
-        const resolvedRole: UserRole = isSuper ? 'super_admin' : (isIsabele ? 'media_admin' : (u.role || 'media_member'));
-        const resolvedRoleLabel = resolvedRole === 'super_admin' ? 'Super Administrador' : (resolvedRole === 'media_admin' ? 'Administrador de Mídia' : 'Membro da Mídia');
+        const isSuper = !isIsabele && !isFranciele && (u.role === 'super_admin' || isInitialAdmin);
+        const resolvedRole: UserRole = isSuper
+          ? 'super_admin'
+          : (isIsabele ? 'media_admin' : (isFranciele ? 'media_member' : (u.role || 'media_member')));
+        const resolvedRoleLabel = resolvedRole === 'super_admin'
+          ? 'Super Administrador'
+          : (resolvedRole === 'media_admin' ? 'Administrador' : 'Membro da Mídia');
         return {
           ...u,
           id: u.id || uid,
           uid: u.uid || uid,
-          name: isIsabele ? 'Isabele Menezes' : (u.name || defaultName),
+          name: isFranciele ? 'Franciele Pinheiro' : (isIsabele ? 'Isabele Menezes' : (u.name || defaultName)),
           email: u.email || effectiveEmail,
           role: resolvedRole,
           roleLabel: resolvedRoleLabel,
-          canManageChurchPage: true,
+          canManageChurchPage: isSuper || isIsabele,
         };
       }
 
       const role: UserRole = isInitialAdmin ? 'super_admin' : (isIsabele ? 'media_admin' : 'media_member');
-      const roleLabel = role === 'super_admin' ? 'Super Administrador' : (role === 'media_admin' ? 'Administrador de Mídia' : 'Membro da Mídia');
+      const roleLabel = role === 'super_admin' ? 'Super Administrador' : (role === 'media_admin' ? 'Administrador' : 'Membro da Mídia');
 
       const newUserProfile: User = {
         uid,
@@ -571,10 +603,22 @@ export const api = {
         name: 'Isabele Menezes',
         email: 'menezesisabele505@gmail.com',
         role: 'media_admin',
-        roleLabel: 'Administrador de Mídia',
+        roleLabel: 'Administrador',
         avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&h=200&q=80',
         status: 'active',
         canManageChurchPage: true,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        uid: 'kh5UT2UEGDP8rYyiBjyx9gApFr32',
+        id: 'kh5UT2UEGDP8rYyiBjyx9gApFr32',
+        name: 'Franciele Pinheiro',
+        email: 'francielearaujopinheiro862@gmail.com',
+        role: 'media_member',
+        roleLabel: 'Membro da Mídia',
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+        status: 'active',
+        canManageChurchPage: false,
         createdAt: '2026-01-01T00:00:00.000Z',
       },
     ];
