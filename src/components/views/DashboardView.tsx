@@ -172,7 +172,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
         <h2 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
           Acesso Rápido
         </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-2.5 sm:gap-3">
           <button
             onClick={() => setActiveTab('schedule')}
             className="flex items-center gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 hover:border-amber-400 hover:bg-amber-500/20 transition-all text-left group"

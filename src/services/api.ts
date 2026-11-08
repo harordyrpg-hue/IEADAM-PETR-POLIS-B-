@@ -1252,11 +1252,28 @@ export const api = {
 
   async restoreFile(id: string): Promise<void> {
     try {
-      await updateDoc(doc(db, 'files', id), {
+      const fileRef = doc(db, 'files', id);
+      const fileSnap = await getDoc(fileRef).catch(() => null);
+      const fileData = fileSnap?.data() as FileRecord | undefined;
+
+      await updateDoc(fileRef, {
         inTrash: false,
         trashedAt: null,
         updatedAt: new Date().toISOString(),
       });
+
+      // If this file belongs to a folder that is in trash, restore that folder too so it's not orphaned
+      if (fileData?.folderId) {
+        const folderRef = doc(db, 'folders', fileData.folderId);
+        const folderSnap = await getDoc(folderRef).catch(() => null);
+        if (folderSnap?.exists() && folderSnap.data()?.inTrash) {
+          await updateDoc(folderRef, {
+            inTrash: false,
+            trashedAt: null,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {});
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `files/${id}`);
     }
@@ -1332,14 +1349,91 @@ export const api = {
   },
 
   async deleteFolder(id: string, permanent: boolean = false): Promise<void> {
+    const currentUser = auth.currentUser;
     try {
+      const folderRef = doc(db, 'folders', id);
+      const folderSnap = await getDoc(folderRef).catch(() => null);
+      const folderData = folderSnap?.data() as Folder | undefined;
+      const folderName = folderData?.name || 'Pasta';
+
       if (permanent) {
-        await deleteDoc(doc(db, 'folders', id));
+        // 1. Delete all child files in this folder permanently
+        const filesSnap = await getDocs(query(collection(db, 'files'), where('folderId', '==', id))).catch(() => ({ docs: [] }));
+        for (const fileDoc of filesSnap.docs) {
+          const file = fileDoc.data() as FileRecord;
+          if (file.storagePath) {
+            try {
+              const storageObjRef = ref(storage, file.storagePath);
+              await deleteObject(storageObjRef);
+            } catch (storageErr) {
+              console.warn('Storage object may already be removed:', storageErr);
+            }
+          }
+          await deleteDoc(fileDoc.ref).catch(() => {});
+        }
+
+        // 2. Delete child subfolders
+        const subfoldersSnap = await getDocs(query(collection(db, 'folders'), where('parentId', '==', id))).catch(() => ({ docs: [] }));
+        for (const subDoc of subfoldersSnap.docs) {
+          await deleteDoc(subDoc.ref).catch(() => {});
+        }
+
+        // 3. Delete the folder doc itself
+        await deleteDoc(folderRef);
+
+        if (currentUser) {
+          await api.addActivity({
+            userId: currentUser.uid,
+            userName: currentUser.displayName || currentUser.email || 'Membro',
+            action: 'delete',
+            actionLabel: 'Excluiu pasta permanentemente',
+            targetType: 'folder',
+            targetName: folderName,
+            details: 'Pasta e todo o seu conteúdo foram removidos em definitivo',
+          });
+        }
       } else {
-        await updateDoc(doc(db, 'folders', id), {
+        const now = new Date().toISOString();
+        // 1. Mark folder as inTrash
+        await updateDoc(folderRef, {
           inTrash: true,
-          updatedAt: new Date().toISOString(),
+          trashedAt: now,
+          updatedAt: now,
         });
+
+        // 2. Mark all files in this folder as inTrash
+        const filesSnap = await getDocs(query(collection(db, 'files'), where('folderId', '==', id))).catch(() => ({ docs: [] }));
+        const fileUpdates = filesSnap.docs.map((d) =>
+          updateDoc(d.ref, {
+            inTrash: true,
+            trashedAt: now,
+            updatedAt: now,
+          }).catch(() => {})
+        );
+        await Promise.allSettled(fileUpdates);
+
+        // 3. Mark child subfolders as inTrash
+        const subfoldersSnap = await getDocs(query(collection(db, 'folders'), where('parentId', '==', id))).catch(() => ({ docs: [] }));
+        const subUpdates = subfoldersSnap.docs.map((d) =>
+          updateDoc(d.ref, {
+            inTrash: true,
+            trashedAt: now,
+            updatedAt: now,
+          }).catch(() => {})
+        );
+        await Promise.allSettled(subUpdates);
+
+        if (currentUser) {
+          await api.addActivity({
+            userId: currentUser.uid,
+            userName: currentUser.displayName || currentUser.email || 'Membro',
+            action: 'delete',
+            actionLabel: 'Moveu pasta para a Lixeira',
+            targetType: 'folder',
+            targetName: folderName,
+            details: 'Preservada com segurança na lixeira',
+          });
+        }
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `folders/${id}`);
@@ -1347,11 +1441,56 @@ export const api = {
   },
 
   async restoreFolder(id: string): Promise<void> {
+    const currentUser = auth.currentUser;
     try {
-      await updateDoc(doc(db, 'folders', id), {
+      const folderRef = doc(db, 'folders', id);
+      const folderSnap = await getDoc(folderRef).catch(() => null);
+      const folderData = folderSnap?.data() as Folder | undefined;
+      const folderName = folderData?.name || 'Pasta';
+      const now = new Date().toISOString();
+
+      // 1. Restore the folder itself
+      await updateDoc(folderRef, {
         inTrash: false,
-        updatedAt: new Date().toISOString(),
+        trashedAt: null,
+        updatedAt: now,
       });
+
+      // 2. Restore all files inside this folder
+      const filesSnap = await getDocs(query(collection(db, 'files'), where('folderId', '==', id))).catch(() => ({ docs: [] }));
+      const fileRestores = filesSnap.docs.map((d) =>
+        updateDoc(d.ref, {
+          inTrash: false,
+          trashedAt: null,
+          updatedAt: now,
+        }).catch(() => {})
+      );
+      await Promise.allSettled(fileRestores);
+
+      // 3. If folder has a parent that is in trash, restore parent folder as well
+      if (folderData?.parentId) {
+        const parentRef = doc(db, 'folders', folderData.parentId);
+        const parentSnap = await getDoc(parentRef).catch(() => null);
+        if (parentSnap && parentSnap.exists() && parentSnap.data()?.inTrash) {
+          await updateDoc(parentRef, {
+            inTrash: false,
+            trashedAt: null,
+            updatedAt: now,
+          }).catch(() => {});
+        }
+      }
+
+      if (currentUser) {
+        await api.addActivity({
+          userId: currentUser.uid,
+          userName: currentUser.displayName || currentUser.email || 'Membro',
+          action: 'create_folder',
+          actionLabel: 'Restaurou pasta da Lixeira',
+          targetType: 'folder',
+          targetName: folderName,
+          details: 'Pasta e arquivos retornaram ao local original',
+        });
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `folders/${id}`);
     }

@@ -450,7 +450,7 @@ export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMemb
               <div
                 key={cell.dateStr}
                 onClick={() => openDayModal(cell.dateStr)}
-                className={`min-h-[96px] sm:min-h-[120px] p-1.5 sm:p-2.5 transition-all flex flex-col justify-between cursor-pointer group relative ${
+                className={`min-h-[60px] sm:min-h-[120px] p-1 sm:p-2.5 transition-all flex flex-col justify-between cursor-pointer group relative ${
                   !cell.isCurrentMonth
                     ? 'bg-neutral-950/50 text-neutral-600 opacity-40 hover:opacity-75'
                     : holiday
@@ -460,9 +460,9 @@ export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMemb
               >
                 <div>
                   {/* Top Bar inside cell: Day number + Today pill + quick add for admins */}
-                  <div className="flex items-center justify-between gap-1 mb-1">
+                  <div className="flex items-center justify-between gap-1 mb-0.5 sm:mb-1">
                     <span
-                      className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold font-mono-numbers ${
+                      className={`inline-flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 rounded-full text-[11px] sm:text-xs font-bold font-mono-numbers ${
                         isToday
                           ? 'bg-amber-400 text-neutral-950 font-black'
                           : holiday && cell.isCurrentMonth
@@ -490,7 +490,7 @@ export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMemb
                             setEditingEventId(null);
                             resetForm();
                           }}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-neutral-400 hover:text-amber-300 hover:bg-neutral-800 rounded transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1 text-neutral-400 hover:text-amber-300 hover:bg-neutral-800 rounded transition-all hidden sm:block"
                           title="Adicionar culto ou horário a este dia"
                         >
                           <Plus className="w-3.5 h-3.5" />
@@ -499,19 +499,32 @@ export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMemb
                     </div>
                   </div>
 
-                  {/* Holiday / Festive Badge */}
+                  {/* Mobile Dot Indicators */}
+                  <div className="flex sm:hidden items-center justify-center gap-1 mt-1 flex-wrap">
+                    {holiday && cell.isCurrentMonth && (
+                      <span className="text-[10px] text-amber-400 leading-none">★</span>
+                    )}
+                    {cell.isCurrentMonth && dayEvents.length > 0 && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                    )}
+                    {cell.isCurrentMonth && dayTasks.length > 0 && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    )}
+                  </div>
+
+                  {/* Holiday / Festive Badge (Desktop/Tablet) */}
                   {holiday && cell.isCurrentMonth && (
                     <div
-                      className="mb-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[10px] font-bold text-amber-300 leading-tight truncate"
+                      className="hidden sm:block mb-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[10px] font-bold text-amber-300 leading-tight truncate"
                       title={holiday.name}
                     >
                       ★ {holiday.name}
                     </div>
                   )}
 
-                  {/* Church Events with exact time */}
+                  {/* Church Events with exact time (Desktop/Tablet) */}
                   {cell.isCurrentMonth && (
-                    <div className="space-y-1 mt-1">
+                    <div className="hidden sm:block space-y-1 mt-1">
                       {dayEvents.slice(0, 2).map((evt) => (
                         <div
                           key={evt.id}
@@ -545,7 +558,7 @@ export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMemb
                   )}
                 </div>
 
-                <div className="mt-1" />
+                <div className="mt-0.5 sm:mt-1" />
               </div>
             );
           })}

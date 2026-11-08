@@ -420,65 +420,65 @@ export const ScheduleView: React.FC = () => {
       </div>
 
       {/* 3. Sub-Navigation Tabs */}
-      <div className="flex items-center gap-1.5 p-1 bg-neutral-900 border border-neutral-800 rounded-xl w-fit flex-wrap">
+      <div className="flex items-center gap-1.5 p-1 bg-neutral-900 border border-neutral-800 rounded-xl w-full sm:w-fit overflow-x-auto no-scrollbar scroll-smooth">
         <button
           onClick={() => setActiveSubTab('calendar')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+          className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
             activeSubTab === 'calendar'
               ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <CalendarDays className="w-4 h-4" />
-          <span>📅 Montar Calendário & Feriados</span>
+          <CalendarDays className="w-4 h-4 shrink-0" />
+          <span>📅 Calendário & Feriados</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('my_schedule')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+          className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
             activeSubTab === 'my_schedule'
               ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <UserCheck className="w-4 h-4" />
-          <span>Minha Escala & Afazeres ({myTasks.length})</span>
+          <UserCheck className="w-4 h-4 shrink-0" />
+          <span>Minha Escala ({myTasks.length})</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('tasks')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+          className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
             activeSubTab === 'tasks'
               ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <ListTodo className="w-4 h-4" />
-          <span>Escala Geral da Equipe ({visibleTasks.length})</span>
+          <ListTodo className="w-4 h-4 shrink-0" />
+          <span>Escala Geral ({visibleTasks.length})</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('events')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+          className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
             activeSubTab === 'events'
               ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <Calendar className="w-4 h-4" />
-          <span>Cultos & Eventos Agendados ({events.length})</span>
+          <Calendar className="w-4 h-4 shrink-0" />
+          <span>Cultos & Eventos ({events.length})</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('notes')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+          className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
             activeSubTab === 'notes'
               ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <StickyNote className="w-4 h-4" />
-          <span>Mural de Anotações ({teamNotes.length})</span>
+          <StickyNote className="w-4 h-4 shrink-0" />
+          <span>Anotações ({teamNotes.length})</span>
         </button>
       </div>
 

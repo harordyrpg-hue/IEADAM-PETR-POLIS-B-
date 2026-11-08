@@ -22,22 +22,19 @@ import {
   Moon,
   LogOut,
   Shield,
-  Radio,
-  UserPlus,
   Church,
   CalendarDays,
-  Tv,
-  Square,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { ViewTab } from '../../types.js';
-import { formatBytes, getRoleBadgeStyle } from '../../utils/formatters.js';
 
 interface NavItem {
   id: ViewTab;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   badge?: number;
+  badgeText?: string;
+  liveDot?: boolean;
   adminOnly?: boolean;
   superAdminOnly?: boolean;
   churchAdminOnly?: boolean;
@@ -58,17 +55,20 @@ export const Sidebar: React.FC = () => {
     openUpload,
     setActiveFolderId,
     setActiveEventId,
-    isRealtimeActive,
     isTransmitting,
-    toggleTransmission,
+    folders,
+    allFiles,
   } = useApp();
 
   const isSuperAdmin = user?.role === 'super_admin';
   const isMediaAdmin = user?.role === 'super_admin' || user?.role === 'media_admin';
   const canManageChurch = isSuperAdmin || user?.canManageChurchPage === true;
-  const roleStyle = user ? getRoleBadgeStyle(user.role) : { label: '', textClass: '', borderClass: '' };
 
   const pendingTasksCount = teamTasks.filter((t) => t.status !== 'concluido').length;
+  const usedPercent = storageStats?.usedPercentage || 0;
+  const trashedFoldersCount = folders.filter((f) => f.inTrash).length;
+  const trashedFilesCount = allFiles.filter((f) => f.inTrash).length;
+  const totalTrashCount = trashedFoldersCount + trashedFilesCount;
 
   const navSections: { title: string; superAdminOnly?: boolean; items: NavItem[] }[] = [
     {
@@ -77,6 +77,13 @@ export const Sidebar: React.FC = () => {
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { id: 'schedule', label: 'Central de Agenda', icon: CalendarDays, badge: pendingTasksCount },
         { id: 'files', label: 'Meus arquivos', icon: FolderOpen, badge: storageStats?.counts.totalFiles },
+        {
+          id: 'storage',
+          label: 'Armazenamento & Telão',
+          icon: HardDrive,
+          liveDot: isTransmitting,
+          badgeText: isTransmitting ? 'Ao vivo' : `${usedPercent.toFixed(0)}%`,
+        },
       ],
     },
     {
@@ -102,7 +109,7 @@ export const Sidebar: React.FC = () => {
         { id: 'recents', label: 'Recentes', icon: Clock },
         { id: 'favorites', label: 'Favoritos', icon: Star },
         { id: 'shares', label: 'Compartilhados', icon: Share2, badge: storageStats?.counts.totalShares },
-        { id: 'trash', label: 'Lixeira', icon: Trash2, badge: storageStats?.breakdown.trash.count },
+        { id: 'trash', label: 'Lixeira', icon: Trash2, badge: totalTrashCount },
       ],
     },
     {
@@ -131,10 +138,6 @@ export const Sidebar: React.FC = () => {
     setMobileMenuOpen(false);
   };
 
-  const usedBytes = storageStats?.totalBytesUsed || 0;
-  const quotaBytes = storageStats?.totalQuota || 2 * 1024 * 1024 * 1024 * 1024;
-  const usedPercent = storageStats?.usedPercentage || 0;
-
   return (
     <>
       {/* Mobile backdrop */}
@@ -146,8 +149,10 @@ export const Sidebar: React.FC = () => {
       )}
 
       <aside
-        className={`fixed top-16 bottom-0 left-0 z-40 w-72 md:w-64 bg-neutral-900 dark:bg-neutral-950 border-r border-neutral-800 flex flex-col justify-between transition-transform duration-200 ease-in-out md:translate-x-0 ${
-          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        className={`fixed top-16 bottom-0 left-0 z-40 w-72 md:w-64 bg-neutral-900 dark:bg-neutral-950 border-r border-neutral-800 flex flex-col justify-between transition-transform duration-200 ease-in-out ${
+          mobileMenuOpen
+            ? 'translate-x-0 pointer-events-auto shadow-2xl'
+            : '-translate-x-full pointer-events-none md:pointer-events-auto md:translate-x-0'
         }`}
       >
         {/* Top Section: User Profile + Action "Enviar" + Theme + Realtime */}
@@ -217,7 +222,7 @@ export const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* Navigation items list */}
+        {/* Navigation items list - now uses 100% remaining vertical space */}
         <div className="flex-1 overflow-y-auto px-3 py-3 space-y-5">
           {navSections.map((section) => {
             if (section.superAdminOnly && !isSuperAdmin) return null;
@@ -254,96 +259,30 @@ export const Sidebar: React.FC = () => {
                         <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-amber-400' : 'text-neutral-400'}`} />
                         <span className="truncate">{item.label}</span>
                       </div>
-                      {typeof item.badge === 'number' && item.badge > 0 && (
-                        <span className="text-[11px] font-mono-numbers text-neutral-400 px-1.5 py-0.5">
-                          {item.badge}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {item.liveDot && (
+                          <span className="flex items-center gap-1 text-[10px] font-bold text-rose-400 bg-rose-500/15 px-1.5 py-0.5 rounded border border-rose-500/30">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                            <span>NO AR</span>
+                          </span>
+                        )}
+                        {!item.liveDot && item.badgeText && (
+                          <span className="text-[10px] font-mono-numbers text-amber-400/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                            {item.badgeText}
+                          </span>
+                        )}
+                        {typeof item.badge === 'number' && item.badge > 0 && (
+                          <span className="text-[11px] font-mono-numbers text-neutral-400 px-1.5 py-0.5">
+                            {item.badge}
+                          </span>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
               </div>
             );
           })}
-        </div>
-
-        {/* Telão & Projeção Card */}
-        <div className="px-3 pt-2 pb-1 border-t border-neutral-800">
-          <div className="p-2.5 rounded-xl bg-neutral-950/60 border border-neutral-800">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
-                <Tv className="w-3 h-3 text-amber-400" />
-                <span>Telão & Projeção</span>
-              </span>
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-amber-300 font-bold border border-neutral-700">
-                PC
-              </span>
-            </div>
-            <button
-              onClick={() => {
-                toggleTransmission();
-                if (mobileMenuOpen) setMobileMenuOpen(false);
-              }}
-              className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-xs ${
-                isTransmitting
-                  ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse shadow-rose-600/30'
-                  : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-100 border border-neutral-700 hover:border-amber-500/50'
-              }`}
-              title={
-                isTransmitting
-                  ? 'Parar de transmitir agora'
-                  : 'Transmitir tela do computador para o telão/projetor'
-              }
-            >
-              {isTransmitting ? (
-                <>
-                  <Square className="w-3.5 h-3.5 fill-current" />
-                  <span>Parar de transmitir</span>
-                </>
-              ) : (
-                <>
-                  <Tv className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Transmitir para a tela</span>
-                </>
-              )}
-            </button>
-            <span className="block text-[10px] text-neutral-400 text-center mt-1">
-              {isTransmitting ? '🔴 Transmitindo na tela' : 'Opção para computador'}
-            </span>
-          </div>
-        </div>
-
-        {/* Real Storage Health Box */}
-        <div className="p-3 border-t border-neutral-800 bg-neutral-900/60">
-          <div className="p-3 rounded-xl bg-neutral-800/60 border border-neutral-700/60 text-neutral-300">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-1.5">
-                <HardDrive className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-xs font-semibold text-neutral-100">Armazenamento</span>
-              </div>
-              <span className="text-[11px] font-mono-numbers font-medium text-amber-400">
-                {usedPercent.toFixed(1)}%
-              </span>
-            </div>
-
-            {/* Storage Progress Bar */}
-            <div className="w-full h-1.5 bg-neutral-700/80 rounded-full overflow-hidden mb-2">
-              <div
-                className="h-full bg-linear-to-r from-amber-500 to-amber-400 rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.max(usedPercent, 1))}%` }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between text-[11px] text-neutral-400 font-mono-numbers">
-              <span>{formatBytes(usedBytes)} usado</span>
-              <span>{formatBytes(quotaBytes)}</span>
-            </div>
-
-            <div className="mt-2 pt-2 border-t border-neutral-700/40 text-[10px] text-neutral-400 flex items-center justify-between">
-              <span>Compartilhado</span>
-              <span className="text-emerald-400 font-medium">Tempo Real</span>
-            </div>
-          </div>
         </div>
       </aside>
     </>

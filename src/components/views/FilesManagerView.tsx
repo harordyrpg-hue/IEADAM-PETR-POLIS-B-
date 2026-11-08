@@ -151,9 +151,16 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
   };
 
   const handleDeleteFolder = async (folderId: string) => {
+    const targetFolder = folders.find((f) => f.id === folderId);
+    const folderName = targetFolder ? targetFolder.name : 'esta pasta';
+    const confirmDelete = window.confirm(
+      `Deseja mover a pasta "${folderName}" para a Lixeira?\n\nEla ficará guardada na Lixeira e você poderá restaurá-la com todos os arquivos a qualquer momento.`
+    );
+    if (!confirmDelete) return;
+
     try {
       await api.deleteFolder(folderId);
-      notify('Pasta movida para a Lixeira', 'info');
+      notify(`Pasta "${folderName}" movida para a Lixeira`, 'info');
       if (activeFolderId === folderId) {
         setActiveFolderId(null);
       }
@@ -184,9 +191,9 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
       {/* 1. Header Toolbar & Breadcrumbs */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-neutral-800">
         {/* Breadcrumbs */}
-        <div className="flex items-center gap-1.5 text-xs flex-wrap">
+        <div className="flex items-center gap-1.5 text-xs overflow-x-auto no-scrollbar py-0.5 max-w-full">
           {breadcrumbs.map((crumb, idx) => (
             <React.Fragment key={crumb.id || 'root'}>
               {idx > 0 && <ChevronRight className="w-3.5 h-3.5 text-neutral-500" />}
@@ -206,23 +213,25 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
         </div>
 
         {/* View mode & Action buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
           {/* Create Folder button */}
           <button
             onClick={() => setIsNewFolderOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-lg text-xs font-medium transition-colors"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-lg text-xs font-medium transition-colors cursor-pointer"
           >
             <FolderPlus className="w-3.5 h-3.5 text-amber-400" />
-            <span>Criar pasta</span>
+            <span className="hidden xs:inline">Criar pasta</span>
+            <span className="xs:hidden">Pasta</span>
           </button>
 
           {/* Upload Button */}
           <button
             onClick={() => openUpload(activeFolderId)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
           >
             <Upload className="w-3.5 h-3.5" />
-            <span>Enviar arquivos</span>
+            <span className="hidden xs:inline">Enviar arquivos</span>
+            <span className="xs:hidden">Enviar</span>
           </button>
 
           {/* Grid / List View Toggle */}
@@ -256,63 +265,81 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
             Pastas ({subfolders.length})
           </span>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {subfolders.map((folder) => (
-              <div
-                key={folder.id}
-                onClick={() => setActiveFolderId(folder.id)}
-                className="group relative p-3 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 hover:bg-neutral-800/60 cursor-pointer transition-all flex flex-col justify-between"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center"
-                    style={{ backgroundColor: `${folder.color || '#D97706'}20`, color: folder.color || '#D97706' }}
-                  >
-                    <FolderIcon className="w-4 h-4 fill-current" />
+            {subfolders.map((folder) => {
+              const folderFilesCount = allFiles.filter(
+                (f) => !f.inTrash && f.folderId === folder.id
+              ).length;
+
+              return (
+                <div
+                  key={folder.id}
+                  onClick={() => setActiveFolderId(folder.id)}
+                  className="group relative p-3 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 hover:bg-neutral-800/60 cursor-pointer transition-all flex flex-col justify-between shadow-xs select-none"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div
+                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: `${folder.color || '#D97706'}20`, color: folder.color || '#D97706' }}
+                    >
+                      <FolderIcon className="w-4 h-4 fill-current" />
+                    </div>
+
+                    {/* Folder quick actions - Always visible on mobile and desktop with clear touch targets */}
+                    <div
+                      className="flex items-center gap-1 opacity-90 sm:opacity-75 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDownloadFolderZip(folder.id);
+                        }}
+                        title="Baixar pasta em ZIP"
+                        className="p-1.5 text-neutral-400 hover:text-amber-400 bg-neutral-800/70 hover:bg-neutral-800 border border-neutral-700/50 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                      >
+                        <Archive className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingFolder(folder);
+                          setEditedFolderName(folder.name);
+                        }}
+                        title="Renomear pasta"
+                        className="p-1.5 text-neutral-400 hover:text-white bg-neutral-800/70 hover:bg-neutral-800 border border-neutral-700/50 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteFolder(folder.id);
+                        }}
+                        title="Excluir pasta"
+                        className="p-1.5 text-neutral-400 hover:text-red-400 bg-neutral-800/70 hover:bg-neutral-800 border border-neutral-700/50 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Folder quick actions */}
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={() => handleDownloadFolderZip(folder.id)}
-                      title="Baixar pasta em ZIP"
-                      className="p-1 text-neutral-400 hover:text-amber-400 hover:bg-neutral-700 rounded"
-                    >
-                      <Archive className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingFolder(folder);
-                        setEditedFolderName(folder.name);
-                      }}
-                      title="Renomear pasta"
-                      className="p-1 text-neutral-400 hover:text-white hover:bg-neutral-700 rounded"
-                    >
-                      <Edit2 className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteFolder(folder.id)}
-                      title="Excluir pasta"
-                      className="p-1 text-neutral-400 hover:text-red-400 hover:bg-neutral-700 rounded"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                  <div>
+                    <span className="font-semibold text-neutral-200 text-xs truncate block group-hover:text-amber-300">
+                      {folder.name}
+                    </span>
+                    <span className="text-[10px] text-neutral-400">
+                      {folderFilesCount} {folderFilesCount === 1 ? 'arquivo' : 'arquivos'}
+                    </span>
                   </div>
                 </div>
-
-                <div>
-                  <span className="font-semibold text-neutral-200 text-xs truncate block group-hover:text-amber-300">
-                    {folder.name}
-                  </span>
-                  <span className="text-[10px] text-neutral-400">Pasta</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
 
       {/* 3. Files Header & Sort Options */}
-      <div className="flex items-center justify-between pt-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-neutral-300">
             Arquivos {files.length > 0 ? `(${files.length})` : ''}
@@ -326,7 +353,7 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
                   selectAllFiles(files.map((f) => f.id));
                 }
               }}
-              className="text-[11px] text-amber-400 hover:underline ml-2"
+              className="text-[11px] text-amber-400 hover:underline ml-1.5 cursor-pointer"
             >
               {selectedFileIds.length === files.length ? 'Desmarcar todos' : 'Selecionar todos'}
             </button>
@@ -334,7 +361,7 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
         </div>
 
         {/* Sort Controls */}
-        <div className="flex items-center gap-2 text-xs text-neutral-400">
+        <div className="flex items-center gap-1 sm:gap-2 text-xs text-neutral-400 overflow-x-auto no-scrollbar py-0.5">
           <span className="hidden sm:inline">Ordenar:</span>
           <button
             onClick={() => handleSortToggle('name')}

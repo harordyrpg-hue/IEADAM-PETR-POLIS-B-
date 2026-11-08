@@ -312,11 +312,12 @@ export const FileCard: React.FC<FileCardProps> = ({
           e.stopPropagation();
           onSelect(file.id);
         }}
-        className={`absolute top-2 left-2 z-10 w-6 h-6 rounded-md flex items-center justify-center transition-all ${
+        className={`absolute top-2 left-2 z-10 w-6 h-6 rounded-md flex items-center justify-center transition-all cursor-pointer ${
           isSelected
-            ? 'bg-amber-400 text-neutral-950 shadow-sm'
-            : 'bg-black/60 text-neutral-400 opacity-0 group-hover:opacity-100 hover:bg-black/80 hover:text-white'
+            ? 'bg-amber-400 text-neutral-950 shadow-sm opacity-100'
+            : 'bg-black/60 text-neutral-300 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-black/80 hover:text-white'
         }`}
+        title={isSelected ? 'Desmarcar arquivo' : 'Selecionar arquivo'}
       >
         <Check className={`w-3.5 h-3.5 ${isSelected ? 'stroke-[3]' : 'stroke-2'}`} />
       </button>
@@ -324,10 +325,10 @@ export const FileCard: React.FC<FileCardProps> = ({
       {/* Favorite Star Button */}
       <button
         onClick={handleToggleFavorite}
-        className={`absolute top-2 right-2 z-10 p-1.5 rounded-md backdrop-blur-xs transition-all ${
+        className={`absolute top-2 right-2 z-10 p-1.5 rounded-md backdrop-blur-xs transition-all cursor-pointer ${
           file.isFavorite
             ? 'bg-amber-500/20 text-amber-400 opacity-100'
-            : 'bg-black/50 text-neutral-400 opacity-0 group-hover:opacity-100 hover:text-amber-400'
+            : 'bg-black/50 text-neutral-300 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 hover:text-amber-400'
         }`}
         title={file.isFavorite ? 'Remover dos favoritos' : 'Favoritar'}
       >

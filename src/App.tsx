@@ -34,6 +34,7 @@ import { HistoryView } from './components/views/HistoryView.js';
 import { SettingsView } from './components/views/SettingsView.js';
 import { SharedResourceView } from './components/views/SharedResourceView.js';
 import { ChurchAdminView } from './components/views/ChurchAdminView.js';
+import { StorageTransmissionView } from './components/views/StorageTransmissionView.js';
 import { PublicChurchPage } from './components/public/PublicChurchPage.js';
 import { LoginView } from './components/auth/LoginView.js';
 import { X, CheckCircle2, AlertCircle, Info } from 'lucide-react';
@@ -185,6 +186,8 @@ const MainLayout: React.FC = () => {
             }}
           />
         );
+      case 'storage':
+        return <StorageTransmissionView />;
       default:
         return (
           <DashboardView
@@ -202,13 +205,13 @@ const MainLayout: React.FC = () => {
       {/* Top Header */}
       <Header />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-w-0">
         {/* Sidebar (Desktop & Mobile Drawer) */}
         <Sidebar />
 
-        {/* Main Content Area */}
-        <main className="flex-1 md:pl-64 min-w-0 flex flex-col pb-20 md:pb-8">
-          <div className="max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+        {/* Main Content Area - Native smooth window scrolling without touch traps */}
+        <main className="flex-1 md:pl-64 min-w-0 pb-28 md:pb-12">
+          <div className="max-w-7xl w-full mx-auto p-3 sm:p-6 lg:p-8">
             {renderActiveView()}
           </div>
         </main>

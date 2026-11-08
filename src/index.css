@@ -6,8 +6,21 @@
     --font-mono: 'JetBrains Mono', monospace;
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+    touch-action: pan-x pan-y;
+  }
+
   body {
     font-family: var(--font-sans);
+    overscroll-behavior-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
+  }
+
+  button, a, input, select, textarea {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 }
 

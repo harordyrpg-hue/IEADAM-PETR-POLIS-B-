@@ -22,6 +22,7 @@ export interface Folder {
   ownerUid: string;
   isFavorite: boolean;
   inTrash: boolean;
+  trashedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -179,7 +180,8 @@ export type ViewTab =
   | 'church'
   | 'admin'
   | 'history'
-  | 'settings';
+  | 'settings'
+  | 'storage';
 
 export interface ChurchLeadershipMember {
   id: string;

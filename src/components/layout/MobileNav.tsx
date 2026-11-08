@@ -21,7 +21,7 @@ export const MobileNav: React.FC = () => {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-neutral-900/95 dark:bg-neutral-950/95 backdrop-blur-md border-t border-neutral-800 px-2 py-1.5 flex items-center justify-around text-neutral-400">
+    <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-neutral-900/95 dark:bg-neutral-950/95 backdrop-blur-md border-t border-neutral-800 px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] flex items-center justify-around text-neutral-400 shadow-2xl select-none">
       {tabs.slice(0, 2).map((tab) => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
@@ -29,7 +29,7 @@ export const MobileNav: React.FC = () => {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex flex-col items-center justify-center py-1 px-3 min-w-[56px] text-[10px] font-medium transition-colors ${
+            className={`flex flex-col items-center justify-center py-1 px-3 min-w-[56px] text-[10px] font-medium transition-colors cursor-pointer touch-manipulation ${
               isActive ? 'text-amber-400 font-semibold' : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -42,7 +42,7 @@ export const MobileNav: React.FC = () => {
       {/* Center Upload Button */}
       <button
         onClick={() => openUpload()}
-        className="flex flex-col items-center justify-center -mt-4 bg-amber-400 hover:bg-amber-300 text-neutral-950 p-2.5 rounded-full shadow-lg transition-transform active:scale-95"
+        className="flex flex-col items-center justify-center -mt-4 bg-amber-400 hover:bg-amber-300 text-neutral-950 p-2.5 rounded-full shadow-lg transition-transform active:scale-95 cursor-pointer touch-manipulation"
         title="Enviar arquivos"
       >
         <PlusCircle className="w-6 h-6 stroke-[2.5]" />
@@ -55,7 +55,7 @@ export const MobileNav: React.FC = () => {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex flex-col items-center justify-center py-1 px-3 min-w-[56px] text-[10px] font-medium transition-colors ${
+            className={`flex flex-col items-center justify-center py-1 px-3 min-w-[56px] text-[10px] font-medium transition-colors cursor-pointer touch-manipulation ${
               isActive ? 'text-amber-400 font-semibold' : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
