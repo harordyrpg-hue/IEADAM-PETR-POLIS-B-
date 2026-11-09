@@ -181,7 +181,8 @@ export type ViewTab =
   | 'admin'
   | 'history'
   | 'settings'
-  | 'storage';
+  | 'storage'
+  | 'profile';
 
 export interface ChurchLeadershipMember {
   id: string;

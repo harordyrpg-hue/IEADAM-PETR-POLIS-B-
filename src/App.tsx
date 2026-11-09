@@ -35,6 +35,7 @@ import { SettingsView } from './components/views/SettingsView.js';
 import { SharedResourceView } from './components/views/SharedResourceView.js';
 import { ChurchAdminView } from './components/views/ChurchAdminView.js';
 import { StorageTransmissionView } from './components/views/StorageTransmissionView.js';
+import { ProfileView } from './components/views/ProfileView.js';
 import { PublicChurchPage } from './components/public/PublicChurchPage.js';
 import { LoginView } from './components/auth/LoginView.js';
 import { X, CheckCircle2, AlertCircle, Info } from 'lucide-react';
@@ -188,6 +189,8 @@ const MainLayout: React.FC = () => {
         );
       case 'storage':
         return <StorageTransmissionView />;
+      case 'profile':
+        return <ProfileView />;
       default:
         return (
           <DashboardView

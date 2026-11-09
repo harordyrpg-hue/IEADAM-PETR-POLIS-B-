@@ -11,6 +11,8 @@ export const Header: React.FC = () => {
     isRealtimeActive,
     isTransmitting,
     toggleTransmission,
+    user,
+    setActiveTab,
   } = useApp();
 
   return (
@@ -66,11 +68,28 @@ export const Header: React.FC = () => {
         </div>
       </div>
 
-      {/* Zone 3: Screen transmission control (Desktop / PC only - prevented from firing on mobile touch) */}
-      <div className="hidden md:flex items-center gap-2 shrink-0">
+      {/* Zone 3: Actions (Desktop Transmission & Mobile Profile Avatar) */}
+      <div className="flex items-center gap-2 shrink-0">
+        {/* Mobile Profile Avatar Quick Button */}
+        <button
+          onClick={() => setActiveTab('profile')}
+          className="md:hidden p-0.5 rounded-full ring-2 ring-amber-500/40 hover:ring-amber-400 transition-all cursor-pointer"
+          title="Ver meu perfil e escala"
+        >
+          <img
+            src={
+              user?.avatar ||
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80'
+            }
+            alt={user?.name || 'Perfil'}
+            className="w-7 h-7 rounded-full object-cover"
+          />
+        </button>
+
+        {/* Desktop Screen transmission */}
         <button
           onClick={toggleTransmission}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-xs ${
+          className={`hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-xs ${
             isTransmitting
               ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-400/80 shadow-rose-600/30 animate-pulse'
               : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 hover:border-amber-500/50'

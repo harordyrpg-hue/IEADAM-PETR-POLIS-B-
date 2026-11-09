@@ -24,6 +24,7 @@ import {
   Shield,
   Church,
   CalendarDays,
+  User as UserIcon,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { ViewTab } from '../../types.js';
@@ -84,6 +85,7 @@ export const Sidebar: React.FC = () => {
           liveDot: isTransmitting,
           badgeText: isTransmitting ? 'Ao vivo' : `${usedPercent.toFixed(0)}%`,
         },
+        { id: 'profile', label: 'Meu Perfil & Escala', icon: UserIcon },
       ],
     },
     {
@@ -159,7 +161,11 @@ export const Sidebar: React.FC = () => {
         <div className="p-3 border-b border-neutral-800 bg-neutral-900/90 dark:bg-neutral-950/90 space-y-3">
           {/* User Profile Card */}
           <div className="flex items-center justify-between p-2.5 rounded-xl bg-neutral-800/70 border border-neutral-700/60">
-            <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              onClick={() => handleNavClick('profile')}
+              className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition-opacity"
+              title="Abrir meu perfil e configurações"
+            >
               <img
                 src={
                   user?.avatar ||
@@ -176,7 +182,7 @@ export const Sidebar: React.FC = () => {
                   <span className="truncate">{user?.roleLabel}</span>
                 </div>
               </div>
-            </div>
+            </button>
 
             <button
               onClick={() => logout()}

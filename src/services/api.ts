@@ -825,6 +825,65 @@ export const api = {
     }
   },
 
+  async uploadAvatar(file: File): Promise<string> {
+    try {
+      const res = await new Promise<{ downloadUrl: string }>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload', true);
+        xhr.setRequestHeader('x-filename', encodeURIComponent(`avatar_${Date.now()}_${file.name}`));
+        xhr.setRequestHeader('Content-Type', file.type || 'image/jpeg');
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (err) {
+              reject(err);
+            }
+          } else {
+            reject(new Error(`Status ${xhr.status}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Falha de rede no upload da foto'));
+        xhr.send(file);
+      });
+      if (res?.downloadUrl) return res.downloadUrl;
+    } catch (err) {
+      console.warn('Upload direto de avatar via API falhou, usando canvas fallback:', err);
+    }
+
+    // High quality canvas data URL fallback for instant offline/local persistence
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxDim = 360;
+          let w = img.width;
+          let h = img.height;
+          if (w > h) {
+            if (w > maxDim) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            }
+          } else {
+            if (h > maxDim) {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.88));
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  },
+
   async deleteUser(uid: string): Promise<void> {
     return api.deleteTeamUser(uid);
   },

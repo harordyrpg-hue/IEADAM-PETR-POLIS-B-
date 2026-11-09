@@ -29,6 +29,7 @@ interface AppContextType {
   registerWithEmail: (name: string, email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  updateUserProfile: (updates: { name?: string; avatar?: string }) => Promise<void>;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
   activeTab: ViewTab;
@@ -582,6 +583,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [transmissionStream]);
 
+  const updateUserProfile = useCallback(
+    async (updates: { name?: string; avatar?: string }) => {
+      if (!user) return;
+      await api.updateUser(user.uid, updates);
+      const updated: User = {
+        ...user,
+        ...(updates.name ? { name: updates.name } : {}),
+        ...(updates.avatar ? { avatar: updates.avatar } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      setUser(updated);
+      try {
+        localStorage.setItem('ptb_session_user', JSON.stringify(updated));
+      } catch {}
+    },
+    [user]
+  );
+
   return (
     <AppContext.Provider
       value={{
@@ -593,6 +612,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         registerWithEmail,
         logout,
         resetPassword,
+        updateUserProfile,
         theme,
         toggleTheme,
         activeTab,
