@@ -184,7 +184,8 @@ export type ViewTab =
   | 'settings'
   | 'storage'
   | 'profile'
-  | 'finances';
+  | 'finances'
+  | 'registrations';
 
 export interface ChurchLeadershipMember {
   id: string;
@@ -482,4 +483,77 @@ export interface FinancialSummary {
   pendingReceivable: number;
   futureExpensesWithDate: number;
   futureExpensesWithoutForecast: number;
+}
+
+// ==========================================
+// SISTEMA DE EVENTOS PÚBLICOS COM INSCRIÇÃO & QR CODE
+// ==========================================
+export type RegistrationThemeColor =
+  | 'amber'
+  | 'emerald'
+  | 'blue'
+  | 'indigo'
+  | 'rose'
+  | 'purple'
+  | 'neutral';
+
+export interface RegistrationStandardFieldConfig {
+  enabled: boolean;
+  required: boolean;
+  label: string;
+}
+
+export interface RegistrationCustomField {
+  id: string;
+  label: string;
+  type: 'text' | 'select' | 'checkbox' | 'textarea' | 'number';
+  required: boolean;
+  placeholder?: string;
+  options?: string[]; // for 'select'
+}
+
+export interface PublicRegistrationEvent {
+  id: string;
+  name: string;
+  description: string;
+  date: string; // YYYY-MM-DD
+  time: string; // e.g. "19:00" ou "18:30 às 21:30"
+  location: string; // e.g. "IEADAM Petrópolis B - Templo Central"
+  bannerUrl: string | null;
+  themeColor: RegistrationThemeColor;
+  rulesAndNotes: string; // Termos, regras e orientações
+  maxRegistrations?: number | null;
+  status: 'aberto' | 'encerrado' | 'em_breve';
+  standardFields: {
+    fullName: RegistrationStandardFieldConfig;
+    phone: RegistrationStandardFieldConfig;
+    email: RegistrationStandardFieldConfig;
+    church: RegistrationStandardFieldConfig;
+    area: RegistrationStandardFieldConfig;
+    responsibleLeader: RegistrationStandardFieldConfig;
+    responsiblePastor: RegistrationStandardFieldConfig;
+  };
+  customFields?: RegistrationCustomField[];
+  createdByUid: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EventRegistration {
+  id: string; // e.g. "REG-2026-PTB-XXXXX"
+  eventId: string;
+  eventName: string;
+  fullName: string;
+  phone: string;
+  email?: string;
+  church?: string;
+  area?: string;
+  responsibleLeader?: string;
+  responsiblePastor?: string;
+  customResponses?: Record<string, any>;
+  status: 'confirmada' | 'presente' | 'cancelada';
+  qrCodeData: string;
+  registeredAt: string;
+  checkInAt?: string | null;
 }

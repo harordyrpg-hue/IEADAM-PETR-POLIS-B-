@@ -69,6 +69,8 @@ import {
   FinancialBill,
   FinancialReceipt,
   FinancialPaymentMethod,
+  PublicRegistrationEvent,
+  EventRegistration,
 } from '../types.js';
 import { createFileThumbnail } from '../utils/thumbnail.js';
 
@@ -3242,6 +3244,273 @@ export const api = {
         });
       };
       reader.onerror = () => reject(new Error('Falha ao ler arquivo de comprovante'));
+      reader.readAsDataURL(file);
+    });
+  },
+
+  // ==========================================
+  // SISTEMA DE EVENTOS PÚBLICOS COM INSCRIÇÃO & QR CODE
+  // ==========================================
+
+  subscribePublicEvents(callback: (events: PublicRegistrationEvent[]) => void): () => void {
+    const q = collection(db, 'public_events');
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const list: PublicRegistrationEvent[] = snapshot.docs.map((d) => {
+          const ev = d.data() as PublicRegistrationEvent;
+          return {
+            ...ev,
+            id: ev.id || d.id,
+          };
+        });
+        list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+        callback(list);
+      },
+      (error) => {
+        console.warn('Real-time public events subscription sync:', error);
+      }
+    );
+  },
+
+  async getPublicEvents(): Promise<PublicRegistrationEvent[]> {
+    try {
+      const snap = await getDocs(collection(db, 'public_events'));
+      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as PublicRegistrationEvent));
+      list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+      return list;
+    } catch (err) {
+      console.warn('Could not load public events:', err);
+      return [];
+    }
+  },
+
+  async getPublicEventById(id: string): Promise<PublicRegistrationEvent | null> {
+    try {
+      const snap = await getDoc(doc(db, 'public_events', id));
+      if (!snap.exists()) return null;
+      return { ...snap.data(), id: snap.id } as PublicRegistrationEvent;
+    } catch (err) {
+      console.warn(`Could not load public event ${id}:`, err);
+      return null;
+    }
+  },
+
+  async createPublicEvent(data: Partial<PublicRegistrationEvent>): Promise<PublicRegistrationEvent> {
+    const effective = api.getEffectiveUser();
+    const eventId = `pubevent_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    const defaultStandardFields = {
+      fullName: { enabled: true, required: true, label: 'Nome Completo' },
+      phone: { enabled: true, required: true, label: 'Telefone / WhatsApp' },
+      email: { enabled: true, required: false, label: 'E-mail' },
+      church: { enabled: true, required: false, label: 'Igreja / Congregação' },
+      area: { enabled: true, required: false, label: 'Área' },
+      responsibleLeader: { enabled: true, required: false, label: 'Líder Responsável' },
+      responsiblePastor: { enabled: true, required: false, label: 'Pastor Responsável' },
+    };
+
+    const event: PublicRegistrationEvent = {
+      id: eventId,
+      name: data.name || 'Novo Evento Público',
+      description: data.description || '',
+      date: data.date || new Date().toISOString().split('T')[0],
+      time: data.time || '19:30',
+      location: data.location || 'IEADAM Petrópolis B - Templo Central',
+      bannerUrl: data.bannerUrl || null,
+      themeColor: data.themeColor || 'amber',
+      rulesAndNotes: data.rulesAndNotes || '• Chegue com 15 minutos de antecedência.\n• Apresente seu comprovante ou QR Code na entrada.\n• Evento sujeito à lotação do espaço.',
+      maxRegistrations: data.maxRegistrations || null,
+      status: data.status || 'aberto',
+      standardFields: data.standardFields || defaultStandardFields,
+      customFields: data.customFields || [],
+      createdByUid: effective.uid,
+      createdByName: effective.displayName,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDoc(doc(db, 'public_events', eventId), removeUndefinedValues(event));
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'create_public_event',
+        actionLabel: 'Criou Evento Público com Inscrição',
+        targetType: 'public_event',
+        targetName: event.name,
+        details: `${event.date} · ${event.location}`,
+      });
+      return event;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `public_events/${eventId}`);
+    }
+  },
+
+  async updatePublicEvent(id: string, updates: Partial<PublicRegistrationEvent>): Promise<void> {
+    try {
+      await updateDoc(doc(db, 'public_events', id), removeUndefinedValues({
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `public_events/${id}`);
+    }
+  },
+
+  async deletePublicEvent(id: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, 'public_events', id));
+      // Also cleanup registrations
+      const snap = await getDocs(query(collection(db, 'event_registrations'), where('eventId', '==', id)));
+      const batch = writeBatch(db);
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `public_events/${id}`);
+    }
+  },
+
+  subscribeEventRegistrations(eventId: string, callback: (registrations: EventRegistration[]) => void): () => void {
+    const q = query(collection(db, 'event_registrations'), where('eventId', '==', eventId));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const list: EventRegistration[] = snapshot.docs.map((d) => {
+          const r = d.data() as EventRegistration;
+          return {
+            ...r,
+            id: r.id || d.id,
+          };
+        });
+        list.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
+        callback(list);
+      },
+      (error) => {
+        console.warn('Real-time event registrations subscription sync:', error);
+      }
+    );
+  },
+
+  async getEventRegistrations(eventId: string): Promise<EventRegistration[]> {
+    try {
+      const q = query(collection(db, 'event_registrations'), where('eventId', '==', eventId));
+      const snap = await getDocs(q);
+      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as EventRegistration));
+      list.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
+      return list;
+    } catch (err) {
+      console.warn(`Could not load registrations for event ${eventId}:`, err);
+      return [];
+    }
+  },
+
+  async createEventRegistration(data: Partial<EventRegistration>): Promise<EventRegistration> {
+    const regCode = `PTB-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const regId = `reg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    // Build QR payload containing all verifiable ticket data and event rules
+    const qrPayload = JSON.stringify({
+      id: regCode,
+      evento: data.eventName || 'Evento IEADAM Petrópolis B',
+      nome: data.fullName,
+      telefone: data.phone,
+      email: data.email || '',
+      igreja: data.church || '',
+      area: data.area || '',
+      lider: data.responsibleLeader || '',
+      pastor: data.responsiblePastor || '',
+      status: 'CONFIRMADO',
+      dataHora: new Date().toISOString(),
+    });
+
+    const registration: EventRegistration = {
+      id: regCode,
+      eventId: data.eventId || '',
+      eventName: data.eventName || '',
+      fullName: data.fullName || '',
+      phone: data.phone || '',
+      email: data.email || '',
+      church: data.church || '',
+      area: data.area || '',
+      responsibleLeader: data.responsibleLeader || '',
+      responsiblePastor: data.responsiblePastor || '',
+      customResponses: data.customResponses || {},
+      status: 'confirmada',
+      qrCodeData: qrPayload,
+      registeredAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDoc(doc(db, 'event_registrations', regId), removeUndefinedValues({
+        ...registration,
+        firestoreDocId: regId,
+      }));
+      return registration;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `event_registrations/${regId}`);
+      return registration;
+    }
+  },
+
+  async updateEventRegistration(id: string, updates: Partial<EventRegistration>): Promise<void> {
+    try {
+      // Find doc where id equals id or docId equals id
+      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+      if (!snap.empty) {
+        await updateDoc(snap.docs[0].ref, removeUndefinedValues(updates));
+      } else {
+        await updateDoc(doc(db, 'event_registrations', id), removeUndefinedValues(updates));
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
+    }
+  },
+
+  async deleteEventRegistration(id: string): Promise<void> {
+    try {
+      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+      if (!snap.empty) {
+        await deleteDoc(snap.docs[0].ref);
+      } else {
+        await deleteDoc(doc(db, 'event_registrations', id));
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `event_registrations/${id}`);
+    }
+  },
+
+  async uploadEventBanner(file: File): Promise<string> {
+    // 1. Try server API upload
+    try {
+      const res = await new Promise<{ downloadUrl: string }>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload', true);
+        xhr.setRequestHeader('x-filename', encodeURIComponent(`banner_${Date.now()}_${file.name}`));
+        xhr.setRequestHeader('Content-Type', file.type || 'image/jpeg');
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (err) {
+              reject(err);
+            }
+          } else {
+            reject(new Error(`Status ${xhr.status}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(file);
+      });
+      if (res?.downloadUrl) return res.downloadUrl;
+    } catch (err) {
+      console.warn('Banner upload via /api/upload failed, using FileReader DataURL fallback:', err);
+    }
+
+    // 2. High quality fallback: FileReader DataURL
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
       reader.readAsDataURL(file);
     });
   },

@@ -123,5 +123,16 @@ service cloud.firestore {
       allow read: if true;
       allow write: if true;
     }
+
+    // 5. Public Registration Events & Guest Registrations (no login required for guests)
+    match /public_events/{eventId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /event_registrations/{registrationId} {
+      allow read: if true;
+      allow write: if true;
+    }
   }
 }

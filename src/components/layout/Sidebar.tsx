@@ -26,6 +26,7 @@ import {
   CalendarDays,
   User as UserIcon,
   DollarSign,
+  QrCode,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { ViewTab } from '../../types.js';
@@ -80,6 +81,7 @@ export const Sidebar: React.FC = () => {
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { id: 'schedule', label: 'Central de Agenda', icon: CalendarDays, badge: pendingTasksCount },
+        { id: 'registrations', label: 'Eventos & Inscrições', icon: QrCode },
         { id: 'files', label: 'Meus arquivos', icon: FolderOpen, badge: storageStats?.counts.totalFiles },
         {
           id: 'finances',

@@ -37,6 +37,8 @@ import { ChurchAdminView } from './components/views/ChurchAdminView.js';
 import { StorageTransmissionView } from './components/views/StorageTransmissionView.js';
 import { ProfileView } from './components/views/ProfileView.js';
 import { FinancialView } from './components/views/FinancialView.js';
+import { PublicEventsAdminView } from './components/views/PublicEventsAdminView.js';
+import { PublicEventRegistrationPage } from './components/public/PublicEventRegistrationPage.js';
 import { PublicChurchPage } from './components/public/PublicChurchPage.js';
 import { LoginView } from './components/auth/LoginView.js';
 import { X, CheckCircle2, AlertCircle, Info } from 'lucide-react';
@@ -45,11 +47,29 @@ const MainLayout: React.FC = () => {
   const { activeTab, setActiveTab, toasts, dismissToast, user, authLoading } = useApp();
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
   const [sharedToken, setSharedToken] = useState<string | null>(null);
+  const [publicEventId, setPublicEventId] = useState<string | null>(null);
 
-  // Check URL hash for shared resource links (e.g. #share=ptb_token)
+  // Check URL hash and query params for public registration and shared resource links
   useEffect(() => {
-    const handleHashChange = () => {
+    const handleRouteCheck = () => {
+      // 1. Check for public registration link via query param (e.g. ?inscricao=EVENT_ID or ?evento=EVENT_ID)
+      const searchParams = new URLSearchParams(window.location.search);
+      const queryInscricao = searchParams.get('inscricao') || searchParams.get('evento');
+      if (queryInscricao) {
+        setPublicEventId(queryInscricao);
+        return;
+      }
+
+      // 2. Check for public registration link via hash (e.g. #inscricao=EVENT_ID)
       const hash = window.location.hash;
+      if (hash.startsWith('#inscricao=') || hash.startsWith('#evento=')) {
+        const hashId = hash.replace(/#(inscricao|evento)=/, '');
+        setPublicEventId(hashId);
+        return;
+      }
+      setPublicEventId(null);
+
+      // 3. Check for shared resource links (e.g. #share=ptb_token)
       if (hash.startsWith('#share=')) {
         const token = hash.replace('#share=', '');
         setSharedToken(token);
@@ -58,10 +78,32 @@ const MainLayout: React.FC = () => {
       }
     };
 
-    handleHashChange();
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    handleRouteCheck();
+    window.addEventListener('hashchange', handleRouteCheck);
+    window.addEventListener('popstate', handleRouteCheck);
+    return () => {
+      window.removeEventListener('hashchange', handleRouteCheck);
+      window.removeEventListener('popstate', handleRouteCheck);
+    };
   }, []);
+
+  // Public Event Registration Page (NO LOGIN REQUIRED FOR GUESTS)
+  if (publicEventId) {
+    return (
+      <PublicEventRegistrationPage
+        eventId={publicEventId}
+        onExit={() => {
+          // Clean URL params and hash
+          const url = new URL(window.location.href);
+          url.searchParams.delete('inscricao');
+          url.searchParams.delete('evento');
+          url.hash = '';
+          window.history.replaceState({}, '', url.pathname);
+          setPublicEventId(null);
+        }}
+      />
+    );
+  }
 
   if (sharedToken) {
     return (
@@ -194,6 +236,8 @@ const MainLayout: React.FC = () => {
         return <ProfileView />;
       case 'finances':
         return <FinancialView />;
+      case 'registrations':
+        return <PublicEventsAdminView />;
       default:
         return (
           <DashboardView

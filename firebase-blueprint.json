@@ -210,6 +210,48 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["type", "title", "amount", "description", "counterparty", "status"]
+    },
+    "PublicRegistrationEvent": {
+      "title": "PublicRegistrationEvent",
+      "description": "Public church event with customizable registration form",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 4000 },
+        "date": { "type": "string", "maxLength": 30 },
+        "time": { "type": "string", "maxLength": 30 },
+        "location": { "type": "string", "maxLength": 300 },
+        "bannerUrl": { "type": "string", "maxLength": 2000 },
+        "themeColor": { "type": "string", "maxLength": 30 },
+        "rulesAndNotes": { "type": "string", "maxLength": 4000 },
+        "status": { "type": "string", "enum": ["aberto", "encerrado", "em_breve"] },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "date", "location", "status"]
+    },
+    "EventRegistration": {
+      "title": "EventRegistration",
+      "description": "Guest attendee registration record with QR code",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "eventId": { "type": "string", "maxLength": 128 },
+        "eventName": { "type": "string", "maxLength": 200 },
+        "fullName": { "type": "string", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 150 },
+        "church": { "type": "string", "maxLength": 150 },
+        "area": { "type": "string", "maxLength": 100 },
+        "responsibleLeader": { "type": "string", "maxLength": 150 },
+        "responsiblePastor": { "type": "string", "maxLength": 150 },
+        "status": { "type": "string", "enum": ["confirmada", "presente", "cancelada"] },
+        "registeredAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "eventName", "fullName", "phone", "status"]
     }
   },
   "firestore": {
@@ -284,6 +326,14 @@
     "/financial_bills/{billId}": {
       "schema": { "$ref": "#/entities/FinancialBill" },
       "description": "Accounts payable, accounts receivable, and future planned expenses"
+    },
+    "/public_events/{eventId}": {
+      "schema": { "$ref": "#/entities/PublicRegistrationEvent" },
+      "description": "Public events with customizable registration forms"
+    },
+    "/event_registrations/{registrationId}": {
+      "schema": { "$ref": "#/entities/EventRegistration" },
+      "description": "Guest registrations with ticket and QR code"
     }
   }
 }
