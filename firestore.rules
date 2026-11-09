@@ -112,5 +112,16 @@ service cloud.firestore {
       allow read: if true;
       allow write: if true;
     }
+
+    // 4. Church Media Financial System (Livro Caixa, Contas & Previsões)
+    match /financial_records/{recordId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /financial_bills/{billId} {
+      allow read: if true;
+      allow write: if true;
+    }
   }
 }

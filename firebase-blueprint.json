@@ -165,6 +165,51 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "content", "authorUid"]
+    },
+    "FinancialTransaction": {
+      "title": "FinancialTransaction",
+      "description": "Church media cash flow record (entrada / saida)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["entrada", "saida"] },
+        "title": { "type": "string", "maxLength": 200 },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "maxLength": 30 },
+        "category": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "counterparty": { "type": "string", "maxLength": 200 },
+        "paymentMethod": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "enum": ["confirmado", "pendente", "cancelado"] },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "title", "amount", "date", "description", "counterparty", "status"]
+    },
+    "FinancialBill": {
+      "title": "FinancialBill",
+      "description": "Accounts payable, accounts receivable, and future planned expenses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["a_pagar", "a_receber"] },
+        "title": { "type": "string", "maxLength": 200 },
+        "amount": { "type": "number" },
+        "category": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "counterparty": { "type": "string", "maxLength": 200 },
+        "dueDate": { "type": "string", "maxLength": 30 },
+        "hasNoForecast": { "type": "boolean" },
+        "priority": { "type": "string", "enum": ["baixa", "media", "alta", "urgente"] },
+        "status": { "type": "string", "enum": ["pendente", "pago", "cancelado"] },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "title", "amount", "description", "counterparty", "status"]
     }
   },
   "firestore": {
@@ -231,6 +276,14 @@
     "/team_notes/{noteId}": {
       "schema": { "$ref": "#/entities/TeamNote" },
       "description": "Team collaborative board notes"
+    },
+    "/financial_records/{recordId}": {
+      "schema": { "$ref": "#/entities/FinancialTransaction" },
+      "description": "Church financial cash flow transactions (entradas e saídas de caixa)"
+    },
+    "/financial_bills/{billId}": {
+      "schema": { "$ref": "#/entities/FinancialBill" },
+      "description": "Accounts payable, accounts receivable, and future planned expenses"
     }
   }
 }

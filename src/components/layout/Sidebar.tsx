@@ -25,6 +25,7 @@ import {
   Church,
   CalendarDays,
   User as UserIcon,
+  DollarSign,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { ViewTab } from '../../types.js';
@@ -39,6 +40,7 @@ interface NavItem {
   adminOnly?: boolean;
   superAdminOnly?: boolean;
   churchAdminOnly?: boolean;
+  financeAdminOnly?: boolean;
 }
 
 export const Sidebar: React.FC = () => {
@@ -59,6 +61,7 @@ export const Sidebar: React.FC = () => {
     isTransmitting,
     folders,
     allFiles,
+    canAccessFinances,
   } = useApp();
 
   const isSuperAdmin = user?.role === 'super_admin';
@@ -78,6 +81,12 @@ export const Sidebar: React.FC = () => {
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { id: 'schedule', label: 'Central de Agenda', icon: CalendarDays, badge: pendingTasksCount },
         { id: 'files', label: 'Meus arquivos', icon: FolderOpen, badge: storageStats?.counts.totalFiles },
+        {
+          id: 'finances',
+          label: 'Livro Financeiro & Caixa',
+          icon: DollarSign,
+          financeAdminOnly: true,
+        },
         {
           id: 'storage',
           label: 'Armazenamento & Telão',
@@ -238,6 +247,7 @@ export const Sidebar: React.FC = () => {
               if (item.superAdminOnly && !isSuperAdmin) return false;
               if (item.adminOnly && !isSuperAdmin && !isMediaAdmin) return false;
               if (item.churchAdminOnly && !canManageChurch) return false;
+              if (item.financeAdminOnly && !canAccessFinances) return false;
               return true;
             });
             if (visibleItems.length === 0) return null;

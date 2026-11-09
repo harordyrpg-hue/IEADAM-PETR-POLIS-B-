@@ -10,6 +10,9 @@ import {
   TeamTask,
   TeamNote,
   TeamTaskStatus,
+  FinancialTransaction,
+  FinancialBill,
+  FinancialPaymentMethod,
 } from '../types.js';
 import { api } from '../services/api.js';
 import { auth } from '../services/firebase.js';
@@ -55,6 +58,16 @@ interface AppContextType {
   createTeamNote: (data: Partial<TeamNote>) => Promise<TeamNote>;
   updateTeamNote: (id: string, updates: Partial<TeamNote>) => Promise<void>;
   deleteTeamNote: (id: string) => Promise<void>;
+  financialTransactions: FinancialTransaction[];
+  financialBills: FinancialBill[];
+  createFinancialTransaction: (data: Partial<FinancialTransaction>) => Promise<FinancialTransaction>;
+  updateFinancialTransaction: (id: string, updates: Partial<FinancialTransaction>) => Promise<void>;
+  deleteFinancialTransaction: (id: string) => Promise<void>;
+  createFinancialBill: (data: Partial<FinancialBill>) => Promise<FinancialBill>;
+  updateFinancialBill: (id: string, updates: Partial<FinancialBill>) => Promise<void>;
+  deleteFinancialBill: (id: string) => Promise<void>;
+  settleFinancialBill: (bill: FinancialBill, paymentMethod?: FinancialPaymentMethod, createTx?: boolean) => Promise<FinancialTransaction | null>;
+  canAccessFinances: boolean;
   activeFolderId: string | null;
   setActiveFolderId: (id: string | null) => void;
   activeEventId: string | null;
@@ -117,6 +130,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [events, setEvents] = useState<ChurchEvent[]>([]);
   const [teamTasks, setTeamTasks] = useState<TeamTask[]>([]);
   const [teamNotes, setTeamNotes] = useState<TeamNote[]>([]);
+  const [financialTransactions, setFinancialTransactions] = useState<FinancialTransaction[]>([]);
+  const [financialBills, setFinancialBills] = useState<FinancialBill[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -287,12 +302,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setTeamNotes(notesList);
     });
 
+    // 6. Real-time Financial Transactions & Bills sync (for authorized leaders)
+    let unsubFinTx = () => {};
+    let unsubFinBills = () => {};
+    if (
+      user.role === 'super_admin' ||
+      (user.role === 'media_admin' && user.canManageFinances !== false) ||
+      user.email?.toLowerCase().includes('pedro.martinss225') ||
+      user.email?.toLowerCase().includes('emillycampos308')
+    ) {
+      unsubFinTx = api.subscribeFinancialTransactions((records) => {
+        setFinancialTransactions(records);
+      });
+      unsubFinBills = api.subscribeFinancialBills((bills) => {
+        setFinancialBills(bills);
+      });
+    }
+
     return () => {
       unsubFiles();
       unsubFolders();
       unsubEvents();
       unsubTasks();
       unsubNotes();
+      unsubFinTx();
+      unsubFinBills();
     };
   }, [user]);
 
@@ -521,6 +555,92 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const canAccessFinances = !!(
+    user &&
+    (user.role === 'super_admin' ||
+      (user.role === 'media_admin' && user.canManageFinances !== false) ||
+      user.email?.toLowerCase().includes('pedro.martinss225') ||
+      user.email?.toLowerCase().includes('emillycampos308'))
+  );
+
+  // Financial Actions (Livro Caixa & Contas)
+  const createFinancialTransaction = async (data: Partial<FinancialTransaction>): Promise<FinancialTransaction> => {
+    try {
+      const tx = await api.createFinancialTransaction(data);
+      notify(data.type === 'entrada' ? 'Entrada de caixa registrada!' : 'Saída de caixa registrada!', 'success');
+      return tx;
+    } catch (err: any) {
+      notify('Erro ao registrar lançamento financeiro.', 'error');
+      throw err;
+    }
+  };
+
+  const updateFinancialTransaction = async (id: string, updates: Partial<FinancialTransaction>): Promise<void> => {
+    try {
+      await api.updateFinancialTransaction(id, updates);
+      notify('Lançamento atualizado!', 'success');
+    } catch (err: any) {
+      notify('Erro ao atualizar lançamento.', 'error');
+      throw err;
+    }
+  };
+
+  const deleteFinancialTransaction = async (id: string): Promise<void> => {
+    try {
+      await api.deleteFinancialTransaction(id);
+      notify('Lançamento excluído do caixa.', 'info');
+    } catch (err: any) {
+      notify('Erro ao excluir lançamento.', 'error');
+      throw err;
+    }
+  };
+
+  const createFinancialBill = async (data: Partial<FinancialBill>): Promise<FinancialBill> => {
+    try {
+      const bill = await api.createFinancialBill(data);
+      notify(bill.type === 'a_pagar' ? 'Conta a pagar cadastrada!' : 'Conta a receber cadastrada!', 'success');
+      return bill;
+    } catch (err: any) {
+      notify('Erro ao cadastrar conta/previsão.', 'error');
+      throw err;
+    }
+  };
+
+  const updateFinancialBill = async (id: string, updates: Partial<FinancialBill>): Promise<void> => {
+    try {
+      await api.updateFinancialBill(id, updates);
+      notify('Conta/Previsão atualizada!', 'success');
+    } catch (err: any) {
+      notify('Erro ao atualizar conta.', 'error');
+      throw err;
+    }
+  };
+
+  const deleteFinancialBill = async (id: string): Promise<void> => {
+    try {
+      await api.deleteFinancialBill(id);
+      notify('Conta/Previsão removida.', 'info');
+    } catch (err: any) {
+      notify('Erro ao excluir conta.', 'error');
+      throw err;
+    }
+  };
+
+  const settleFinancialBill = async (
+    bill: FinancialBill,
+    paymentMethod: FinancialPaymentMethod = 'pix',
+    createTx: boolean = true
+  ): Promise<FinancialTransaction | null> => {
+    try {
+      const tx = await api.settleFinancialBill(bill, paymentMethod, createTx);
+      notify(bill.type === 'a_pagar' ? 'Conta liquidada com sucesso!' : 'Recebimento confirmado com sucesso!', 'success');
+      return tx;
+    } catch (err: any) {
+      notify('Erro ao liquidar conta.', 'error');
+      throw err;
+    }
+  };
+
   // Screen Transmission to Projector / External Screen (Desktop only)
   const [isTransmitting, setIsTransmitting] = useState(false);
   const [transmissionStream, setTransmissionStream] = useState<MediaStream | null>(null);
@@ -638,6 +758,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         createTeamNote,
         updateTeamNote,
         deleteTeamNote,
+        financialTransactions,
+        financialBills,
+        createFinancialTransaction,
+        updateFinancialTransaction,
+        deleteFinancialTransaction,
+        createFinancialBill,
+        updateFinancialBill,
+        deleteFinancialBill,
+        settleFinancialBill,
+        canAccessFinances,
         activeFolderId,
         setActiveFolderId,
         activeEventId,

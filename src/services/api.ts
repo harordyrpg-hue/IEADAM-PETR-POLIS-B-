@@ -65,6 +65,10 @@ import {
   TeamTaskCategory,
   TeamTaskPriority,
   TeamTaskStatus,
+  FinancialTransaction,
+  FinancialBill,
+  FinancialReceipt,
+  FinancialPaymentMethod,
 } from '../types.js';
 import { createFileThumbnail } from '../utils/thumbnail.js';
 
@@ -2957,6 +2961,289 @@ export const api = {
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `team_notes/${id}`);
     }
+  },
+
+  // ==========================================
+  // LIVRO FINANCEIRO, CAIXA & GASTOS MÍDIA PT-B
+  // ==========================================
+
+  subscribeFinancialTransactions(callback: (records: FinancialTransaction[]) => void): () => void {
+    const q = collection(db, 'financial_records');
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const list: FinancialTransaction[] = snapshot.docs.map((d) => {
+          const t = d.data() as FinancialTransaction;
+          return {
+            ...t,
+            id: t.id || d.id,
+          };
+        });
+        // Sort by date descending (most recent first)
+        list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+        callback(list);
+      },
+      (error) => {
+        console.warn('Real-time financial transactions subscription sync:', error);
+      }
+    );
+  },
+
+  async getFinancialTransactions(): Promise<FinancialTransaction[]> {
+    try {
+      const snap = await getDocs(collection(db, 'financial_records'));
+      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as FinancialTransaction));
+      list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+      return list;
+    } catch (err) {
+      console.warn('Could not load financial transactions:', err);
+      return [];
+    }
+  },
+
+  async createFinancialTransaction(data: Partial<FinancialTransaction>): Promise<FinancialTransaction> {
+    const effective = api.getEffectiveUser();
+    const txId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const tx: FinancialTransaction = {
+      id: txId,
+      type: data.type || 'entrada',
+      title: data.title || 'Lançamento Financeiro',
+      amount: Number(data.amount) || 0,
+      date: data.date || new Date().toISOString().split('T')[0],
+      category: data.category || 'outro',
+      description: data.description || '',
+      counterparty: data.counterparty || 'Igreja / Ministério',
+      paymentMethod: data.paymentMethod || 'pix',
+      receipt: data.receipt || null,
+      status: data.status || 'confirmado',
+      createdByUid: effective.uid,
+      createdByName: effective.displayName,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDoc(doc(db, 'financial_records', txId), removeUndefinedValues(tx));
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: tx.type === 'entrada' ? 'create_income' : 'create_expense',
+        actionLabel: tx.type === 'entrada' ? 'Registrou Entrada de Caixa' : 'Registrou Saída de Caixa',
+        targetType: 'finance',
+        targetName: tx.title,
+        details: `R$ ${tx.amount.toFixed(2)} · ${tx.counterparty}`,
+      });
+      return tx;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `financial_records/${txId}`);
+    }
+  },
+
+  async updateFinancialTransaction(id: string, updates: Partial<FinancialTransaction>): Promise<void> {
+    try {
+      await updateDoc(doc(db, 'financial_records', id), removeUndefinedValues({
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `financial_records/${id}`);
+    }
+  },
+
+  async deleteFinancialTransaction(id: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, 'financial_records', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `financial_records/${id}`);
+    }
+  },
+
+  subscribeFinancialBills(callback: (bills: FinancialBill[]) => void): () => void {
+    const q = collection(db, 'financial_bills');
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const list: FinancialBill[] = snapshot.docs.map((d) => {
+          const b = d.data() as FinancialBill;
+          return {
+            ...b,
+            id: b.id || d.id,
+          };
+        });
+        // Sort: pending first, then by date (if has date), then without date
+        list.sort((a, b) => {
+          if (a.status === 'pendente' && b.status !== 'pendente') return -1;
+          if (a.status !== 'pendente' && b.status === 'pendente') return 1;
+          if (!a.dueDate && b.dueDate) return 1;
+          if (a.dueDate && !b.dueDate) return -1;
+          if (a.dueDate && b.dueDate) {
+            return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+          }
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+        callback(list);
+      },
+      (error) => {
+        console.warn('Real-time financial bills subscription sync:', error);
+      }
+    );
+  },
+
+  async getFinancialBills(): Promise<FinancialBill[]> {
+    try {
+      const snap = await getDocs(collection(db, 'financial_bills'));
+      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as FinancialBill));
+      return list;
+    } catch (err) {
+      console.warn('Could not load financial bills:', err);
+      return [];
+    }
+  },
+
+  async createFinancialBill(data: Partial<FinancialBill>): Promise<FinancialBill> {
+    const effective = api.getEffectiveUser();
+    const billId = `bill_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const bill: FinancialBill = {
+      id: billId,
+      type: data.type || 'a_pagar',
+      title: data.title || 'Conta / Previsão',
+      amount: Number(data.amount) || 0,
+      category: data.category || 'outro',
+      description: data.description || '',
+      counterparty: data.counterparty || 'Fornecedor / Responsável',
+      dueDate: data.hasNoForecast ? null : (data.dueDate || null),
+      hasNoForecast: !!data.hasNoForecast,
+      priority: data.priority || 'media',
+      status: data.status || 'pendente',
+      receipt: data.receipt || null,
+      createdByUid: effective.uid,
+      createdByName: effective.displayName,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDoc(doc(db, 'financial_bills', billId), removeUndefinedValues(bill));
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'create_bill',
+        actionLabel: bill.type === 'a_pagar' ? 'Cadastrou Conta a Pagar' : 'Cadastrou Conta a Receber',
+        targetType: 'finance_bill',
+        targetName: bill.title,
+        details: `R$ ${bill.amount.toFixed(2)} · ${bill.counterparty}`,
+      });
+      return bill;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `financial_bills/${billId}`);
+    }
+  },
+
+  async updateFinancialBill(id: string, updates: Partial<FinancialBill>): Promise<void> {
+    try {
+      await updateDoc(doc(db, 'financial_bills', id), removeUndefinedValues({
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `financial_bills/${id}`);
+    }
+  },
+
+  async deleteFinancialBill(id: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, 'financial_bills', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `financial_bills/${id}`);
+    }
+  },
+
+  async settleFinancialBill(
+    bill: FinancialBill,
+    paymentMethod: FinancialPaymentMethod = 'pix',
+    createTransaction: boolean = true
+  ): Promise<FinancialTransaction | null> {
+    try {
+      await api.updateFinancialBill(bill.id, {
+        status: 'pago',
+        paidAt: new Date().toISOString(),
+      });
+
+      if (createTransaction) {
+        const tx = await api.createFinancialTransaction({
+          type: bill.type === 'a_pagar' ? 'saida' : 'entrada',
+          title: bill.title,
+          amount: bill.amount,
+          date: new Date().toISOString().split('T')[0],
+          category: bill.category,
+          description: `Liquidação de conta (${bill.type === 'a_pagar' ? 'Conta Paga' : 'Conta Recebida'}): ${bill.description}`,
+          counterparty: bill.counterparty,
+          paymentMethod,
+          receipt: bill.receipt || null,
+          status: 'confirmado',
+        });
+        return tx;
+      }
+      return null;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `financial_bills/${bill.id}/settle`);
+      return null;
+    }
+  },
+
+  async uploadFinancialReceipt(file: File): Promise<FinancialReceipt> {
+    const isImage = file.type.startsWith('image/');
+    const isPdf = file.type.includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
+    const docType: 'image' | 'pdf' | 'document' = isImage ? 'image' : (isPdf ? 'pdf' : 'document');
+
+    // 1. Try server API upload
+    try {
+      const res = await new Promise<{ downloadUrl: string }>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload', true);
+        xhr.setRequestHeader('x-filename', encodeURIComponent(`recibo_${Date.now()}_${file.name}`));
+        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (err) {
+              reject(err);
+            }
+          } else {
+            reject(new Error(`Status ${xhr.status}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(file);
+      });
+
+      if (res?.downloadUrl) {
+        return {
+          url: res.downloadUrl,
+          name: file.name,
+          type: docType,
+          size: file.size,
+        };
+      }
+    } catch (err) {
+      console.warn('Upload via /api/upload falhou, usando FileReader DataURL fallback:', err);
+    }
+
+    // 2. High-performance fallback: FileReader DataURL
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve({
+          url: reader.result as string,
+          name: file.name,
+          type: docType,
+          size: file.size,
+        });
+      };
+      reader.onerror = () => reject(new Error('Falha ao ler arquivo de comprovante'));
+      reader.readAsDataURL(file);
+    });
   },
 
   // No automatic seeding - team members create and manage their own tasks and schedules

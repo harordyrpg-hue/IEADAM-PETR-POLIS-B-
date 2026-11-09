@@ -10,6 +10,7 @@ export interface User {
   avatar: string;
   status: 'active' | 'blocked';
   canManageChurchPage?: boolean;
+  canManageFinances?: boolean;
   createdAt: string;
   updatedAt?: string;
 }
@@ -182,7 +183,8 @@ export type ViewTab =
   | 'history'
   | 'settings'
   | 'storage'
-  | 'profile';
+  | 'profile'
+  | 'finances';
 
 export interface ChurchLeadershipMember {
   id: string;
@@ -392,4 +394,92 @@ export interface TeamNote {
   tags?: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+// ==========================================
+// LIVRO FINANCEIRO, CAIXA & GASTOS — PT-B MÍDIA
+// ==========================================
+export type FinancialTransactionType = 'entrada' | 'saida';
+
+export type FinancialPaymentMethod =
+  | 'pix'
+  | 'dinheiro'
+  | 'cartao_credito'
+  | 'cartao_debito'
+  | 'transferencia'
+  | 'boleto'
+  | 'outro';
+
+export type FinancialCategory =
+  | 'dizimos_ofertas'
+  | 'doacao_especifica'
+  | 'equipamentos'
+  | 'cabos_conectores'
+  | 'streaming_internet'
+  | 'iluminacao'
+  | 'cenografia'
+  | 'manutencao_tecnica'
+  | 'servicos_terceiros'
+  | 'alimentacao_equipe'
+  | 'transporte'
+  | 'eventos_especiais'
+  | 'outro';
+
+export interface FinancialReceipt {
+  url: string;
+  name: string;
+  type: 'image' | 'pdf' | 'document';
+  size?: number;
+}
+
+export interface FinancialTransaction {
+  id: string;
+  type: FinancialTransactionType;
+  title: string;
+  amount: number; // In BRL (Reais)
+  date: string; // YYYY-MM-DD
+  category: FinancialCategory | string;
+  description: string; // Motivo detalhado (de onde veio ou para onde vai)
+  counterparty: string; // De quem veio (origem) ou para quem foi (destino/favorecido)
+  paymentMethod: FinancialPaymentMethod;
+  receipt?: FinancialReceipt | null;
+  status: 'confirmado' | 'pendente' | 'cancelado';
+  createdByUid: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FinancialBillType = 'a_pagar' | 'a_receber';
+export type FinancialBillPriority = 'baixa' | 'media' | 'alta' | 'urgente';
+export type FinancialBillStatus = 'pendente' | 'pago' | 'cancelado';
+
+export interface FinancialBill {
+  id: string;
+  type: FinancialBillType;
+  title: string;
+  amount: number;
+  category: FinancialCategory | string;
+  description: string; // Motivo / finalidade
+  counterparty: string; // Favorecido ou Pagador
+  dueDate: string | null; // YYYY-MM-DD ou null se for sem previsão
+  hasNoForecast: boolean; // Gasto futuro sem data definida
+  priority: FinancialBillPriority;
+  status: FinancialBillStatus;
+  paidAt?: string | null;
+  receipt?: FinancialReceipt | null;
+  createdByUid: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinancialSummary {
+  currentBalance: number; // Total Entradas confirmadas - Total Saídas confirmadas
+  totalIncome: number;
+  totalExpense: number;
+  pendingPayable: number;
+  pendingReceivable: number;
+  futureExpensesWithDate: number;
+  futureExpensesWithoutForecast: number;
 }
