@@ -315,7 +315,40 @@ const checkIsChurchRoute = () => {
   if (typeof window === 'undefined') return false;
   const path = window.location.pathname.toLowerCase();
   const hash = window.location.hash.toLowerCase();
-  return path === '/igreja' || path.startsWith('/igreja/') || hash === '#igreja' || hash.startsWith('#igreja');
+  const searchParams = new URLSearchParams(window.location.search);
+
+  // Path routing
+  if (path === '/igreja' || path.startsWith('/igreja') || path === '/site' || path.startsWith('/site')) {
+    return true;
+  }
+
+  // Hash routing
+  if (
+    hash === '#igreja' ||
+    hash.startsWith('#igreja') ||
+    hash === '#site' ||
+    hash.startsWith('#site') ||
+    hash === '#portal' ||
+    hash === '#publico'
+  ) {
+    return true;
+  }
+
+  // Query parameter routing (guaranteed to work across all iframe & static hosting setups)
+  if (
+    searchParams.has('site') ||
+    searchParams.has('igreja') ||
+    searchParams.has('portal') ||
+    searchParams.has('publico') ||
+    searchParams.get('tab') === 'igreja' ||
+    searchParams.get('view') === 'igreja' ||
+    searchParams.get('view') === 'church' ||
+    searchParams.get('page') === 'church'
+  ) {
+    return true;
+  }
+
+  return false;
 };
 
 export default function App() {

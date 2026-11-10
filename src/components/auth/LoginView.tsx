@@ -227,12 +227,29 @@ export const LoginView: React.FC = () => {
                 setErrorMessage(null);
                 setMode('login');
               }}
-              className="text-xs text-neutral-400 hover:text-neutral-200 underline"
+              className="text-xs text-neutral-400 hover:text-neutral-200 underline cursor-pointer"
             >
               Voltar ao login
             </button>
           </div>
         )}
+
+        {/* Public Church Page Access Link */}
+        <div className="mt-6 pt-4 border-t border-neutral-800 text-center">
+          <button
+            type="button"
+            onClick={() => {
+              window.location.hash = '#igreja';
+            }}
+            className="w-full py-2.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-amber-200 text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
+          >
+            <span>⛪ Visitar Site Público da Igreja</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+          <p className="text-[10px] text-neutral-500 mt-1.5">
+            Acesso livre para visitantes e membros (sem necessidade de login)
+          </p>
+        </div>
       </div>
     </div>
   );

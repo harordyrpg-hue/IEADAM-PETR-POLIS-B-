@@ -124,7 +124,7 @@ export const ChurchPublicNavbar: React.FC<ChurchPublicNavbarProps> = ({ profile 
               ))}
             </div>
 
-            {/* Right Action: Conheça-nos / WhatsApp */}
+            {/* Right Action: Conheça-nos / WhatsApp / Admin */}
             <div className="hidden sm:flex items-center gap-2">
               {whatsappClean && (
                 <a
@@ -137,6 +137,24 @@ export const ChurchPublicNavbar: React.FC<ChurchPublicNavbarProps> = ({ profile 
                   <span>Fale Conosco</span>
                 </a>
               )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete('site');
+                  url.searchParams.delete('igreja');
+                  url.searchParams.delete('portal');
+                  url.searchParams.delete('publico');
+                  url.hash = '';
+                  window.history.replaceState({}, '', url.pathname);
+                  window.location.reload();
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white border border-stone-700 transition-all cursor-pointer"
+                title="Acessar o Painel Administrativo PT-B Mídia"
+              >
+                <span>Painel Admin</span>
+              </button>
             </div>
 
             {/* Mobile Hamburger Button */}

@@ -112,11 +112,18 @@ export async function exportRegistrationTicketPDF(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(245, 158, 11); // Amber 500
-  doc.text('COMPROVANTE OFICIAL DE INSCRIÇÃO & CREDENCIAL', margin + 6, y + 8.5);
+  const isPaid = !!(registration.isPaidEvent || event?.isPaid);
+  const ticketTitle = isPaid
+    ? 'COMPROVANTE DE PAGAMENTO & INGRESSO PAGO'
+    : 'COMPROVANTE OFICIAL DE INSCRIÇÃO & CREDENCIAL';
+  doc.text(ticketTitle, margin + 6, y + 8.5);
 
   doc.setFontSize(8);
   doc.setTextColor(52, 211, 153); // Emerald text
-  doc.text('INSCRIÇÃO CONFIRMADA', pageWidth - margin - 6, y + 8.5, { align: 'right' });
+  const statusLabel = isPaid
+    ? 'PAGAMENTO CONFIRMADO'
+    : 'INSCRIÇÃO CONFIRMADA';
+  doc.text(statusLabel, pageWidth - margin - 6, y + 8.5, { align: 'right' });
 
   // 4. Registration ID & Event Name Hero Card
   y += 19;
@@ -128,15 +135,25 @@ export async function exportRegistrationTicketPDF(
   doc.setFontSize(7.5);
   doc.setTextColor(107, 114, 128);
   doc.text('CÓDIGO DE INSCRIÇÃO (CHECK-IN):', margin + 6, y + 7);
-  doc.text('EVENTO:', margin + 70, y + 7);
+  doc.text('EVENTO:', margin + 60, y + 7);
+  if (isPaid) {
+    doc.text('VALOR PAGO:', margin + contentWidth - 45, y + 7);
+  }
 
   doc.setFontSize(11);
   doc.setTextColor(217, 119, 6); // Amber code
   doc.text(registration.id, margin + 6, y + 14);
 
-  doc.setFontSize(11);
+  doc.setFontSize(10.5);
   doc.setTextColor(17, 24, 39);
-  doc.text(registration.eventName, margin + 70, y + 14);
+  doc.text(registration.eventName, margin + 60, y + 14);
+
+  if (isPaid) {
+    const priceVal = registration.ticketPrice || event?.price || 0;
+    doc.setFontSize(11);
+    doc.setTextColor(16, 185, 129); // Emerald 500
+    doc.text(`R$ ${priceVal.toFixed(2)}`, margin + contentWidth - 45, y + 14);
+  }
 
   y += 30;
 

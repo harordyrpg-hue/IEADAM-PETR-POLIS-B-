@@ -30,6 +30,12 @@ import {
   Shield,
   Palette,
   Image as ImageIcon,
+  DollarSign,
+  CreditCard,
+  MessageCircle,
+  Hourglass,
+  Check,
+  RotateCcw,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import {
@@ -53,7 +59,7 @@ export const PublicEventsAdminView: React.FC = () => {
   const [attendees, setAttendees] = useState<EventRegistration[]>([]);
   const [attendeesLoading, setAttendeesLoading] = useState(false);
   const [attendeeSearch, setAttendeeSearch] = useState('');
-  const [attendeeStatusFilter, setAttendeeStatusFilter] = useState<'all' | 'confirmada' | 'presente'>('all');
+  const [attendeeStatusFilter, setAttendeeStatusFilter] = useState<'all' | 'waiting' | 'paid' | 'expired' | 'rejected' | 'presente'>('all');
 
   // Event Modal (Create / Edit & Form Builder)
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -70,6 +76,17 @@ export const PublicEventsAdminView: React.FC = () => {
   );
   const [maxRegistrations, setMaxRegistrations] = useState<string>('');
   const [status, setStatus] = useState<'aberto' | 'encerrado' | 'em_breve'>('aberto');
+
+  // Paid Event Settings
+  const [isPaid, setIsPaid] = useState(false);
+  const [price, setPrice] = useState<string>('30.00');
+  const [paymentType, setPaymentType] = useState<'pix' | 'whatsapp'>('pix');
+  const [pixKey, setPixKey] = useState('');
+  const [pixCode, setPixCode] = useState('');
+  const [pixBeneficiary, setPixBeneficiary] = useState('IEADAM Petrópolis B');
+  const [whatsappPaymentNumber, setWhatsappPaymentNumber] = useState('');
+  const [paymentTimeoutMinutes, setPaymentTimeoutMinutes] = useState<number>(10);
+  const [supportWhatsappNumber, setSupportWhatsappNumber] = useState('');
 
   // Standard Fields Config
   const [standardFields, setStandardFields] = useState({
@@ -145,6 +162,18 @@ export const PublicEventsAdminView: React.FC = () => {
     setRulesAndNotes(event.rulesAndNotes || '');
     setMaxRegistrations(event.maxRegistrations ? String(event.maxRegistrations) : '');
     setStatus(event.status);
+
+    // Paid Event Data
+    setIsPaid(!!event.isPaid);
+    setPrice(event.price !== undefined ? String(event.price) : '30.00');
+    setPaymentType(event.paymentType || 'pix');
+    setPixKey(event.pixKey || '');
+    setPixCode(event.pixCode || '');
+    setPixBeneficiary(event.pixBeneficiary || 'IEADAM Petrópolis B');
+    setWhatsappPaymentNumber(event.whatsappPaymentNumber || '');
+    setPaymentTimeoutMinutes(event.paymentTimeoutMinutes || 10);
+    setSupportWhatsappNumber(event.supportWhatsappNumber || '');
+
     setStandardFields(
       event.standardFields || {
         fullName: { enabled: true, required: true, label: 'Nome Completo' },
@@ -174,6 +203,18 @@ export const PublicEventsAdminView: React.FC = () => {
     );
     setMaxRegistrations('');
     setStatus('aberto');
+
+    // Reset Paid Event fields
+    setIsPaid(false);
+    setPrice('30.00');
+    setPaymentType('pix');
+    setPixKey('');
+    setPixCode('');
+    setPixBeneficiary('IEADAM Petrópolis B');
+    setWhatsappPaymentNumber('');
+    setPaymentTimeoutMinutes(10);
+    setSupportWhatsappNumber('');
+
     setStandardFields({
       fullName: { enabled: true, required: true, label: 'Nome Completo' },
       phone: { enabled: true, required: true, label: 'Telefone / WhatsApp' },
@@ -252,6 +293,17 @@ export const PublicEventsAdminView: React.FC = () => {
         status,
         standardFields,
         customFields,
+
+        // Paid Event Data
+        isPaid,
+        price: isPaid ? (parseFloat(price) || 0) : 0,
+        paymentType,
+        pixKey: isPaid && paymentType === 'pix' ? pixKey.trim() : undefined,
+        pixCode: isPaid && paymentType === 'pix' ? pixCode.trim() : undefined,
+        pixBeneficiary: isPaid && paymentType === 'pix' ? pixBeneficiary.trim() : undefined,
+        whatsappPaymentNumber: isPaid && paymentType === 'whatsapp' ? whatsappPaymentNumber.replace(/\D/g, '') : undefined,
+        paymentTimeoutMinutes: Number(paymentTimeoutMinutes) || 10,
+        supportWhatsappNumber: supportWhatsappNumber.replace(/\D/g, '') || undefined,
       };
 
       if (editingEventId) {
@@ -271,10 +323,52 @@ export const PublicEventsAdminView: React.FC = () => {
     }
   };
 
+  // Queue actions
+  const handleConfirmPayment = async (attendee: EventRegistration) => {
+    try {
+      await api.confirmRegistrationPayment(attendee.id, user ? { uid: user.uid, name: user.name } : undefined);
+      notify(`Pagamento de ${attendee.fullName} CONFIRMADO! Ingresso liberado na tela do inscrito.`, 'success');
+    } catch {
+      notify('Erro ao confirmar pagamento.', 'error');
+    }
+  };
+
+  const handleRejectPayment = async (attendee: EventRegistration) => {
+    if (!confirm(`Deseja marcar o pagamento de ${attendee.fullName} como NÃO PAGO / CANCELADO?`)) return;
+    try {
+      await api.rejectRegistrationPayment(attendee.id);
+      notify(`Inscrição de ${attendee.fullName} marcada como NÃO PAGA.`, 'info');
+    } catch {
+      notify('Erro ao rejeitar pagamento.', 'error');
+    }
+  };
+
+  const handleExtendWaitTime = async (attendee: EventRegistration) => {
+    try {
+      await api.extendRegistrationWaitTime(attendee.id, 5);
+      notify(`Tempo de espera de ${attendee.fullName} aumentado em +5 minutos!`, 'success');
+    } catch {
+      notify('Erro ao estender tempo.', 'error');
+    }
+  };
+
   // Attendees Statistics Calculations
   const stats = useMemo(() => {
     const total = attendees.length;
     const checkedIn = attendees.filter((a) => a.status === 'presente').length;
+    const now = Date.now();
+    const waitingPayment = attendees.filter((a) => a.paymentStatus === 'waiting_confirmation').length;
+    const confirmedPaid = attendees.filter((a) => a.paymentStatus === 'paid' || a.paymentStatus === 'free').length;
+    const expiredPayment = attendees.filter((a) => {
+      if (a.paymentStatus === 'expired') return true;
+      if (a.paymentStatus === 'waiting_confirmation' && a.paymentExpiresAt) {
+        return new Date(a.paymentExpiresAt).getTime() < now;
+      }
+      return false;
+    }).length;
+    const totalRevenue = attendees
+      .filter((a) => a.paymentStatus === 'paid')
+      .reduce((acc, a) => acc + (a.ticketPrice || 0), 0);
 
     const churchCount: Record<string, number> = {};
     const areaCount: Record<string, number> = {};
@@ -295,15 +389,31 @@ export const PublicEventsAdminView: React.FC = () => {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
-    return { total, checkedIn, topChurches, topAreas };
+    return { total, checkedIn, waitingPayment, confirmedPaid, expiredPayment, totalRevenue, topChurches, topAreas };
   }, [attendees]);
 
   // Filtered Attendees
   const filteredAttendees = useMemo(() => {
+    const now = Date.now();
     return attendees.filter((a) => {
-      if (attendeeStatusFilter !== 'all' && a.status !== attendeeStatusFilter) {
-        return false;
+      const isExpired =
+        a.paymentStatus === 'expired' ||
+        (a.paymentStatus === 'waiting_confirmation' &&
+          a.paymentExpiresAt &&
+          new Date(a.paymentExpiresAt).getTime() < now);
+
+      if (attendeeStatusFilter === 'waiting') {
+        if (a.paymentStatus !== 'waiting_confirmation') return false;
+      } else if (attendeeStatusFilter === 'paid') {
+        if (a.paymentStatus !== 'paid' && a.paymentStatus !== 'free') return false;
+      } else if (attendeeStatusFilter === 'expired') {
+        if (!isExpired) return false;
+      } else if (attendeeStatusFilter === 'rejected') {
+        if (a.paymentStatus !== 'rejected' && a.status !== 'cancelada') return false;
+      } else if (attendeeStatusFilter === 'presente') {
+        if (a.status !== 'presente') return false;
       }
+
       if (attendeeSearch.trim()) {
         const q = attendeeSearch.toLowerCase();
         const matchName = a.fullName.toLowerCase().includes(q);
@@ -528,42 +638,85 @@ export const PublicEventsAdminView: React.FC = () => {
           {/* Quick Stats Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
-              <div className="text-xs text-neutral-400 font-semibold mb-1">Total de Inscritos</div>
+              <div className="text-xs text-neutral-400 font-semibold mb-1">Total de Participantes</div>
               <div className="text-3xl font-bold font-mono-numbers text-neutral-100">{stats.total}</div>
-              <div className="text-[10px] text-neutral-400 mt-1">Candidatos cadastrados no link público</div>
-            </div>
-
-            <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
-              <div className="text-xs text-neutral-400 font-semibold mb-1">Check-Ins Confirmados</div>
-              <div className="text-3xl font-bold font-mono-numbers text-emerald-400">{stats.checkedIn}</div>
-              <div className="text-[10px] text-emerald-400/80 mt-1">
-                {stats.total > 0 ? ((stats.checkedIn / stats.total) * 100).toFixed(0) : 0}% presentes no evento
+              <div className="text-[10px] text-neutral-400 mt-1">
+                {selectedEventForAttendees.isPaid
+                  ? `Ingresso: R$ ${(selectedEventForAttendees.price || 0).toFixed(2)}`
+                  : 'Evento Gratuito'}
               </div>
             </div>
 
-            <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
-              <div className="text-xs text-neutral-400 font-semibold mb-1">Principais Congregações</div>
-              <div className="space-y-1 mt-2">
-                {stats.topChurches.slice(0, 2).map(([ch, cnt]) => (
-                  <div key={ch} className="text-xs text-neutral-300 flex items-center justify-between">
-                    <span className="truncate max-w-[140px]">{ch}</span>
-                    <span className="font-bold font-mono-numbers text-amber-400">{cnt}</span>
+            {selectedEventForAttendees.isPaid ? (
+              <>
+                <div className={`p-4 bg-neutral-900 border rounded-2xl ${stats.waitingPayment > 0 ? 'border-amber-500/50 bg-amber-500/5' : 'border-neutral-800'}`}>
+                  <div className="text-xs text-amber-400 font-semibold mb-1 flex items-center gap-1.5">
+                    <Hourglass className="w-3.5 h-3.5" />
+                    <span>Fila Aguardando Pagamento</span>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
-              <div className="text-xs text-neutral-400 font-semibold mb-1">Principais Áreas</div>
-              <div className="space-y-1 mt-2">
-                {stats.topAreas.slice(0, 2).map(([ar, cnt]) => (
-                  <div key={ar} className="text-xs text-neutral-300 flex items-center justify-between">
-                    <span className="truncate max-w-[140px]">{ar}</span>
-                    <span className="font-bold font-mono-numbers text-purple-400">{cnt}</span>
+                  <div className="text-3xl font-bold font-mono-numbers text-amber-400">{stats.waitingPayment}</div>
+                  <div className="text-[10px] text-amber-300/80 mt-1">
+                    Aguardando conferência do vendedor
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
+
+                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
+                  <div className="text-xs text-emerald-400 font-semibold mb-1 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Pagamentos Confirmados</span>
+                  </div>
+                  <div className="text-3xl font-bold font-mono-numbers text-emerald-400">{stats.confirmedPaid}</div>
+                  <div className="text-[10px] text-emerald-400/80 mt-1">
+                    Arrecadação: R$ {stats.totalRevenue.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className={`p-4 bg-neutral-900 border rounded-2xl ${stats.expiredPayment > 0 ? 'border-red-500/60 bg-red-500/10' : 'border-neutral-800'}`}>
+                  <div className="text-xs text-red-400 font-semibold mb-1 flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Tempo Excedido</span>
+                  </div>
+                  <div className="text-3xl font-bold font-mono-numbers text-red-400">{stats.expiredPayment}</div>
+                  <div className="text-[10px] text-red-300/80 mt-1">
+                    Tempo limite de espera esgotado
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
+                  <div className="text-xs text-neutral-400 font-semibold mb-1">Check-Ins Confirmados</div>
+                  <div className="text-3xl font-bold font-mono-numbers text-emerald-400">{stats.checkedIn}</div>
+                  <div className="text-[10px] text-emerald-400/80 mt-1">
+                    {stats.total > 0 ? ((stats.checkedIn / stats.total) * 100).toFixed(0) : 0}% presentes no evento
+                  </div>
+                </div>
+
+                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
+                  <div className="text-xs text-neutral-400 font-semibold mb-1">Principais Congregações</div>
+                  <div className="space-y-1 mt-2">
+                    {stats.topChurches.slice(0, 2).map(([ch, cnt]) => (
+                      <div key={ch} className="text-xs text-neutral-300 flex items-center justify-between">
+                        <span className="truncate max-w-[140px]">{ch}</span>
+                        <span className="font-bold font-mono-numbers text-amber-400">{cnt}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
+                  <div className="text-xs text-neutral-400 font-semibold mb-1">Principais Áreas</div>
+                  <div className="space-y-1 mt-2">
+                    {stats.topAreas.slice(0, 2).map(([ar, cnt]) => (
+                      <div key={ar} className="text-xs text-neutral-300 flex items-center justify-between">
+                        <span className="truncate max-w-[140px]">{ar}</span>
+                        <span className="font-bold font-mono-numbers text-purple-400">{cnt}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Attendees Table Controls */}
@@ -579,10 +732,52 @@ export const PublicEventsAdminView: React.FC = () => {
               />
             </div>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto scrollbar-none pb-1 sm:pb-0">
+              {selectedEventForAttendees.isPaid && (
+                <button
+                  onClick={() => setAttendeeStatusFilter('waiting')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer ${
+                    attendeeStatusFilter === 'waiting'
+                      ? 'bg-amber-500 text-neutral-950'
+                      : 'bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
+                  }`}
+                >
+                  <Hourglass className="w-3.5 h-3.5" />
+                  <span>Fila de Pagamento ({stats.waitingPayment})</span>
+                </button>
+              )}
+
+              {selectedEventForAttendees.isPaid && (
+                <button
+                  onClick={() => setAttendeeStatusFilter('paid')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer ${
+                    attendeeStatusFilter === 'paid'
+                      ? 'bg-emerald-500 text-neutral-950'
+                      : 'text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Pagos ({stats.confirmedPaid})</span>
+                </button>
+              )}
+
+              {selectedEventForAttendees.isPaid && stats.expiredPayment > 0 && (
+                <button
+                  onClick={() => setAttendeeStatusFilter('expired')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer ${
+                    attendeeStatusFilter === 'expired'
+                      ? 'bg-red-500 text-white'
+                      : 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20'
+                  }`}
+                >
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Tempo Excedido ({stats.expiredPayment})</span>
+                </button>
+              )}
+
               <button
                 onClick={() => setAttendeeStatusFilter('all')}
-                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                   attendeeStatusFilter === 'all'
                     ? 'bg-neutral-800 text-neutral-100'
                     : 'text-neutral-400 hover:text-neutral-200'
@@ -590,25 +785,16 @@ export const PublicEventsAdminView: React.FC = () => {
               >
                 Todos ({attendees.length})
               </button>
-              <button
-                onClick={() => setAttendeeStatusFilter('confirmada')}
-                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                  attendeeStatusFilter === 'confirmada'
-                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                    : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                Inscritos ({attendees.filter((a) => a.status === 'confirmada').length})
-              </button>
+
               <button
                 onClick={() => setAttendeeStatusFilter('presente')}
-                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                   attendeeStatusFilter === 'presente'
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                     : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
-                Presentes ({attendees.filter((a) => a.status === 'presente').length})
+                Presentes ({stats.checkedIn})
               </button>
             </div>
           </div>
@@ -625,21 +811,34 @@ export const PublicEventsAdminView: React.FC = () => {
                   <tr>
                     <th className="p-3.5">Check-In</th>
                     <th className="p-3.5">Código / Nome</th>
+                    {selectedEventForAttendees.isPaid && <th className="p-3.5">Status & Fila</th>}
                     <th className="p-3.5">Telefone / WhatsApp</th>
                     <th className="p-3.5">Igreja & Área</th>
-                    <th className="p-3.5">Líder & Pastor</th>
-                    <th className="p-3.5 text-right">Ações</th>
+                    <th className="p-3.5 text-right">Ações & Verificação</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-800/60">
                   {filteredAttendees.map((a) => {
                     const isPresent = a.status === 'presente';
+                    const isWaiting = a.paymentStatus === 'waiting_confirmation';
+                    const isPaidConfirmed = a.paymentStatus === 'paid';
+                    const isRejected = a.paymentStatus === 'rejected';
+
+                    // Check timeout
+                    const now = Date.now();
+                    const expiresMs = a.paymentExpiresAt ? new Date(a.paymentExpiresAt).getTime() : now;
+                    const diffSec = Math.floor((expiresMs - now) / 1000);
+                    const isTimedOut = isWaiting && diffSec <= 0;
+                    const remMin = Math.floor(Math.max(0, diffSec) / 60);
+                    const remSec = Math.max(0, diffSec) % 60;
+                    const timerText = `${remMin.toString().padStart(2, '0')}:${remSec.toString().padStart(2, '0')}`;
+
                     return (
-                      <tr key={a.id} className="hover:bg-neutral-850/50 transition-colors">
+                      <tr key={a.id} className={`hover:bg-neutral-850/50 transition-colors ${isWaiting ? 'bg-amber-500/5' : ''}`}>
                         <td className="p-3.5">
                           <button
                             onClick={() => handleToggleCheckIn(a)}
-                            className={`p-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-semibold ${
+                            className={`p-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
                               isPresent
                                 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                                 : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'
@@ -657,6 +856,54 @@ export const PublicEventsAdminView: React.FC = () => {
                           {a.email && <div className="text-[10px] text-neutral-400">{a.email}</div>}
                         </td>
 
+                        {selectedEventForAttendees.isPaid && (
+                          <td className="p-3.5">
+                            {isWaiting && (
+                              <div className="space-y-1">
+                                {isTimedOut ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 font-bold text-[10px] uppercase animate-pulse">
+                                    <AlertCircle className="w-3 h-3" />
+                                    Tempo Máximo Atingido
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 font-bold text-[10px] uppercase">
+                                    <Hourglass className="w-3 h-3 animate-spin" />
+                                    Aguardando ({timerText})
+                                  </span>
+                                )}
+                                <div className="text-[10px] text-neutral-400">
+                                  Via {a.paymentType === 'whatsapp' ? 'WhatsApp' : 'Pix Copie e Cole'} • R$ {(a.ticketPrice || 0).toFixed(2)}
+                                </div>
+                                {a.extendedMinutes && a.extendedMinutes > 0 && (
+                                  <div className="text-[9px] text-amber-400/80 font-mono">
+                                    +{a.extendedMinutes}m extras adicionados
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {isPaidConfirmed && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 font-bold text-[10px] uppercase">
+                                <CheckCircle2 className="w-3 h-3" />
+                                Pagamento Confirmado
+                              </span>
+                            )}
+
+                            {isRejected && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 font-bold text-[10px] uppercase">
+                                <X className="w-3 h-3" />
+                                Não Pago / Cancelado
+                              </span>
+                            )}
+
+                            {!isWaiting && !isPaidConfirmed && !isRejected && (
+                              <span className="text-[10px] text-neutral-400 uppercase font-semibold">
+                                {a.paymentStatus || 'Gratuito'}
+                              </span>
+                            )}
+                          </td>
+                        )}
+
                         <td className="p-3.5">
                           <div className="font-mono-numbers text-neutral-200">{a.phone}</div>
                           {a.phone && (
@@ -667,7 +914,7 @@ export const PublicEventsAdminView: React.FC = () => {
                               className="text-[10px] text-emerald-400 hover:underline inline-flex items-center gap-1 mt-0.5"
                             >
                               <Phone className="w-2.5 h-2.5" />
-                              Chamar no WhatsApp
+                              WhatsApp
                             </a>
                           )}
                         </td>
@@ -677,27 +924,57 @@ export const PublicEventsAdminView: React.FC = () => {
                           <div className="text-[10px] text-neutral-400">Área: {a.area || 'Geral'}</div>
                         </td>
 
-                        <td className="p-3.5">
-                          <div className="text-neutral-300">Líder: {a.responsibleLeader || '-'}</div>
-                          <div className="text-[10px] text-neutral-400">Pastor: {a.responsiblePastor || '-'}</div>
-                        </td>
-
                         <td className="p-3.5 text-right">
-                          <div className="flex items-center justify-end gap-1">
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                            {/* Verification Queue Action Buttons */}
+                            {selectedEventForAttendees.isPaid && isWaiting && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleConfirmPayment(a)}
+                                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 cursor-pointer"
+                                  title="Confirmar recebimento do pagamento"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Pagou</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleRejectPayment(a)}
+                                  className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-300 rounded-lg text-xs font-medium transition-all flex items-center gap-1 cursor-pointer"
+                                  title="Não pagou / Cancelar inscrição"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                  <span>Não Pagou</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleExtendWaitTime(a)}
+                                  className="px-2 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-semibold transition-all flex items-center gap-0.5 cursor-pointer"
+                                  title="Aumentar tempo de espera em +5 minutos"
+                                >
+                                  <span>+5m</span>
+                                </button>
+                              </>
+                            )}
+
                             <button
                               onClick={() => exportRegistrationTicketPDF(a, selectedEventForAttendees)}
-                              className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded-lg transition-colors"
+                              className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
                               title="Baixar Credencial PDF com QR Code"
                             >
                               <Download className="w-4 h-4" />
                             </button>
+
                             <button
                               onClick={async () => {
                                 if (window.confirm(`Excluir inscrição de ${a.fullName}?`)) {
                                   await api.deleteEventRegistration(a.id);
                                 }
                               }}
-                              className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-lg transition-colors"
+                              className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-lg transition-colors cursor-pointer"
                               title="Excluir inscrição"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -947,11 +1224,254 @@ export const PublicEventsAdminView: React.FC = () => {
                 </div>
               </div>
 
-              {/* SECTION 2: ANOTAÇÕES & REGRAS DO EVENTO */}
+              {/* SECTION 2: CONFIGURAÇÃO DE PAGAMENTO & INGRESSOS */}
+              <div className="pt-2 border-t border-neutral-800">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-3 flex items-center gap-1.5">
+                  <DollarSign className="w-4 h-4 text-emerald-400" />
+                  2. Modalidade do Evento: Gratuito ou Pago
+                </h4>
+
+                <div className="space-y-4 bg-neutral-950/70 p-4 rounded-2xl border border-neutral-800">
+                  {/* Free vs Paid Toggle */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsPaid(false)}
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                        !isPaid
+                          ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                          : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-neutral-200'
+                      }`}
+                    >
+                      <div className="font-semibold text-xs flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Evento Gratuito</span>
+                      </div>
+                      <p className="text-[10px] text-neutral-400 mt-0.5">
+                        Inscrição direta com emissão imediata da credencial e QR Code.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsPaid(true)}
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                        isPaid
+                          ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                          : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-neutral-200'
+                      }`}
+                    >
+                      <div className="font-semibold text-xs flex items-center gap-1.5">
+                        <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Evento Pago</span>
+                      </div>
+                      <p className="text-[10px] text-neutral-400 mt-0.5">
+                        Fila de pagamento, confirmação manual e liberação do ingresso pago.
+                      </p>
+                    </button>
+                  </div>
+
+                  {isPaid && (
+                    <div className="space-y-4 pt-3 border-t border-neutral-800/80 animate-in fade-in duration-200">
+                      {/* Ticket Price */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
+                            Valor do Ingresso (R$) *
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 text-xs font-mono font-bold">
+                              R$
+                            </span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              required={isPaid}
+                              value={price}
+                              onChange={(e) => setPrice(e.target.value)}
+                              placeholder="35.00"
+                              className="w-full pl-9 pr-3 py-2 bg-neutral-900 border border-neutral-700 rounded-xl text-neutral-100 text-xs font-mono font-bold focus:outline-none focus:border-amber-400"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Payment Type Selection */}
+                        <div>
+                          <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
+                            Tipo de Pagamento para o Participante *
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setPaymentType('pix')}
+                              className={`py-2 px-2.5 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                paymentType === 'pix'
+                                  ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                                  : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
+                              }`}
+                            >
+                              <span>1. Chave Pix</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setPaymentType('whatsapp')}
+                              className={`py-2 px-2.5 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                paymentType === 'whatsapp'
+                                  ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                                  : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
+                              }`}
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                              <span>2. WhatsApp</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Details for Tipo 1: PIX Copie e Cole */}
+                      {paymentType === 'pix' && (
+                        <div className="p-3.5 bg-neutral-900/90 border border-neutral-800 rounded-xl space-y-3">
+                          <span className="text-xs font-bold text-amber-400 block">
+                            Configuração do Pix Copie e Cole
+                          </span>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[10px] text-neutral-400 font-semibold uppercase mb-1">
+                                Chave Pix (E-mail, Celular, CPF, CNPJ ou Aleatória) *
+                              </label>
+                              <input
+                                type="text"
+                                required={isPaid && paymentType === 'pix'}
+                                value={pixKey}
+                                onChange={(e) => setPixKey(e.target.value)}
+                                placeholder="ex: midia.petropolisb@gmail.com ou 92999999999"
+                                className="w-full px-3 py-1.5 bg-neutral-950 border border-neutral-700 rounded-lg text-xs text-neutral-200"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] text-neutral-400 font-semibold uppercase mb-1">
+                                Nome do Favorecido / Titular da Conta *
+                              </label>
+                              <input
+                                type="text"
+                                required={isPaid && paymentType === 'pix'}
+                                value={pixBeneficiary}
+                                onChange={(e) => setPixBeneficiary(e.target.value)}
+                                placeholder="ex: IEADAM Petrópolis B"
+                                className="w-full px-3 py-1.5 bg-neutral-950 border border-neutral-700 rounded-lg text-xs text-neutral-200"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] text-neutral-400 font-semibold uppercase mb-1">
+                              Código Pix Copia e Cole Completo (Opcional, para pagamento instantâneo)
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={pixCode}
+                              onChange={(e) => setPixCode(e.target.value)}
+                              placeholder="00020126580014br.gov.bcb.pix0136..."
+                              className="w-full px-3 py-1.5 bg-neutral-950 border border-neutral-700 rounded-lg text-[11px] font-mono text-neutral-200"
+                            />
+                            <p className="text-[10px] text-neutral-500 mt-1">
+                              Quando o usuário copiar o Pix no formulário, a tela entrará automaticamente em "Aguardando confirmação do pagamento" para você aprovar na fila.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Details for Tipo 2: WhatsApp Link */}
+                      {paymentType === 'whatsapp' && (
+                        <div className="p-3.5 bg-neutral-900/90 border border-neutral-800 rounded-xl space-y-3">
+                          <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                            <MessageCircle className="w-4 h-4" />
+                            Contato Direto via WhatsApp (wa.me)
+                          </span>
+                          <div>
+                            <label className="block text-[10px] text-neutral-400 font-semibold uppercase mb-1">
+                              Número do WhatsApp do Vendedor / Administrador (com DDD) *
+                            </label>
+                            <input
+                              type="tel"
+                              required={isPaid && paymentType === 'whatsapp'}
+                              value={whatsappPaymentNumber}
+                              onChange={(e) => setWhatsappPaymentNumber(e.target.value)}
+                              placeholder="Ex: 92984000000 (apenas números)"
+                              className="w-full px-3 py-1.5 bg-neutral-950 border border-neutral-700 rounded-lg text-xs text-neutral-200"
+                            />
+                            <p className="text-[10px] text-neutral-500 mt-1">
+                              O participante clica no botão e vai direto para a conversa no WhatsApp para tratar com você. A página do participante entra na fila aguardando sua confirmação.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Timeout & Support Configuration */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3.5 bg-neutral-900/90 border border-neutral-800 rounded-xl">
+                        <div>
+                          <label className="block text-[10px] text-neutral-300 font-semibold uppercase mb-1.5">
+                            Tempo Limite de Espera para Confirmar Pagamento *
+                          </label>
+                          <div className="flex items-center gap-1.5 mb-2">
+                            {[5, 10, 15, 20].map((mins) => (
+                              <button
+                                key={mins}
+                                type="button"
+                                onClick={() => setPaymentTimeoutMinutes(mins)}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                  paymentTimeoutMinutes === mins
+                                    ? 'bg-amber-500 text-neutral-950'
+                                    : 'bg-neutral-800 text-neutral-300 hover:text-white'
+                                }`}
+                              >
+                                {mins}m
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              max="120"
+                              value={paymentTimeoutMinutes}
+                              onChange={(e) => setPaymentTimeoutMinutes(parseInt(e.target.value, 10) || 10)}
+                              className="w-20 px-2.5 py-1.5 bg-neutral-950 border border-neutral-700 rounded-lg text-xs text-neutral-100 font-mono"
+                            />
+                            <span className="text-xs text-neutral-400">minutos de espera</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] text-neutral-300 font-semibold uppercase mb-1.5">
+                            WhatsApp de Suporte (Aparece após expirar tempo) *
+                          </label>
+                          <input
+                            type="tel"
+                            value={supportWhatsappNumber}
+                            onChange={(e) => setSupportWhatsappNumber(e.target.value)}
+                            placeholder="Ex: 92984000000"
+                            className="w-full px-3 py-1.5 bg-neutral-950 border border-neutral-700 rounded-lg text-xs text-neutral-200"
+                          />
+                          <p className="text-[10px] text-neutral-500 mt-1">
+                            Se o tempo limite esgotar, o usuário verá o aviso: <em>"Parece que seu pagamento ainda não foi confirmado, fique à vontade para entrar em contato conosco"</em> com este botão de suporte.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* SECTION 3: ANOTAÇÕES & REGRAS DO EVENTO */}
               <div className="pt-2 border-t border-neutral-800">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2 flex items-center gap-1.5">
                   <AlertCircle className="w-4 h-4" />
-                  2. Regras e Orientações do Evento (Ficam Gravadas no QR Code & PDF)
+                  3. Regras e Orientações do Evento (Ficam Gravadas no QR Code & PDF)
                 </h4>
                 <p className="text-[11px] text-neutral-400 mb-2">
                   O participante precisará declarar ciência destas regras ao se inscrever.

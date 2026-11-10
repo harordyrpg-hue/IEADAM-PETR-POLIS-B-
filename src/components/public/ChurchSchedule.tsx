@@ -199,7 +199,7 @@ export const ChurchSchedule: React.FC<ChurchScheduleProps> = ({ profile, events 
                       </p>
                     </div>
 
-                    <div className="pt-4 border-t border-stone-800 space-y-1.5 text-xs text-stone-400">
+                    <div className="pt-4 border-t border-stone-800 space-y-2 text-xs text-stone-400">
                       <div className="flex items-center gap-2">
                         <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                         <span>Horário: <strong className="text-stone-200">{ev.time}</strong></span>
@@ -208,6 +208,19 @@ export const ChurchSchedule: React.FC<ChurchScheduleProps> = ({ profile, events 
                         <MapPin className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                         <span className="truncate">Local: <strong className="text-stone-200">{ev.location}</strong></span>
                       </div>
+                      {ev.registrationLink && (
+                        <div className="pt-2">
+                          <a
+                            href={ev.registrationLink}
+                            target={ev.registrationLink.startsWith('http') ? '_blank' : undefined}
+                            rel={ev.registrationLink.startsWith('http') ? 'noopener noreferrer' : undefined}
+                            className="w-full py-2 px-3 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors shadow-md"
+                          >
+                            <span>Fazer Inscrição Online</span>
+                            <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                          </a>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

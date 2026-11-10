@@ -3409,6 +3409,12 @@ export const api = {
     const regCode = `PTB-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
     const regId = `reg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
+    const isPaid = !!data.isPaidEvent;
+    const initialPaymentStatus = data.paymentStatus || (isPaid ? 'waiting_confirmation' : 'free');
+    const timeoutMin = data.extendedMinutes || 10;
+    const nowMs = Date.now();
+    const expiresAt = data.paymentExpiresAt || new Date(nowMs + timeoutMin * 60 * 1000).toISOString();
+
     // Build QR payload containing all verifiable ticket data and event rules
     const qrPayload = JSON.stringify({
       id: regCode,
@@ -3420,7 +3426,9 @@ export const api = {
       area: data.area || '',
       lider: data.responsibleLeader || '',
       pastor: data.responsiblePastor || '',
-      status: 'CONFIRMADO',
+      pago: isPaid ? 'SIM' : 'GRATUITO',
+      valor: isPaid && data.ticketPrice ? `R$ ${data.ticketPrice.toFixed(2)}` : 'R$ 0,00',
+      status: initialPaymentStatus === 'paid' || initialPaymentStatus === 'free' ? 'CONFIRMADO' : 'AGUARDANDO_PAGAMENTO',
       dataHora: new Date().toISOString(),
     });
 
@@ -3436,9 +3444,20 @@ export const api = {
       responsibleLeader: data.responsibleLeader || '',
       responsiblePastor: data.responsiblePastor || '',
       customResponses: data.customResponses || {},
-      status: 'confirmada',
+      status: isPaid && initialPaymentStatus !== 'paid' ? 'confirmada' : 'confirmada',
       qrCodeData: qrPayload,
       registeredAt: new Date().toISOString(),
+
+      // Paid Event tracking
+      isPaidEvent: isPaid,
+      ticketPrice: data.ticketPrice || 0,
+      paymentType: data.paymentType || 'pix',
+      paymentStatus: initialPaymentStatus,
+      paymentRequestedAt: new Date().toISOString(),
+      paymentExpiresAt: expiresAt,
+      extendedMinutes: 0,
+      maxWaitExceeded: false,
+      paidConfirmedAt: initialPaymentStatus === 'paid' ? new Date().toISOString() : null,
     };
 
     try {
@@ -3446,16 +3465,48 @@ export const api = {
         ...registration,
         firestoreDocId: regId,
       }));
-      return registration;
+      return { ...registration, id: regCode };
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `event_registrations/${regId}`);
       return registration;
     }
   },
 
+  /**
+   * Real-time listener for a single registration (used on guest payment & ticket page).
+   * Automatically fires when admin confirms payment ("Pagou") or rejects ("Não Pagou").
+   */
+  subscribeSingleRegistration(registrationId: string, callback: (reg: EventRegistration | null) => void): () => void {
+    const q = query(collection(db, 'event_registrations'), where('id', '==', registrationId));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const docData = snapshot.docs[0].data() as EventRegistration;
+          callback({
+            ...docData,
+            id: docData.id || snapshot.docs[0].id,
+          });
+        } else {
+          // Fallback to direct doc query
+          const directRef = doc(db, 'event_registrations', registrationId);
+          getDoc(directRef).then((snap) => {
+            if (snap.exists()) {
+              callback(snap.data() as EventRegistration);
+            } else {
+              callback(null);
+            }
+          }).catch(() => callback(null));
+        }
+      },
+      (error) => {
+        console.warn('Real-time single registration sync error:', error);
+      }
+    );
+  },
+
   async updateEventRegistration(id: string, updates: Partial<EventRegistration>): Promise<void> {
     try {
-      // Find doc where id equals id or docId equals id
       const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
       if (!snap.empty) {
         await updateDoc(snap.docs[0].ref, removeUndefinedValues(updates));
@@ -3465,6 +3516,58 @@ export const api = {
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
     }
+  },
+
+  /**
+   * Confirms payment for an attendee ("Pagou")
+   */
+  async confirmRegistrationPayment(id: string, adminUser?: { uid?: string; name?: string }): Promise<void> {
+    const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+    const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
+    
+    await updateDoc(targetRef, {
+      paymentStatus: 'paid',
+      status: 'confirmada',
+      paidConfirmedAt: new Date().toISOString(),
+      confirmedByAdminUid: adminUser?.uid || 'admin',
+      confirmedByAdminName: adminUser?.name || 'Administrador / Vendedor',
+      maxWaitExceeded: false,
+    });
+  },
+
+  /**
+   * Rejects payment for an attendee ("Não Pagou")
+   */
+  async rejectRegistrationPayment(id: string, reason?: string): Promise<void> {
+    const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+    const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
+
+    await updateDoc(targetRef, {
+      paymentStatus: 'rejected',
+      status: 'cancelada',
+      rejectionReason: reason || 'Pagamento não identificado ou cancelado pelo administrador.',
+    });
+  },
+
+  /**
+   * Extends wait time by +5 minutes for an attendee in the payment queue
+   */
+  async extendRegistrationWaitTime(id: string, additionalMinutes: number = 5): Promise<void> {
+    const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+    const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
+    const existing = !snap.empty ? (snap.docs[0].data() as EventRegistration) : null;
+
+    const currentExpires = existing?.paymentExpiresAt ? new Date(existing.paymentExpiresAt).getTime() : Date.now();
+    const baseTime = Math.max(Date.now(), currentExpires);
+    const newExpires = new Date(baseTime + additionalMinutes * 60 * 1000).toISOString();
+    const prevExtended = existing?.extendedMinutes || 0;
+
+    await updateDoc(targetRef, {
+      paymentExpiresAt: newExpires,
+      extendedMinutes: prevExtended + additionalMinutes,
+      maxWaitExceeded: false,
+      paymentStatus: 'waiting_confirmation',
+    });
   },
 
   async deleteEventRegistration(id: string): Promise<void> {
@@ -3481,12 +3584,19 @@ export const api = {
   },
 
   async uploadEventBanner(file: File): Promise<string> {
+    return api.uploadChurchImage(file, 'banner');
+  },
+
+  /**
+   * Upload image for church portal, banners, logos, pastor photos, leadership, announcements
+   */
+  async uploadChurchImage(file: File, prefix = 'church'): Promise<string> {
     // 1. Try server API upload
     try {
       const res = await new Promise<{ downloadUrl: string }>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/api/upload', true);
-        xhr.setRequestHeader('x-filename', encodeURIComponent(`banner_${Date.now()}_${file.name}`));
+        xhr.setRequestHeader('x-filename', encodeURIComponent(`${prefix}_${Date.now()}_${file.name}`));
         xhr.setRequestHeader('Content-Type', file.type || 'image/jpeg');
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
@@ -3504,13 +3614,38 @@ export const api = {
       });
       if (res?.downloadUrl) return res.downloadUrl;
     } catch (err) {
-      console.warn('Banner upload via /api/upload failed, using FileReader DataURL fallback:', err);
+      console.warn('Image upload via /api/upload fallback to canvas/FileReader:', err);
     }
 
-    // 2. High quality fallback: FileReader DataURL
+    // 2. High quality compressed canvas fallback for direct storage in Firestore / storage
     return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxDim = 1200;
+          let w = img.width;
+          let h = img.height;
+          if (w > h) {
+            if (w > maxDim) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            }
+          } else {
+            if (h > maxDim) {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.88));
+        };
+        img.src = reader.result as string;
+      };
       reader.readAsDataURL(file);
     });
   },

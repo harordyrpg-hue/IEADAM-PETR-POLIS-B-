@@ -266,6 +266,7 @@ export interface ChurchPublicEvent {
   location: string;
   category: string;
   bannerUrl?: string | null;
+  registrationLink?: string | null;
   status: PublicationStatus;
   authorName: string;
   authorUid: string;
@@ -497,6 +498,17 @@ export type RegistrationThemeColor =
   | 'purple'
   | 'neutral';
 
+export type EventPaymentType = 'pix' | 'whatsapp';
+
+export type RegistrationPaymentStatus =
+  | 'free'                  // Evento gratuito, confirmado direto
+  | 'filling'               // Preenchendo formulário (iniciado)
+  | 'waiting_confirmation'  // Aguardando confirmação do vendedor/admin
+  | 'paid'                  // Pagamento confirmado pelo admin (Pagou)
+  | 'rejected'              // Pagamento rejeitado pelo admin (Não pagou)
+  | 'abandoned'             // Abandonou formulário
+  | 'expired';              // Tempo máximo de espera atingido
+
 export interface RegistrationStandardFieldConfig {
   enabled: boolean;
   required: boolean;
@@ -524,6 +536,18 @@ export interface PublicRegistrationEvent {
   rulesAndNotes: string; // Termos, regras e orientações
   maxRegistrations?: number | null;
   status: 'aberto' | 'encerrado' | 'em_breve';
+
+  // Configurações de Evento Pago / Gratuito
+  isPaid?: boolean;
+  price?: number; // Preço do ingresso em R$ (ex: 35.00)
+  paymentType?: EventPaymentType; // 'pix' ou 'whatsapp'
+  pixKey?: string; // Chave Pix (ex: email, celular, CPF, CNPJ, aleatória)
+  pixCode?: string; // Código Pix Copia e Cola
+  pixBeneficiary?: string; // Nome do recebedor/beneficiário do Pix
+  whatsappPaymentNumber?: string; // Número do vendedor WhatsApp (wa.me)
+  paymentTimeoutMinutes?: number; // 5, 10, 15, 20 ou customizado (padrão: 10m)
+  supportWhatsappNumber?: string; // WhatsApp de suporte quando expirar tempo limite
+
   standardFields: {
     fullName: RegistrationStandardFieldConfig;
     phone: RegistrationStandardFieldConfig;
@@ -555,5 +579,20 @@ export interface EventRegistration {
   status: 'confirmada' | 'presente' | 'cancelada';
   qrCodeData: string;
   registeredAt: string;
+  createdAt?: string;
   checkInAt?: string | null;
+
+  // Informações de Pagamento e Fila
+  isPaidEvent?: boolean;
+  ticketPrice?: number;
+  paymentType?: EventPaymentType;
+  paymentStatus?: RegistrationPaymentStatus;
+  paymentRequestedAt?: string; // ISO string de quando iniciou espera
+  paymentExpiresAt?: string;   // ISO string de quando vence o tempo limite
+  extendedMinutes?: number;    // Minutos adicionados pelo admin (+5m)
+  maxWaitExceeded?: boolean;   // Flag visual se estourou tempo limite
+  paidConfirmedAt?: string | null;
+  confirmedByAdminUid?: string | null;
+  confirmedByAdminName?: string | null;
+  rejectionReason?: string;
 }

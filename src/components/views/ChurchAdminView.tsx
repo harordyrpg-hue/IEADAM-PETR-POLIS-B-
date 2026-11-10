@@ -34,6 +34,8 @@ import {
   X,
   MapPin,
   Video,
+  Copy,
+  Upload,
 } from 'lucide-react';
 
 type AdminChurchSubTab = 'profile' | 'announcements' | 'events' | 'articles' | 'gallery' | 'downloads';
@@ -79,6 +81,43 @@ export const ChurchAdminView: React.FC = () => {
   const [newLeaderName, setNewLeaderName] = useState('');
   const [newLeaderRole, setNewLeaderRole] = useState('');
   const [newLeaderPhoto, setNewLeaderPhoto] = useState('');
+
+  // Image Upload State
+  const [uploadingImage, setUploadingImage] = useState<string | null>(null);
+
+  const handleFileUpload = async (file: File, target: 'logo' | 'hero' | 'announcement' | 'event' | 'article' | 'album_cover' | 'leader') => {
+    try {
+      setUploadingImage(target);
+      const url = await api.uploadChurchImage(file, target);
+      if (target === 'logo') {
+        setProfile((prev) => ({ ...prev, logoUrl: url }));
+        notifySuccess('Logo carregado com sucesso!');
+      } else if (target === 'hero') {
+        setProfile((prev) => ({ ...prev, heroBannerUrl: url }));
+        notifySuccess('Banner Hero carregado com sucesso!');
+      } else if (target === 'leader') {
+        setNewLeaderPhoto(url);
+        notifySuccess('Foto do líder carregada!');
+      } else if (target === 'announcement') {
+        setEditingAnnouncement((prev) => (prev ? { ...prev, imageUrl: url } : { imageUrl: url }));
+        notifySuccess('Imagem do comunicado carregada!');
+      } else if (target === 'event') {
+        setEditingEvent((prev) => (prev ? { ...prev, bannerUrl: url } : { bannerUrl: url }));
+        notifySuccess('Banner do evento carregado!');
+      } else if (target === 'article') {
+        setEditingArticle((prev) => (prev ? { ...prev, coverImageUrl: url } : { coverImageUrl: url }));
+        notifySuccess('Capa do artigo carregada!');
+      } else if (target === 'album_cover') {
+        setEditingAlbum((prev) => (prev ? { ...prev, coverUrl: url } : { coverUrl: url }));
+        notifySuccess('Capa do álbum carregada!');
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorMessage('Erro ao enviar imagem.');
+    } finally {
+      setUploadingImage(null);
+    }
+  };
 
   const loadAllData = async () => {
     try {
@@ -377,7 +416,7 @@ export const ChurchAdminView: React.FC = () => {
             <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
               Gestão da Página da Igreja
               <span className="text-xs font-normal px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                Pública: /igreja
+                Pública: /?site ou #site
               </span>
             </h1>
             <p className="text-xs sm:text-sm text-stone-400 mt-0.5">
@@ -390,28 +429,64 @@ export const ChurchAdminView: React.FC = () => {
           <button
             onClick={loadAllData}
             disabled={loading}
-            className="p-2.5 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-xl transition-colors border border-stone-700"
+            className="p-2.5 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-xl transition-colors border border-stone-700 cursor-pointer"
             title="Recarregar dados"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
 
-          <a
-            href="/igreja"
-            onClick={(e) => {
-              if (window.top !== window.self) {
-                e.preventDefault();
-                window.location.hash = '#igreja';
-              }
+          <button
+            type="button"
+            onClick={() => {
+              window.open(`${window.location.origin}/?site`, '_blank');
             }}
-            target="_blank"
-            rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-medium text-sm shadow-md shadow-amber-950/40 transition-all cursor-pointer"
           >
             <Eye className="w-4 h-4" />
             <span>Ver Site da Igreja</span>
             <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+          </button>
+        </div>
+      </div>
+
+      {/* Public Link Sharing Box */}
+      <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
+            <ExternalLink className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <span className="text-xs font-semibold text-amber-300 block">Link Oficial para Divulgação da Igreja</span>
+            <span className="text-xs text-stone-300 font-mono select-all truncate block">
+              {typeof window !== 'undefined' ? `${window.location.origin}/?site` : '/?site'}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              const url = `${window.location.origin}/?site`;
+              navigator.clipboard.writeText(url);
+              notifySuccess('Link copiado! Envie pelo WhatsApp ou redes sociais.');
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition-all cursor-pointer shadow-sm"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>Copiar Link</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              window.location.hash = '#site';
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium border border-stone-700 transition-all cursor-pointer"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>Visualizar Aqui</span>
+          </button>
         </div>
       </div>
 
@@ -590,26 +665,96 @@ export const ChurchAdminView: React.FC = () => {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-stone-300 mb-1">URL do Logo</label>
-                <input
-                  type="url"
-                  value={profile.logoUrl || ''}
-                  onChange={(e) => setProfile({ ...profile, logoUrl: e.target.value })}
-                  placeholder="https://.../logo.png"
-                  className="w-full bg-stone-850 border border-stone-700 text-white text-sm rounded-xl px-3.5 py-2.5 focus:border-amber-500 focus:outline-none"
-                />
+              <div className="md:col-span-1 space-y-2">
+                <label className="block text-xs font-medium text-stone-300 mb-1">Logotipo da Igreja</label>
+                <div className="flex items-center gap-3">
+                  <div className="w-14 h-14 rounded-xl bg-stone-850 border border-stone-700 flex items-center justify-center overflow-hidden shrink-0">
+                    {profile.logoUrl ? (
+                      <img src={profile.logoUrl} alt="Logo" className="w-full h-full object-contain p-1" />
+                    ) : (
+                      <Church className="w-6 h-6 text-amber-500" />
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-1.5">
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold cursor-pointer transition-all">
+                      {uploadingImage === 'logo' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      <span>{uploadingImage === 'logo' ? 'Enviando...' : 'Fazer Upload do Logo'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'logo')}
+                      />
+                    </label>
+                    <input
+                      type="url"
+                      value={profile.logoUrl || ''}
+                      onChange={(e) => setProfile({ ...profile, logoUrl: e.target.value })}
+                      placeholder="Ou cole a URL do logo..."
+                      className="w-full bg-stone-850 border border-stone-700 text-white text-xs rounded-lg px-2.5 py-1.5 focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-stone-300 mb-1">URL da Imagem do Banner (Hero)</label>
-                <input
-                  type="url"
-                  value={profile.heroBannerUrl || ''}
-                  onChange={(e) => setProfile({ ...profile, heroBannerUrl: e.target.value })}
-                  placeholder="https://images.unsplash.com/..."
-                  className="w-full bg-stone-850 border border-stone-700 text-white text-sm rounded-xl px-3.5 py-2.5 focus:border-amber-500 focus:outline-none"
-                />
+              <div className="md:col-span-2 space-y-2">
+                <label className="block text-xs font-medium text-stone-300 mb-1">Banner Principal do Topo (Hero)</label>
+                <div className="space-y-3">
+                  {profile.heroBannerUrl && (
+                    <div className="w-full h-36 rounded-xl overflow-hidden border border-stone-700 relative group">
+                      <img src={profile.heroBannerUrl} alt="Banner Hero" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-stone-950/60 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <span className="text-xs text-white font-medium">Banner Ativo do Site</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+                    <label className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold cursor-pointer transition-all shrink-0">
+                      {uploadingImage === 'hero' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                      <span>{uploadingImage === 'hero' ? 'Enviando foto...' : 'Fazer Upload do Banner (Celular/PC)'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'hero')}
+                      />
+                    </label>
+
+                    <input
+                      type="url"
+                      value={profile.heroBannerUrl || ''}
+                      onChange={(e) => setProfile({ ...profile, heroBannerUrl: e.target.value })}
+                      placeholder="Ou cole o link direto da imagem aqui..."
+                      className="flex-1 bg-stone-850 border border-stone-700 text-white text-xs rounded-xl px-3 py-2.5 focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Curated Presets */}
+                  <div>
+                    <span className="text-[11px] text-stone-400 block mb-1.5">Sugestões de Banners em Alta Definição:</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {[
+                        { label: 'Templo & Altar', url: 'https://images.unsplash.com/photo-1438232992991-995b7058bbb3?auto=format&fit=crop&w=1600&q=80' },
+                        { label: 'Louvor & Adoração', url: 'https://images.unsplash.com/photo-1519791883288-dc8bd696e667?auto=format&fit=crop&w=1600&q=80' },
+                        { label: 'Comunhão & Família', url: 'https://images.unsplash.com/photo-1511632765486-a01980e01a18?auto=format&fit=crop&w=1600&q=80' },
+                        { label: 'Bíblia & Oração', url: 'https://images.unsplash.com/photo-1507692049790-de58290a4334?auto=format&fit=crop&w=1600&q=80' },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => {
+                            setProfile((prev) => ({ ...prev, heroBannerUrl: preset.url }));
+                            notifySuccess(`Banner "${preset.label}" selecionado!`);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 border border-stone-700 text-stone-300 hover:text-white text-[11px] font-medium text-left truncate transition-colors cursor-pointer"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -791,13 +936,25 @@ export const ChurchAdminView: React.FC = () => {
                     className="bg-stone-850 border border-stone-700 text-white text-xs rounded-lg p-2"
                   />
                 </div>
-                <input
-                  type="url"
-                  placeholder="URL da Foto (opcional)"
-                  value={newLeaderPhoto}
-                  onChange={(e) => setNewLeaderPhoto(e.target.value)}
-                  className="w-full bg-stone-850 border border-stone-700 text-white text-xs rounded-lg p-2"
-                />
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold cursor-pointer shrink-0">
+                    {uploadingImage === 'leader' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                    <span>{uploadingImage === 'leader' ? 'Enviando...' : 'Subir Foto'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'leader')}
+                    />
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="Ou cole a URL da Foto do Líder"
+                    value={newLeaderPhoto}
+                    onChange={(e) => setNewLeaderPhoto(e.target.value)}
+                    className="flex-1 bg-stone-850 border border-stone-700 text-white text-xs rounded-lg p-2"
+                  />
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -1136,14 +1293,31 @@ export const ChurchAdminView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs text-stone-300 mb-1">URL da Imagem / Cartaz (opcional)</label>
-                  <input
-                    type="url"
-                    value={editingAnnouncement.imageUrl || ''}
-                    onChange={(e) => setEditingAnnouncement({ ...editingAnnouncement, imageUrl: e.target.value })}
-                    placeholder="https://..."
-                    className="w-full bg-stone-850 border border-stone-700 text-white text-sm rounded-xl p-2.5"
-                  />
+                  <label className="block text-xs text-stone-300 mb-1">Imagem / Cartaz do Aviso</label>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold cursor-pointer shrink-0">
+                      {uploadingImage === 'announcement' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      <span>{uploadingImage === 'announcement' ? 'Enviando...' : 'Subir Imagem'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'announcement')}
+                      />
+                    </label>
+                    <input
+                      type="url"
+                      value={editingAnnouncement.imageUrl || ''}
+                      onChange={(e) => setEditingAnnouncement({ ...editingAnnouncement, imageUrl: e.target.value })}
+                      placeholder="Ou cole a URL da imagem/cartaz..."
+                      className="flex-1 bg-stone-850 border border-stone-700 text-white text-xs rounded-xl p-2.5"
+                    />
+                  </div>
+                  {editingAnnouncement.imageUrl && (
+                    <div className="mt-2 h-24 rounded-lg overflow-hidden border border-stone-700">
+                      <img src={editingAnnouncement.imageUrl} alt="Prévia" className="w-full h-full object-cover" />
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 pt-2">
@@ -1366,6 +1540,34 @@ export const ChurchAdminView: React.FC = () => {
                 </div>
 
                 <div>
+                  <label className="block text-xs text-stone-300 mb-1">Banner / Imagem do Evento</label>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold cursor-pointer shrink-0">
+                      {uploadingImage === 'event' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      <span>{uploadingImage === 'event' ? 'Enviando...' : 'Subir Banner'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'event')}
+                      />
+                    </label>
+                    <input
+                      type="url"
+                      value={editingEvent.bannerUrl || ''}
+                      onChange={(e) => setEditingEvent({ ...editingEvent, bannerUrl: e.target.value })}
+                      placeholder="Ou cole a URL do banner..."
+                      className="flex-1 bg-stone-850 border border-stone-700 text-white text-xs rounded-xl p-2.5"
+                    />
+                  </div>
+                  {editingEvent.bannerUrl && (
+                    <div className="mt-2 h-24 rounded-lg overflow-hidden border border-stone-700">
+                      <img src={editingEvent.bannerUrl} alt="Prévia" className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                </div>
+
+                <div>
                   <label className="block text-xs text-stone-300 mb-1">Status</label>
                   <select
                     value={editingEvent.status || 'published'}
@@ -1553,14 +1755,31 @@ export const ChurchAdminView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs text-stone-300 mb-1">URL da Imagem de Capa (opcional)</label>
-                  <input
-                    type="url"
-                    value={editingArticle.coverImageUrl || ''}
-                    onChange={(e) => setEditingArticle({ ...editingArticle, coverImageUrl: e.target.value })}
-                    placeholder="https://..."
-                    className="w-full bg-stone-850 border border-stone-700 text-white text-sm rounded-xl p-2.5"
-                  />
+                  <label className="block text-xs text-stone-300 mb-1">Imagem de Capa do Artigo / Devocional</label>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold cursor-pointer shrink-0">
+                      {uploadingImage === 'article' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      <span>{uploadingImage === 'article' ? 'Enviando...' : 'Subir Imagem'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'article')}
+                      />
+                    </label>
+                    <input
+                      type="url"
+                      value={editingArticle.coverImageUrl || ''}
+                      onChange={(e) => setEditingArticle({ ...editingArticle, coverImageUrl: e.target.value })}
+                      placeholder="Ou cole a URL da imagem de capa..."
+                      className="flex-1 bg-stone-850 border border-stone-700 text-white text-xs rounded-xl p-2.5"
+                    />
+                  </div>
+                  {editingArticle.coverImageUrl && (
+                    <div className="mt-2 h-24 rounded-lg overflow-hidden border border-stone-700">
+                      <img src={editingArticle.coverImageUrl} alt="Prévia" className="w-full h-full object-cover" />
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1748,20 +1967,41 @@ export const ChurchAdminView: React.FC = () => {
                   </h4>
 
                   <div className="space-y-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <label className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold cursor-pointer shrink-0">
+                        {uploadingImage === 'album_photo' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                        <span>{uploadingImage === 'album_photo' ? 'Enviando...' : 'Subir Foto'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const f = e.target.files?.[0];
+                            if (!f) return;
+                            try {
+                              setUploadingImage('album_photo');
+                              const url = await api.uploadChurchImage(f, 'album');
+                              setNewPhotoUrl(url);
+                              notifySuccess('Foto enviada!');
+                            } finally {
+                              setUploadingImage(null);
+                            }
+                          }}
+                        />
+                      </label>
                       <input
                         type="url"
-                        placeholder="URL da Imagem (https://...)"
+                        placeholder="Ou cole a URL da Imagem"
                         value={newPhotoUrl}
                         onChange={(e) => setNewPhotoUrl(e.target.value)}
-                        className="bg-stone-900 border border-stone-700 text-white text-xs rounded-lg p-2"
+                        className="flex-1 bg-stone-900 border border-stone-700 text-white text-xs rounded-lg p-2"
                       />
                       <input
                         type="text"
                         placeholder="Legenda da foto (opcional)"
                         value={newPhotoCaption}
                         onChange={(e) => setNewPhotoCaption(e.target.value)}
-                        className="bg-stone-900 border border-stone-700 text-white text-xs rounded-lg p-2"
+                        className="sm:w-48 bg-stone-900 border border-stone-700 text-white text-xs rounded-lg p-2"
                       />
                     </div>
                     <button

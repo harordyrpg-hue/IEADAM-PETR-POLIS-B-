@@ -5,18 +5,20 @@ import {
   MapPin,
   CheckCircle2,
   Download,
-  Share2,
   FileText,
   AlertCircle,
   Building,
   User,
   Phone,
   Mail,
-  Shield,
-  ArrowLeft,
   ChevronRight,
-  Sparkles,
   QrCode,
+  Copy,
+  Check,
+  MessageCircle,
+  RefreshCw,
+  AlertTriangle,
+  ExternalLink,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { PublicRegistrationEvent, EventRegistration, RegistrationThemeColor } from '../../types.js';
@@ -47,11 +49,18 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
   const [customResponses, setCustomResponses] = useState<Record<string, any>>({});
   const [acceptedRules, setAcceptedRules] = useState(false);
 
-  // Submitting & Confirmation State
+  // Submitting, Pending Payment & Confirmation State
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingRegistration, setPendingRegistration] = useState<EventRegistration | null>(null);
   const [confirmedRegistration, setConfirmedRegistration] = useState<EventRegistration | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
 
+  // Payment UI state
+  const [pixCopied, setPixCopied] = useState(false);
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const [hasInteractedWithPayment, setHasInteractedWithPayment] = useState(false);
+
+  // Load Event Data
   useEffect(() => {
     let isMounted = true;
     async function loadEvent() {
@@ -64,8 +73,21 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
           setError('Evento não encontrado ou link expirado.');
         } else {
           setEvent(data);
+
+          // Check if session has a pending registration for this event
+          const cachedRegJson = sessionStorage.getItem(`pending_reg_${eventId}`);
+          if (cachedRegJson) {
+            try {
+              const cachedReg = JSON.parse(cachedRegJson) as EventRegistration;
+              if (cachedReg && cachedReg.id) {
+                setPendingRegistration(cachedReg);
+              }
+            } catch {
+              // ignore json parse error
+            }
+          }
         }
-      } catch (err) {
+      } catch {
         if (isMounted) setError('Erro ao carregar informações do evento.');
       } finally {
         if (isMounted) setLoading(false);
@@ -77,6 +99,62 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
       isMounted = false;
     };
   }, [eventId]);
+
+  // Real-time listener for pending paid registration
+  useEffect(() => {
+    if (!pendingRegistration?.id) return;
+
+    const unsubscribe = api.subscribeSingleRegistration(pendingRegistration.id, (updatedReg) => {
+      if (!updatedReg) return;
+
+      // Update pending registration state (e.g. wait time extension by admin)
+      setPendingRegistration(updatedReg);
+      sessionStorage.setItem(`pending_reg_${eventId}`, JSON.stringify(updatedReg));
+
+      // If admin confirmed payment
+      if (updatedReg.paymentStatus === 'paid' || updatedReg.status === 'confirmada') {
+        setConfirmedRegistration(updatedReg);
+        setPendingRegistration(null);
+        sessionStorage.removeItem(`pending_reg_${eventId}`);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [pendingRegistration?.id, eventId]);
+
+  // Countdown timer for pending payment
+  useEffect(() => {
+    if (!pendingRegistration || confirmedRegistration) {
+      setRemainingSeconds(null);
+      return;
+    }
+
+    const calcRemaining = () => {
+      if (!pendingRegistration.paymentExpiresAt) {
+        // Fallback: timeout minutes from registration time
+        const createdMs = pendingRegistration.registeredAt || pendingRegistration.createdAt
+          ? new Date(pendingRegistration.registeredAt || pendingRegistration.createdAt!).getTime()
+          : Date.now();
+        const timeoutMs = (event?.paymentTimeoutMinutes || 15) * 60 * 1000;
+        const diff = Math.floor((createdMs + timeoutMs - Date.now()) / 1000);
+        return Math.max(0, diff);
+      }
+      const expiresMs = new Date(pendingRegistration.paymentExpiresAt).getTime();
+      const diff = Math.floor((expiresMs - Date.now()) / 1000);
+      return Math.max(0, diff);
+    };
+
+    setRemainingSeconds(calcRemaining());
+
+    const interval = setInterval(() => {
+      const rem = calcRemaining();
+      setRemainingSeconds(rem);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [pendingRegistration, confirmedRegistration, event?.paymentTimeoutMinutes]);
 
   // Generate QR Code image when registration is confirmed
   useEffect(() => {
@@ -118,11 +196,44 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
         customResponses,
       });
 
-      setConfirmedRegistration(reg);
-    } catch (err) {
+      if (event.isPaid) {
+        // Switch to payment waiting screen
+        setPendingRegistration(reg);
+        sessionStorage.setItem(`pending_reg_${eventId}`, JSON.stringify(reg));
+      } else {
+        // Free event: instant confirmation
+        setConfirmedRegistration(reg);
+      }
+    } catch {
       alert('Erro ao confirmar inscrição. Tente novamente.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCopyPix = async () => {
+    const textToCopy = event?.pixCode || event?.pixKey || '';
+    if (!textToCopy) return;
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = textToCopy;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setPixCopied(true);
+      setHasInteractedWithPayment(true);
+      setTimeout(() => setPixCopied(false), 4000);
+    } catch {
+      setPixCopied(true);
+      setHasInteractedWithPayment(true);
     }
   };
 
@@ -139,6 +250,23 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Format seconds to MM:SS
+  const formatTimer = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  // Clean phone number for WhatsApp link
+  const cleanPhoneForWa = (rawPhone?: string) => {
+    if (!rawPhone) return '';
+    let cleaned = rawPhone.replace(/\D/g, '');
+    if (cleaned.length === 10 || cleaned.length === 11) {
+      cleaned = `55${cleaned}`;
+    }
+    return cleaned;
   };
 
   // Theme color styles
@@ -232,8 +360,13 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
     );
   }
 
+  // ==========================================
   // 1. CONFIRMATION SCREEN (POST-SUBMIT SUCCESS)
+  // ==========================================
   if (confirmedRegistration) {
+    const isPaid = !!(confirmedRegistration.isPaidEvent || event.isPaid);
+    const priceVal = confirmedRegistration.ticketPrice ?? event.price ?? 0;
+
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-100 py-10 px-4 sm:px-6 flex items-center justify-center">
         <div className="w-full max-w-xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
@@ -248,7 +381,7 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
 
             <div>
               <span className="text-[11px] font-bold tracking-wider uppercase text-emerald-400">
-                Inscrição Confirmada com Sucesso!
+                {isPaid ? 'Pagamento Confirmado & Inscrição Garantida!' : 'Inscrição Confirmada com Sucesso!'}
               </span>
               <h1 className="text-2xl font-bold text-neutral-100 mt-1">
                 {confirmedRegistration.fullName}
@@ -257,6 +390,16 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
                 Sua credencial para o evento <strong>{confirmedRegistration.eventName}</strong> está garantida.
               </p>
             </div>
+
+            {/* Paid Badge / Ticket Price */}
+            {isPaid && (
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-400">
+                <Check className="w-4 h-4 stroke-[2.5]" />
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  Ingresso Pago: R$ {priceVal.toFixed(2)}
+                </span>
+              </div>
+            )}
 
             {/* Registration Code Badge */}
             <div className="p-3 bg-neutral-950 border border-neutral-800 rounded-2xl inline-block">
@@ -313,7 +456,7 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
                 className="flex-1 py-3 px-4 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 touch-manipulation cursor-pointer"
               >
                 <Download className="w-4 h-4" />
-                <span>Baixar Comprovante em PDF</span>
+                <span>Baixar Comprovante & Ingresso (PDF)</span>
               </button>
 
               <button
@@ -329,6 +472,8 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
               <button
                 onClick={() => {
                   setConfirmedRegistration(null);
+                  setPendingRegistration(null);
+                  sessionStorage.removeItem(`pending_reg_${eventId}`);
                   setFullName('');
                   setPhone('');
                   setEmail('');
@@ -348,7 +493,231 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
     );
   }
 
-  // 2. PUBLIC REGISTRATION FORM
+  // ===============================================================
+  // 2. PAID EVENT: PAYMENT & WAITING FOR CONFIRMATION SCREEN
+  // ===============================================================
+  if (pendingRegistration && event.isPaid) {
+    const isExpired = remainingSeconds !== null && remainingSeconds <= 0;
+    const ticketPrice = pendingRegistration.ticketPrice ?? event.price ?? 0;
+    const supportPhoneClean = cleanPhoneForWa(event.supportWhatsappNumber || event.whatsappPaymentNumber);
+    const sellerPhoneClean = cleanPhoneForWa(event.whatsappPaymentNumber);
+
+    const supportMsg = encodeURIComponent(
+      `Olá! Fiz a inscrição no evento "${event.name}" (Inscrição: #${pendingRegistration.id.slice(-6)}, Nome: ${pendingRegistration.fullName}), mas ainda não tive o pagamento confirmado. Poderiam me ajudar?`
+    );
+
+    const sellerMsg = encodeURIComponent(
+      `Olá! Estou realizando a inscrição no evento "${event.name}". Meu código é #${pendingRegistration.id.slice(-6)} (Nome: ${pendingRegistration.fullName}, Valor: R$ ${ticketPrice.toFixed(2)}). Segue meu comprovante de pagamento!`
+    );
+
+    return (
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex items-center justify-center">
+        <div className="w-full max-w-xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
+          {/* Header Accent Bar */}
+          <div className="h-3 w-full bg-amber-500" />
+
+          <div className="p-6 sm:p-8 space-y-6">
+            {/* Top Badge */}
+            <div className="text-center">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-bold uppercase tracking-wider">
+                <Clock className="w-3.5 h-3.5" />
+                Aguardando Confirmação do Pagamento
+              </span>
+              <h1 className="text-2xl font-bold text-neutral-100 mt-2">
+                {event.name}
+              </h1>
+              <p className="text-xs text-neutral-400 mt-1">
+                Inscrição de <strong>{pendingRegistration.fullName}</strong> · Código: <span className="font-mono text-amber-400 font-bold">#{pendingRegistration.id.slice(-6)}</span>
+              </p>
+            </div>
+
+            {/* Ticket Price Box */}
+            <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-2xl flex items-center justify-between">
+              <div>
+                <div className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider">
+                  Valor da Inscrição
+                </div>
+                <div className="text-xs text-neutral-400">
+                  Ingresso individual oficial
+                </div>
+              </div>
+              <div className="text-2xl font-bold font-mono-numbers text-emerald-400">
+                R$ {ticketPrice.toFixed(2)}
+              </div>
+            </div>
+
+            {/* Payment Method 1: Pix Copie e Cole */}
+            {event.paymentType === 'pix' && (
+              <div className="space-y-4 p-5 bg-neutral-950/70 border border-neutral-800 rounded-2xl">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-bold text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-amber-400" />
+                    Pagamento via Pix (Copie e Cole)
+                  </div>
+                  {event.pixBeneficiary && (
+                    <span className="text-[11px] text-neutral-400">
+                      Favorecido: <strong className="text-neutral-200">{event.pixBeneficiary}</strong>
+                    </span>
+                  )}
+                </div>
+
+                {event.pixKey && (
+                  <div className="text-xs text-neutral-300">
+                    <span className="text-neutral-500">Chave Pix:</span>{' '}
+                    <span className="font-mono text-amber-400 font-semibold">{event.pixKey}</span>
+                  </div>
+                )}
+
+                {/* Copia e Cola box */}
+                <div>
+                  <div className="text-[10px] uppercase font-semibold text-neutral-400 mb-1">
+                    Código Pix Copia e Cola
+                  </div>
+                  <div className="relative">
+                    <textarea
+                      readOnly
+                      rows={2}
+                      value={event.pixCode || event.pixKey || ''}
+                      className="w-full p-2.5 bg-neutral-900 border border-neutral-700 rounded-xl text-neutral-200 text-xs font-mono resize-none focus:outline-none"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleCopyPix}
+                    className="w-full mt-2 py-3 px-4 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer shadow-md"
+                  >
+                    {pixCopied ? (
+                      <>
+                        <Check className="w-4 h-4 stroke-[3] text-neutral-950" />
+                        <span>Código Pix Copiado com Sucesso!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Copiar Código Pix Copia e Cola</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="text-[11px] text-neutral-400 space-y-1 pt-1 leading-relaxed">
+                  <p>1. Abra o aplicativo do seu banco e selecione <strong>Pix &gt; Copia e Cola</strong>.</p>
+                  <p>2. Cole o código acima, confira o valor de <strong>R$ {ticketPrice.toFixed(2)}</strong> e confirme.</p>
+                  <p>3. Após o pagamento, nosso administrador confirmará na fila do sistema e sua credencial será liberada automaticamente nesta tela!</p>
+                </div>
+              </div>
+            )}
+
+            {/* Payment Method 2: WhatsApp Link (wa.me) */}
+            {event.paymentType === 'whatsapp' && (
+              <div className="space-y-4 p-5 bg-neutral-950/70 border border-neutral-800 rounded-2xl">
+                <div className="text-xs font-bold text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+                  <MessageCircle className="w-4 h-4 text-emerald-400" />
+                  Pagamento com Vendedor no WhatsApp
+                </div>
+
+                <p className="text-xs text-neutral-300 leading-relaxed">
+                  Clique no botão abaixo para conversar diretamente com o responsável/vendedor pelo evento. Envie seu comprovante de pagamento para liberação da sua credencial.
+                </p>
+
+                <a
+                  href={`https://wa.me/${sellerPhoneClean}?text=${sellerMsg}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setHasInteractedWithPayment(true)}
+                  className="w-full py-3.5 px-4 bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer shadow-lg"
+                >
+                  <MessageCircle className="w-4 h-4 stroke-[2.5]" />
+                  <span>Conversar com o Vendedor no WhatsApp</span>
+                  <ExternalLink className="w-3.5 h-3.5 opacity-70" />
+                </a>
+
+                <div className="text-[11px] text-neutral-400 space-y-1 pt-1 leading-relaxed">
+                  <p>• O vendedor confirmará seu pagamento no painel administrativo.</p>
+                  <p>• Mantenha esta página aberta: ela atualizará sozinha assim que confirmarem seu ingresso!</p>
+                </div>
+              </div>
+            )}
+
+            {/* Real-time Status Card & Countdown */}
+            <div className={`p-5 rounded-2xl border ${isExpired ? 'bg-red-500/10 border-red-500/30' : 'bg-neutral-950 border-neutral-800'} space-y-3`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-3 w-3">
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isExpired ? 'bg-red-400' : 'bg-amber-400'} opacity-75`} />
+                    <span className={`relative inline-flex rounded-full h-3 w-3 ${isExpired ? 'bg-red-500' : 'bg-amber-500'}`} />
+                  </span>
+                  <span className="text-xs font-bold text-neutral-200 uppercase tracking-wider">
+                    {isExpired ? 'Tempo de Espera Excedido' : 'Fila de Verificação em Tempo Real'}
+                  </span>
+                </div>
+
+                {remainingSeconds !== null && (
+                  <div className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg ${isExpired ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                    {isExpired ? '00:00' : formatTimer(remainingSeconds)}
+                  </div>
+                )}
+              </div>
+
+              {/* Expired vs Waiting messages */}
+              {isExpired ? (
+                <div className="space-y-3 pt-1">
+                  <div className="flex items-start gap-2.5 text-xs text-amber-300 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <p className="leading-relaxed">
+                      Parece que seu pagamento ainda não foi confirmado, fique à vontade para entrar em contato conosco.
+                    </p>
+                  </div>
+
+                  {supportPhoneClean && (
+                    <a
+                      href={`https://wa.me/${supportPhoneClean}?text=${supportMsg}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-2.5 px-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-2 border border-neutral-700 transition-colors"
+                    >
+                      <MessageCircle className="w-4 h-4 text-emerald-400" />
+                      <span>Falar com o Suporte no WhatsApp</span>
+                      <ExternalLink className="w-3.5 h-3.5 opacity-60" />
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2 text-xs text-neutral-400 leading-relaxed">
+                  <p>
+                    Assim que nossa equipe confirmar seu comprovante, esta tela irá <strong>recarregar automaticamente</strong> e liberar seu ingresso com QR Code e PDF.
+                  </p>
+                  <p className="text-[11px] text-neutral-500 flex items-center gap-1.5">
+                    <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+                    Sincronização ativa com o servidor em tempo real.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Cancel / Back button */}
+            <div className="text-center pt-2">
+              <button
+                onClick={() => {
+                  if (confirm('Deseja cancelar o processo e voltar ao formulário?')) {
+                    setPendingRegistration(null);
+                    sessionStorage.removeItem(`pending_reg_${eventId}`);
+                  }
+                }}
+                className="text-xs text-neutral-500 hover:text-neutral-300 underline"
+              >
+                Voltar e preencher novamente
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // 3. PUBLIC REGISTRATION FORM (DEFAULT VIEW)
+  // ==========================================
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-12 px-4 sm:px-6 flex justify-center">
       <div className="w-full max-w-2xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
@@ -385,6 +754,28 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
               <h1 className="text-2xl sm:text-3xl font-bold text-neutral-100">
                 {event.name}
               </h1>
+            </div>
+          )}
+
+          {/* Paid Event Price Banner (if applicable) */}
+          {event.isPaid && (
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs">
+                  R$
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                    Evento com Inscrição Paga
+                  </div>
+                  <div className="text-xs text-neutral-300">
+                    {event.paymentType === 'pix' ? 'Pagamento via Pix Copie e Cole' : 'Pagamento via WhatsApp'}
+                  </div>
+                </div>
+              </div>
+              <div className="text-xl font-bold font-mono-numbers text-emerald-400">
+                R$ {(event.price || 0).toFixed(2)}
+              </div>
             </div>
           )}
 
@@ -454,7 +845,9 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
                 Formulário de Inscrição
               </h2>
               <p className="text-xs text-neutral-400 mb-4">
-                Preencha os dados abaixo para emitir sua credencial com QR Code.
+                {event.isPaid
+                  ? 'Preencha os dados abaixo. Na etapa seguinte você receberá as instruções de pagamento.'
+                  : 'Preencha os dados abaixo para emitir sua credencial com QR Code.'}
               </p>
             </div>
 
@@ -685,6 +1078,11 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
               >
                 {isSubmitting ? (
                   <span>Processando inscrição...</span>
+                ) : event.isPaid ? (
+                  <>
+                    <span>Continuar para Pagamento (R$ {(event.price || 0).toFixed(2)})</span>
+                    <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                  </>
                 ) : (
                   <>
                     <span>Confirmar Inscrição & Obter Credencial</span>
