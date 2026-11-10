@@ -79,8 +79,13 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
           if (cachedRegJson) {
             try {
               const cachedReg = JSON.parse(cachedRegJson) as EventRegistration;
-              if (cachedReg && cachedReg.id) {
-                setPendingRegistration(cachedReg);
+              if (cachedReg && cachedReg.id && cachedReg.eventId === eventId) {
+                if (cachedReg.isPaidEvent && cachedReg.paymentStatus === 'paid') {
+                  setConfirmedRegistration(cachedReg);
+                  sessionStorage.removeItem(`pending_reg_${eventId}`);
+                } else if (cachedReg.isPaidEvent && cachedReg.paymentStatus === 'waiting_confirmation') {
+                  setPendingRegistration(cachedReg);
+                }
               }
             } catch {
               // ignore json parse error
@@ -111,11 +116,20 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
       setPendingRegistration(updatedReg);
       sessionStorage.setItem(`pending_reg_${eventId}`, JSON.stringify(updatedReg));
 
-      // If admin confirmed payment
-      if (updatedReg.paymentStatus === 'paid' || updatedReg.status === 'confirmada') {
-        setConfirmedRegistration(updatedReg);
-        setPendingRegistration(null);
-        sessionStorage.removeItem(`pending_reg_${eventId}`);
+      // CRITICAL: For paid events, ONLY transition to confirmed screen when paymentStatus is explicitly 'paid'!
+      if (updatedReg.isPaidEvent) {
+        if (updatedReg.paymentStatus === 'paid') {
+          setConfirmedRegistration(updatedReg);
+          setPendingRegistration(null);
+          sessionStorage.removeItem(`pending_reg_${eventId}`);
+        }
+      } else {
+        // For free events:
+        if (updatedReg.status === 'confirmada' || updatedReg.paymentStatus === 'free') {
+          setConfirmedRegistration(updatedReg);
+          setPendingRegistration(null);
+          sessionStorage.removeItem(`pending_reg_${eventId}`);
+        }
       }
     });
 
@@ -183,6 +197,7 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
 
     try {
       setIsSubmitting(true);
+      const isPaid = !!event.isPaid;
       const reg = await api.createEventRegistration({
         eventId: event.id,
         eventName: event.name,
@@ -194,9 +209,15 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
         responsibleLeader: responsibleLeader.trim() || undefined,
         responsiblePastor: responsiblePastor.trim() || undefined,
         customResponses,
+        isPaidEvent: isPaid,
+        ticketPrice: isPaid ? (Number(event.price) || 0) : 0,
+        paymentType: event.paymentType || 'pix',
+        paymentStatus: isPaid ? 'waiting_confirmation' : 'free',
+        paymentTimeoutMinutes: Number(event.paymentTimeoutMinutes) || 10,
+        extendedMinutes: Number(event.paymentTimeoutMinutes) || 10,
       });
 
-      if (event.isPaid) {
+      if (isPaid) {
         // Switch to payment waiting screen
         setPendingRegistration(reg);
         sessionStorage.setItem(`pending_reg_${eventId}`, JSON.stringify(reg));
@@ -598,6 +619,13 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
                       </>
                     )}
                   </button>
+
+                  {pixCopied && (
+                    <div className="p-3 mt-2 bg-emerald-500/15 border border-emerald-500/40 rounded-xl text-emerald-400 text-xs flex items-center gap-2">
+                      <Check className="w-4 h-4 shrink-0 stroke-[2.5]" />
+                      <span>Código copiado! <strong>Aguardando Confirmação do pagamento</strong> pelo administrador.</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="text-[11px] text-neutral-400 space-y-1 pt-1 leading-relaxed">

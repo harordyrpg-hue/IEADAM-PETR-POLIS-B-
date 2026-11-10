@@ -576,7 +576,7 @@ export interface EventRegistration {
   responsibleLeader?: string;
   responsiblePastor?: string;
   customResponses?: Record<string, any>;
-  status: 'confirmada' | 'presente' | 'cancelada';
+  status: 'confirmada' | 'presente' | 'cancelada' | 'pendente';
   qrCodeData: string;
   registeredAt: string;
   createdAt?: string;
@@ -587,6 +587,7 @@ export interface EventRegistration {
   ticketPrice?: number;
   paymentType?: EventPaymentType;
   paymentStatus?: RegistrationPaymentStatus;
+  paymentTimeoutMinutes?: number;
   paymentRequestedAt?: string; // ISO string de quando iniciou espera
   paymentExpiresAt?: string;   // ISO string de quando vence o tempo limite
   extendedMinutes?: number;    // Minutos adicionados pelo admin (+5m)

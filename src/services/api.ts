@@ -3376,13 +3376,16 @@ export const api = {
     return onSnapshot(
       q,
       (snapshot) => {
-        const list: EventRegistration[] = snapshot.docs.map((d) => {
-          const r = d.data() as EventRegistration;
-          return {
-            ...r,
-            id: r.id || d.id,
-          };
-        });
+        const list: EventRegistration[] = snapshot.docs
+          .map((d) => {
+            const r = d.data() as EventRegistration;
+            return {
+              ...r,
+              id: r.id || d.id,
+            };
+          })
+          // STRICT EVENT ISOLATION: Never mix attendees between different events
+          .filter((r) => r.eventId === eventId);
         list.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
         callback(list);
       },
@@ -3396,7 +3399,10 @@ export const api = {
     try {
       const q = query(collection(db, 'event_registrations'), where('eventId', '==', eventId));
       const snap = await getDocs(q);
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as EventRegistration));
+      const list = snap.docs
+        .map((d) => ({ ...d.data(), id: d.id } as EventRegistration))
+        // STRICT EVENT ISOLATION
+        .filter((r) => r.eventId === eventId);
       list.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
       return list;
     } catch (err) {
@@ -3444,7 +3450,7 @@ export const api = {
       responsibleLeader: data.responsibleLeader || '',
       responsiblePastor: data.responsiblePastor || '',
       customResponses: data.customResponses || {},
-      status: isPaid && initialPaymentStatus !== 'paid' ? 'confirmada' : 'confirmada',
+      status: isPaid && initialPaymentStatus !== 'paid' ? 'pendente' : 'confirmada',
       qrCodeData: qrPayload,
       registeredAt: new Date().toISOString(),
 
@@ -3567,6 +3573,22 @@ export const api = {
       extendedMinutes: prevExtended + additionalMinutes,
       maxWaitExceeded: false,
       paymentStatus: 'waiting_confirmation',
+      status: 'pendente',
+    });
+  },
+
+  /**
+   * Resets registration back to waiting confirmation status
+   */
+  async resetRegistrationToWaiting(id: string, minutes: number = 10): Promise<void> {
+    const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+    const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
+    const newExpires = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+    await updateDoc(targetRef, {
+      paymentStatus: 'waiting_confirmation',
+      status: 'pendente',
+      paymentExpiresAt: newExpires,
+      maxWaitExceeded: false,
     });
   },
 

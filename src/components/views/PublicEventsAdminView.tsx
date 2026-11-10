@@ -36,6 +36,7 @@ import {
   Hourglass,
   Check,
   RotateCcw,
+  ArrowLeft,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import {
@@ -120,20 +121,25 @@ export const PublicEventsAdminView: React.FC = () => {
     return () => unsub();
   }, []);
 
-  // Subscribe to attendees when an event is selected
+  // Subscribe to attendees when an event is selected (STRICT ISOLATION)
   useEffect(() => {
     if (!selectedEventForAttendees) {
       setAttendees([]);
       return;
     }
 
+    // Immediately clear previous event attendees so they never mix or flash!
+    setAttendees([]);
     setAttendeesLoading(true);
-    const unsub = api.subscribeEventRegistrations(selectedEventForAttendees.id, (list) => {
-      setAttendees(list);
+
+    const targetEventId = selectedEventForAttendees.id;
+    const unsub = api.subscribeEventRegistrations(targetEventId, (list) => {
+      // Ironclad isolation guarantee: only keep attendees strictly belonging to this event
+      setAttendees(list.filter((a) => a.eventId === targetEventId));
       setAttendeesLoading(false);
     });
     return () => unsub();
-  }, [selectedEventForAttendees]);
+  }, [selectedEventForAttendees?.id]);
 
   // Copy Public Form Link to Clipboard
   const handleCopyLink = (event: PublicRegistrationEvent) => {
@@ -352,13 +358,37 @@ export const PublicEventsAdminView: React.FC = () => {
     }
   };
 
-  // Attendees Statistics Calculations
+  const handleResetToWaiting = async (attendee: EventRegistration) => {
+    try {
+      await api.resetRegistrationToWaiting(attendee.id, selectedEventForAttendees?.paymentTimeoutMinutes || 10);
+      notify(`Inscrição de ${attendee.fullName} retornada para a fila de espera.`, 'info');
+    } catch {
+      notify('Erro ao retornar para a fila.', 'error');
+    }
+  };
+
+  const handleDeleteAttendee = async (attendee: EventRegistration) => {
+    if (!confirm(`Deseja realmente excluir a inscrição de "${attendee.fullName}" (${attendee.id})? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await api.deleteEventRegistration(attendee.id);
+      notify(`Inscrição de ${attendee.fullName} excluída com sucesso.`, 'success');
+    } catch {
+      notify('Erro ao excluir inscrição.', 'error');
+    }
+  };
+
+  // Attendees Statistics Calculations (STRICTLY ISOLATED BY EVENT)
   const stats = useMemo(() => {
+    const isEventPaid = !!selectedEventForAttendees?.isPaid;
     const total = attendees.length;
     const checkedIn = attendees.filter((a) => a.status === 'presente').length;
     const now = Date.now();
     const waitingPayment = attendees.filter((a) => a.paymentStatus === 'waiting_confirmation').length;
-    const confirmedPaid = attendees.filter((a) => a.paymentStatus === 'paid' || a.paymentStatus === 'free').length;
+    // For a paid event: ONLY count those who are explicitly marked as 'paid'!
+    const confirmedPaid = isEventPaid
+      ? attendees.filter((a) => a.paymentStatus === 'paid').length
+      : attendees.filter((a) => a.status === 'confirmada' || a.status === 'presente' || a.paymentStatus === 'free').length;
+
     const expiredPayment = attendees.filter((a) => {
       if (a.paymentStatus === 'expired') return true;
       if (a.paymentStatus === 'waiting_confirmation' && a.paymentExpiresAt) {
@@ -366,9 +396,10 @@ export const PublicEventsAdminView: React.FC = () => {
       }
       return false;
     }).length;
+    const rejectedPayment = attendees.filter((a) => a.paymentStatus === 'rejected' || a.status === 'cancelada').length;
     const totalRevenue = attendees
       .filter((a) => a.paymentStatus === 'paid')
-      .reduce((acc, a) => acc + (a.ticketPrice || 0), 0);
+      .reduce((acc, a) => acc + (a.ticketPrice || selectedEventForAttendees?.price || 0), 0);
 
     const churchCount: Record<string, number> = {};
     const areaCount: Record<string, number> = {};
@@ -389,11 +420,12 @@ export const PublicEventsAdminView: React.FC = () => {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
-    return { total, checkedIn, waitingPayment, confirmedPaid, expiredPayment, totalRevenue, topChurches, topAreas };
-  }, [attendees]);
+    return { total, checkedIn, waitingPayment, confirmedPaid, expiredPayment, rejectedPayment, totalRevenue, topChurches, topAreas };
+  }, [attendees, selectedEventForAttendees]);
 
-  // Filtered Attendees
+  // Filtered Attendees (STRICT ISOLATION)
   const filteredAttendees = useMemo(() => {
+    const isEventPaid = !!selectedEventForAttendees?.isPaid;
     const now = Date.now();
     return attendees.filter((a) => {
       const isExpired =
@@ -405,7 +437,11 @@ export const PublicEventsAdminView: React.FC = () => {
       if (attendeeStatusFilter === 'waiting') {
         if (a.paymentStatus !== 'waiting_confirmation') return false;
       } else if (attendeeStatusFilter === 'paid') {
-        if (a.paymentStatus !== 'paid' && a.paymentStatus !== 'free') return false;
+        if (isEventPaid) {
+          if (a.paymentStatus !== 'paid') return false;
+        } else {
+          if (a.status !== 'confirmada' && a.status !== 'presente' && a.paymentStatus !== 'free') return false;
+        }
       } else if (attendeeStatusFilter === 'expired') {
         if (!isExpired) return false;
       } else if (attendeeStatusFilter === 'rejected') {
@@ -427,7 +463,7 @@ export const PublicEventsAdminView: React.FC = () => {
       }
       return true;
     });
-  }, [attendees, attendeeStatusFilter, attendeeSearch]);
+  }, [attendees, attendeeStatusFilter, attendeeSearch, selectedEventForAttendees]);
 
   // Toggle Attendee Check-In
   const handleToggleCheckIn = async (attendee: EventRegistration) => {
@@ -590,27 +626,65 @@ export const PublicEventsAdminView: React.FC = () => {
         /* ATTENDEES & STATISTICS DASHBOARD VIEW                   */
         /* ======================================================== */
         <div className="space-y-6">
-          {/* Back button and title */}
-          <div className="flex items-center justify-between gap-4 p-4 bg-neutral-900/80 border border-neutral-800 rounded-2xl">
+          {/* Back button and title with event switcher */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-neutral-900/90 border border-neutral-800 rounded-2xl">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setSelectedEventForAttendees(null)}
-                className="p-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl transition-colors cursor-pointer"
+                className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
                 title="Voltar aos eventos"
               >
-                <X className="w-4 h-4" />
+                <ArrowLeft className="w-4 h-4" />
+                <span>Voltar</span>
               </button>
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                  Gerenciamento de Participantes
-                </span>
-                <h2 className="text-lg font-bold text-neutral-100">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                    Lista de Inscritos Exclusiva
+                  </span>
+                  {selectedEventForAttendees.isPaid ? (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase">
+                      Evento Pago · R$ {(selectedEventForAttendees.price || 0).toFixed(2)}
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold uppercase">
+                      Evento Gratuito
+                    </span>
+                  )}
+                  <span className="text-[11px] text-neutral-400 font-mono-numbers">
+                    {formatDateBR(selectedEventForAttendees.date)} · {selectedEventForAttendees.time}
+                  </span>
+                </div>
+                <h2 className="text-lg sm:text-xl font-bold text-neutral-100 mt-0.5">
                   {selectedEventForAttendees.name}
                 </h2>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Event switcher dropdown to prevent any mixing */}
+              {events.length > 1 && (
+                <div className="flex items-center gap-1.5 bg-neutral-800/80 px-2.5 py-1.5 rounded-xl border border-neutral-700">
+                  <span className="text-[10px] uppercase font-bold text-neutral-400">Trocar:</span>
+                  <select
+                    value={selectedEventForAttendees.id}
+                    onChange={(e) => {
+                      const target = events.find((ev) => ev.id === e.target.value);
+                      if (target) {
+                        setSelectedEventForAttendees(target);
+                      }
+                    }}
+                    className="bg-transparent text-neutral-200 text-xs font-semibold focus:outline-none cursor-pointer max-w-[150px] sm:max-w-[200px] truncate"
+                  >
+                    {events.map((ev) => (
+                      <option key={ev.id} value={ev.id} className="bg-neutral-900 text-neutral-200">
+                        {ev.name} ({formatDateBR(ev.date)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <button
                 onClick={() => handleCopyLink(selectedEventForAttendees)}
                 className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700"
@@ -926,37 +1000,113 @@ export const PublicEventsAdminView: React.FC = () => {
 
                         <td className="p-3.5 text-right">
                           <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                            {/* Verification Queue Action Buttons */}
-                            {selectedEventForAttendees.isPaid && isWaiting && (
+                            {/* Verification Queue Action Buttons for Paid Events */}
+                            {selectedEventForAttendees.isPaid && (
                               <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleConfirmPayment(a)}
-                                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 cursor-pointer"
-                                  title="Confirmar recebimento do pagamento"
-                                >
-                                  <Check className="w-3.5 h-3.5" />
-                                  <span>Pagou</span>
-                                </button>
+                                {isWaiting && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleConfirmPayment(a)}
+                                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 cursor-pointer"
+                                      title="Confirmar recebimento do pagamento"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                      <span>Pagou</span>
+                                    </button>
 
-                                <button
-                                  type="button"
-                                  onClick={() => handleRejectPayment(a)}
-                                  className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-300 rounded-lg text-xs font-medium transition-all flex items-center gap-1 cursor-pointer"
-                                  title="Não pagou / Cancelar inscrição"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                  <span>Não Pagou</span>
-                                </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRejectPayment(a)}
+                                      className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-300 rounded-lg text-xs font-medium transition-all flex items-center gap-1 cursor-pointer"
+                                      title="Não pagou / Cancelar inscrição"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                      <span>Não Pagou</span>
+                                    </button>
 
-                                <button
-                                  type="button"
-                                  onClick={() => handleExtendWaitTime(a)}
-                                  className="px-2 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-semibold transition-all flex items-center gap-0.5 cursor-pointer"
-                                  title="Aumentar tempo de espera em +5 minutos"
-                                >
-                                  <span>+5m</span>
-                                </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleExtendWaitTime(a)}
+                                      className="px-2 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-semibold transition-all flex items-center gap-0.5 cursor-pointer"
+                                      title="Aumentar tempo de espera em +5 minutos"
+                                    >
+                                      <span>+5m</span>
+                                    </button>
+                                  </>
+                                )}
+
+                                {isPaidConfirmed && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResetToWaiting(a)}
+                                      className="px-2 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-medium transition-all flex items-center gap-1 border border-neutral-700 cursor-pointer"
+                                      title="Reverter status para Fila de Espera"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                                      <span>Reverter p/ Fila</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRejectPayment(a)}
+                                      className="px-2 py-1.5 bg-red-950/60 hover:bg-red-900/80 border border-red-800/60 text-red-300 rounded-lg text-xs font-medium transition-all flex items-center gap-1 cursor-pointer"
+                                      title="Mudar para Não Pagou"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                      <span>Não Pagou</span>
+                                    </button>
+                                  </>
+                                )}
+
+                                {isRejected && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleConfirmPayment(a)}
+                                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 cursor-pointer"
+                                      title="Confirmar recebimento do pagamento"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                      <span>Pagou</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResetToWaiting(a)}
+                                      className="px-2 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-medium transition-all flex items-center gap-1 border border-neutral-700 cursor-pointer"
+                                      title="Mover para Fila de Espera"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                                      <span>Mover p/ Fila</span>
+                                    </button>
+                                  </>
+                                )}
+
+                                {!isWaiting && !isPaidConfirmed && !isRejected && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleConfirmPayment(a)}
+                                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 cursor-pointer"
+                                      title="Confirmar pagamento deste participante"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                      <span>Pagou</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResetToWaiting(a)}
+                                      className="px-2 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer"
+                                      title="Colocar na fila de espera"
+                                    >
+                                      <Hourglass className="w-3.5 h-3.5" />
+                                      <span>Pôr na Fila</span>
+                                    </button>
+                                  </>
+                                )}
                               </>
                             )}
 
@@ -969,13 +1119,9 @@ export const PublicEventsAdminView: React.FC = () => {
                             </button>
 
                             <button
-                              onClick={async () => {
-                                if (window.confirm(`Excluir inscrição de ${a.fullName}?`)) {
-                                  await api.deleteEventRegistration(a.id);
-                                }
-                              }}
+                              onClick={() => handleDeleteAttendee(a)}
                               className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-lg transition-colors cursor-pointer"
-                              title="Excluir inscrição"
+                              title="Excluir inscrição permanentemente"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
