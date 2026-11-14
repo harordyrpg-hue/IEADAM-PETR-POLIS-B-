@@ -92,11 +92,13 @@ export const AttendanceView: React.FC = () => {
 
   // Modals
   const [isDeptModalOpen, setIsDeptModalOpen] = useState(false);
+  const [editingDeptId, setEditingDeptId] = useState<string | null>(null);
   const [newDeptName, setNewDeptName] = useState('');
   const [newDeptKind, setNewDeptKind] = useState<AttendanceDepartmentKind>('departamento');
   const [isSavingDept, setIsSavingDept] = useState(false);
 
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberDeptId, setNewMemberDeptId] = useState('');
   const [isSavingMember, setIsSavingMember] = useState(false);
@@ -495,21 +497,59 @@ export const AttendanceView: React.FC = () => {
   // ==========================================
   // HANDLERS: DEPARTMENTS & MEMBERS CRUD
   // ==========================================
-  const handleCreateDepartment = async (e: React.FormEvent) => {
+  const handleOpenCreateDepartment = () => {
+    setEditingDeptId(null);
+    setNewDeptName('');
+    setNewDeptKind('departamento');
+    setIsDeptModalOpen(true);
+  };
+
+  const handleOpenEditDepartment = (dept: AttendanceDepartment) => {
+    setEditingDeptId(dept.id);
+    setNewDeptName(dept.name);
+    setNewDeptKind(dept.kind);
+    setIsDeptModalOpen(true);
+  };
+
+  const handleSaveDepartment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newDeptName.trim()) {
-      notify('Informe o nome do departamento, ministério ou equipe.', 'error');
+    const cleanName = newDeptName.trim();
+    if (!cleanName) {
+      notify('Informe o nome da categoria, departamento, ministério ou equipe.', 'error');
       return;
     }
     try {
       setIsSavingDept(true);
-      const nextOrder = departments.length > 0 ? Math.max(...departments.map((d) => d.order || 0)) + 1 : 1;
-      await api.createAttendanceDepartment(newDeptName.trim(), newDeptKind, nextOrder);
+      if (editingDeptId) {
+        await api.updateAttendanceDepartment(editingDeptId, {
+          name: cleanName,
+          kind: newDeptKind,
+        });
+        // Keep activeCall records departmentName synced
+        if (activeCall) {
+          let changed = false;
+          const nextRecords = { ...activeCall.records };
+          Object.entries(nextRecords).forEach(([memId, entry]) => {
+            if (entry.departmentId === editingDeptId && entry.departmentName !== cleanName) {
+              nextRecords[memId] = { ...entry, departmentName: cleanName };
+              changed = true;
+            }
+          });
+          if (changed) {
+            await api.saveAttendanceCall({ ...activeCall, records: nextRecords });
+          }
+        }
+        notify('Categoria atualizada com sucesso!', 'success');
+      } else {
+        const nextOrder = departments.length > 0 ? Math.max(...departments.map((d) => d.order || 0)) + 1 : 1;
+        await api.createAttendanceDepartment(cleanName, newDeptKind, nextOrder);
+        notify('Categoria/equipe adicionada com sucesso!', 'success');
+      }
       setNewDeptName('');
+      setEditingDeptId(null);
       setIsDeptModalOpen(false);
-      notify('Departamento/equipe adicionado com sucesso!', 'success');
     } catch {
-      notify('Erro ao criar departamento.', 'error');
+      notify('Erro ao salvar categoria.', 'error');
     } finally {
       setIsSavingDept(false);
     }
@@ -534,32 +574,64 @@ export const AttendanceView: React.FC = () => {
   };
 
   const handleOpenAddMember = (presetDeptId?: string) => {
+    setEditingMemberId(null);
     setNewMemberName('');
     setNewMemberDeptId(presetDeptId || departments[0]?.id || '');
     setIsMemberModalOpen(true);
   };
 
-  const handleCreateMember = async (e: React.FormEvent) => {
+  const handleOpenEditMember = (member: AttendanceMember) => {
+    setEditingMemberId(member.id);
+    setNewMemberName(member.name);
+    setNewMemberDeptId(member.departmentId);
+    setIsMemberModalOpen(true);
+  };
+
+  const handleSaveMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMemberName.trim() || !newMemberDeptId) {
-      notify('Informe o nome do membro e selecione o departamento.', 'error');
+    const cleanName = newMemberName.trim();
+    if (!cleanName || !newMemberDeptId) {
+      notify('Informe o nome do membro e selecione a categoria.', 'error');
       return;
     }
     try {
       setIsSavingMember(true);
-      const created = await api.createAttendanceMember(newMemberDeptId, newMemberName.trim());
-      // Automatically include newly created member in active call if one exists on selected date
-      if (activeCall) {
-        await api.saveAttendanceCall({
-          ...activeCall,
-          includedMemberIds: Array.from(new Set([...activeCall.includedMemberIds, created.id])),
+      if (editingMemberId) {
+        await api.updateAttendanceMember(editingMemberId, {
+          name: cleanName,
+          departmentId: newMemberDeptId,
         });
+        // Keep activeCall record synced with updated member name & category
+        if (activeCall && activeCall.records[editingMemberId]) {
+          const targetDept = departments.find((d) => d.id === newMemberDeptId);
+          const nextRecords = {
+            ...activeCall.records,
+            [editingMemberId]: {
+              ...activeCall.records[editingMemberId],
+              memberName: cleanName,
+              departmentId: newMemberDeptId,
+              departmentName: targetDept?.name || activeCall.records[editingMemberId].departmentName,
+            },
+          };
+          await api.saveAttendanceCall({ ...activeCall, records: nextRecords });
+        }
+        notify(`Membro "${cleanName}" atualizado!`, 'success');
+      } else {
+        const created = await api.createAttendanceMember(newMemberDeptId, cleanName);
+        // Automatically include newly created member in active call if one exists on selected date
+        if (activeCall) {
+          await api.saveAttendanceCall({
+            ...activeCall,
+            includedMemberIds: Array.from(new Set([...activeCall.includedMemberIds, created.id])),
+          });
+        }
+        notify(`Membro "${created.name}" adicionado!`, 'success');
       }
       setNewMemberName('');
+      setEditingMemberId(null);
       setIsMemberModalOpen(false);
-      notify(`Membro "${created.name}" adicionado!`, 'success');
     } catch {
-      notify('Erro ao adicionar membro.', 'error');
+      notify('Erro ao salvar membro.', 'error');
     } finally {
       setIsSavingMember(false);
     }
@@ -713,11 +785,11 @@ export const AttendanceView: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setIsDeptModalOpen(true)}
+            onClick={handleOpenCreateDepartment}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-neutral-800 hover:bg-neutral-700 text-amber-400 text-xs font-semibold rounded-xl border border-amber-500/30 transition-colors cursor-pointer whitespace-nowrap"
           >
             <FolderPlus className="w-3.5 h-3.5" />
-            <span>Novo Depto / Equipe</span>
+            <span>Nova Categoria / Equipe</span>
           </button>
 
           <button
@@ -1015,10 +1087,10 @@ export const AttendanceView: React.FC = () => {
               <div className="flex items-center justify-center gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsDeptModalOpen(true)}
+                  onClick={handleOpenCreateDepartment}
                   className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl cursor-pointer"
                 >
-                  + Novo Departamento
+                  + Nova Categoria
                 </button>
                 <button
                   type="button"
@@ -1112,6 +1184,15 @@ export const AttendanceView: React.FC = () => {
                         >
                           <Plus className="w-3.5 h-3.5 text-amber-400" />
                           <span>Membro</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditDepartment(group.department)}
+                          className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-amber-400 rounded-lg border border-neutral-700 transition-colors cursor-pointer"
+                          title={`Editar categoria ${group.department.name}`}
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
                         </button>
 
                         <button
@@ -1230,6 +1311,15 @@ export const AttendanceView: React.FC = () => {
                                   title="Retirar apenas da chamada deste dia"
                                 >
                                   Retirar
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditMember(member)}
+                                  className="p-1.5 text-neutral-400 hover:text-amber-400 hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer"
+                                  title={`Editar membro ${member.name} ou mudar categoria`}
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
                                 </button>
 
                                 <button
@@ -1465,25 +1555,30 @@ export const AttendanceView: React.FC = () => {
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 3: CRIAR DEPARTAMENTO / MINISTÉRIO / EQUIPE        */}
+      {/* MODAL 3: CRIAR / EDITAR CATEGORIA (DEPTO/MINISTÉRIO/EQUIPE) */}
       {/* ======================================================== */}
       {isDeptModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-neutral-900 border border-neutral-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
             <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
               <h3 className="text-sm font-bold text-neutral-100">
-                Novo Departamento, Ministério ou Equipe
+                {editingDeptId
+                  ? 'Editar Categoria / Departamento / Equipe'
+                  : 'Nova Categoria, Departamento ou Equipe'}
               </h3>
               <button
                 type="button"
-                onClick={() => setIsDeptModalOpen(false)}
+                onClick={() => {
+                  setIsDeptModalOpen(false);
+                  setEditingDeptId(null);
+                }}
                 className="p-1.5 text-neutral-400 hover:text-neutral-200 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateDepartment} className="p-5 space-y-4">
+            <form onSubmit={handleSaveDepartment} className="p-5 space-y-4">
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-neutral-200">Tipo</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -1512,7 +1607,7 @@ export const AttendanceView: React.FC = () => {
 
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-neutral-200">
-                  Nome do Grupo
+                  Nome da Categoria / Grupo
                 </label>
                 <input
                   type="text"
@@ -1527,7 +1622,10 @@ export const AttendanceView: React.FC = () => {
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsDeptModalOpen(false)}
+                  onClick={() => {
+                    setIsDeptModalOpen(false);
+                    setEditingDeptId(null);
+                  }}
                   className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl cursor-pointer"
                 >
                   Cancelar
@@ -1537,7 +1635,7 @@ export const AttendanceView: React.FC = () => {
                   disabled={isSavingDept}
                   className="px-4 py-2 bg-amber-400 hover:bg-amber-300 disabled:opacity-60 text-neutral-950 text-xs font-bold rounded-xl cursor-pointer"
                 >
-                  {isSavingDept ? 'Salvando...' : 'Adicionar'}
+                  {isSavingDept ? 'Salvando...' : editingDeptId ? 'Salvar Alterações' : 'Adicionar'}
                 </button>
               </div>
             </form>
@@ -1546,26 +1644,31 @@ export const AttendanceView: React.FC = () => {
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 4: ADICIONAR MEMBRO                                */}
+      {/* MODAL 4: ADICIONAR / EDITAR MEMBRO                       */}
       {/* ======================================================== */}
       {isMemberModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-neutral-900 border border-neutral-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
             <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-neutral-100">Acrescentar Membro</h3>
+              <h3 className="text-sm font-bold text-neutral-100">
+                {editingMemberId ? 'Editar Membro' : 'Acrescentar Membro'}
+              </h3>
               <button
                 type="button"
-                onClick={() => setIsMemberModalOpen(false)}
+                onClick={() => {
+                  setIsMemberModalOpen(false);
+                  setEditingMemberId(null);
+                }}
                 className="p-1.5 text-neutral-400 hover:text-neutral-200 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateMember} className="p-5 space-y-4">
+            <form onSubmit={handleSaveMember} className="p-5 space-y-4">
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-neutral-200">
-                  Departamento / Ministério / Equipe
+                  Categoria (Departamento / Ministério / Equipe)
                 </label>
                 <select
                   required
@@ -1601,7 +1704,10 @@ export const AttendanceView: React.FC = () => {
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsMemberModalOpen(false)}
+                  onClick={() => {
+                    setIsMemberModalOpen(false);
+                    setEditingMemberId(null);
+                  }}
                   className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl cursor-pointer"
                 >
                   Cancelar
@@ -1611,7 +1717,11 @@ export const AttendanceView: React.FC = () => {
                   disabled={isSavingMember}
                   className="px-4 py-2 bg-amber-400 hover:bg-amber-300 disabled:opacity-60 text-neutral-950 text-xs font-bold rounded-xl cursor-pointer"
                 >
-                  {isSavingMember ? 'Salvando...' : 'Adicionar Membro'}
+                  {isSavingMember
+                    ? 'Salvando...'
+                    : editingMemberId
+                    ? 'Salvar Alterações'
+                    : 'Adicionar Membro'}
                 </button>
               </div>
             </form>

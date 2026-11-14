@@ -4094,6 +4094,36 @@ export const api = {
     }
   },
 
+  async updateAttendanceDepartment(
+    departmentId: string,
+    updates: { name: string; kind: AttendanceDepartmentKind; order?: number }
+  ): Promise<void> {
+    const effective = api.getEffectiveUser();
+    const now = new Date().toISOString();
+    try {
+      await updateDoc(
+        doc(db, 'attendance_departments', departmentId),
+        removeUndefinedValues({
+          name: updates.name.trim(),
+          kind: updates.kind,
+          ...(updates.order !== undefined ? { order: updates.order } : {}),
+          updatedAt: now,
+        })
+      );
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'update_attendance_department',
+        actionLabel: 'Editou Categoria/Equipe na Chamada',
+        targetType: 'attendance',
+        targetName: updates.name.trim(),
+        details: `Tipo: ${updates.kind}`,
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `attendance_departments/${departmentId}`);
+    }
+  },
+
   async deleteAttendanceDepartment(departmentId: string, departmentName?: string): Promise<void> {
     try {
       const membersSnap = await getDocs(
@@ -4147,6 +4177,35 @@ export const api = {
       return member;
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `attendance_members/${id}`);
+    }
+  },
+
+  async updateAttendanceMember(
+    memberId: string,
+    updates: { name: string; departmentId: string }
+  ): Promise<void> {
+    const effective = api.getEffectiveUser();
+    const now = new Date().toISOString();
+    try {
+      await updateDoc(
+        doc(db, 'attendance_members', memberId),
+        removeUndefinedValues({
+          name: updates.name.trim(),
+          departmentId: updates.departmentId,
+          updatedAt: now,
+        })
+      );
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'update_attendance_member',
+        actionLabel: 'Editou Membro na Chamada',
+        targetType: 'attendance',
+        targetName: updates.name.trim(),
+        details: `Categoria ID: ${updates.departmentId}`,
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `attendance_members/${memberId}`);
     }
   },
 
