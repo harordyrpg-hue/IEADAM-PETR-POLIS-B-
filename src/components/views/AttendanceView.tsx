@@ -122,6 +122,7 @@ export const AttendanceView: React.FC = () => {
   const [newCallTitle, setNewCallTitle] = useState('');
 
   const [isExportingImage, setIsExportingImage] = useState(false);
+  const [isResettingCall, setIsResettingCall] = useState(false);
 
   // Seed initial roster once if empty & subscribe to real-time collections
   useEffect(() => {
@@ -700,6 +701,50 @@ export const AttendanceView: React.FC = () => {
     }
   };
 
+  const handleResetAttendanceCall = async () => {
+    const hasMarks = !!(activeCall && Object.keys(activeCall.records || {}).length > 0);
+    const hasCustomParticipants = !!(activeCall && effectiveIncludedIds.length !== members.length);
+    const hasFilters =
+      searchQuery.trim() !== '' || departmentFilter !== 'all' || statusFilter !== 'all';
+
+    if (!hasMarks && !hasCustomParticipants && !hasFilters) {
+      notify('A chamada deste dia já está zerada.', 'info');
+      return;
+    }
+
+    const callLabel = draftTitle.trim() || activeCall?.title || 'Chamada Geral';
+    if (
+      !confirm(
+        `Deseja restaurar a chamada "${callLabel}" (${formatAttendanceDateBR(selectedDate)}) e reiniciar do zero? Todas as presenças, faltas e justificativas deste dia serão apagadas e todos os membros voltarão para a lista.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsResettingCall(true);
+      if (activeCall) {
+        await api.saveAttendanceCall({
+          ...activeCall,
+          title: callLabel,
+          includedMemberIds: members.map((m) => m.id),
+          records: {},
+        });
+      }
+      setSearchQuery('');
+      setDepartmentFilter('all');
+      setStatusFilter('all');
+      setAbsenceTarget(null);
+      setJustificationText('');
+      setNoJustification(false);
+      notify('Chamada restaurada e reiniciada do zero!', 'success');
+    } catch {
+      notify('Erro ao restaurar a chamada.', 'error');
+    } finally {
+      setIsResettingCall(false);
+    }
+  };
+
   // ==========================================
   // CALENDAR GRID COMPUTATION
   // ==========================================
@@ -764,6 +809,17 @@ export const AttendanceView: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            disabled={isResettingCall}
+            onClick={handleResetAttendanceCall}
+            title="Apagar marcações do dia e reiniciar a chamada do zero"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-neutral-800 hover:bg-red-500/15 disabled:opacity-60 text-red-300 hover:text-red-200 text-xs font-semibold rounded-xl border border-red-500/30 transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <RotateCcw className={`w-3.5 h-3.5 ${isResettingCall ? 'animate-spin' : ''}`} />
+            <span>{isResettingCall ? 'Restaurando...' : 'Restaurar Chamada'}</span>
+          </button>
+
           <button
             type="button"
             onClick={handleExportPDF}
