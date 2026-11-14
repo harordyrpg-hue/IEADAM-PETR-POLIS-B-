@@ -27,6 +27,7 @@ import {
   User as UserIcon,
   DollarSign,
   QrCode,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { ViewTab } from '../../types.js';
@@ -81,6 +82,7 @@ export const Sidebar: React.FC = () => {
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { id: 'schedule', label: 'Central de Agenda', icon: CalendarDays, badge: pendingTasksCount },
+        { id: 'attendance', label: 'Chamada & Presença', icon: ClipboardCheck },
         { id: 'registrations', label: 'Eventos & Inscrições', icon: QrCode },
         { id: 'files', label: 'Meus arquivos', icon: FolderOpen, badge: storageStats?.counts.totalFiles },
         {

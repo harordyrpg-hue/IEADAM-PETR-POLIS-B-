@@ -252,6 +252,56 @@
         "registeredAt": { "type": "string", "format": "date-time" }
       },
       "required": ["eventId", "eventName", "fullName", "phone", "status"]
+    },
+    "AttendanceDepartment": {
+      "title": "AttendanceDepartment",
+      "description": "Church department, ministry, or team for attendance tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "kind": { "type": "string", "enum": ["departamento", "ministerio", "equipe"] },
+        "order": { "type": "number" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "kind"]
+    },
+    "AttendanceMember": {
+      "title": "AttendanceMember",
+      "description": "Member belonging to a department, ministry, or team",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "departmentId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["departmentId", "name"]
+    },
+    "AttendanceCall": {
+      "title": "AttendanceCall",
+      "description": "Attendance roll call for a selected calendar date and included members",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 20 },
+        "title": { "type": "string", "maxLength": 200 },
+        "includedMemberIds": { "type": "array" },
+        "records": { "type": "object" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "updatedByUid": { "type": "string", "maxLength": 128 },
+        "updatedByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "title", "includedMemberIds"]
     }
   },
   "firestore": {
@@ -334,6 +384,18 @@
     "/event_registrations/{registrationId}": {
       "schema": { "$ref": "#/entities/EventRegistration" },
       "description": "Guest registrations with ticket and QR code"
+    },
+    "/attendance_departments/{departmentId}": {
+      "schema": { "$ref": "#/entities/AttendanceDepartment" },
+      "description": "Departments, ministries, and teams for attendance roll calls"
+    },
+    "/attendance_members/{memberId}": {
+      "schema": { "$ref": "#/entities/AttendanceMember" },
+      "description": "Members listed inside each department/ministry/team"
+    },
+    "/attendance_calls/{callId}": {
+      "schema": { "$ref": "#/entities/AttendanceCall" },
+      "description": "Daily roll calls with included members, statuses, justifications, and marking user"
     }
   }
 }

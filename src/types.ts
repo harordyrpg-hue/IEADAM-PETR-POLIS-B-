@@ -185,7 +185,8 @@ export type ViewTab =
   | 'storage'
   | 'profile'
   | 'finances'
-  | 'registrations';
+  | 'registrations'
+  | 'attendance';
 
 export interface ChurchLeadershipMember {
   id: string;
@@ -524,6 +525,28 @@ export interface RegistrationCustomField {
   options?: string[]; // for 'select'
 }
 
+export interface EventCashboxMovement {
+  id: string;
+  type: 'entrada' | 'estorno';
+  amount: number;
+  registrationId: string;
+  attendeeName: string;
+  paymentType?: EventPaymentType;
+  reason: string;
+  adminName: string;
+  timestamp: string;
+}
+
+export interface EventRegistrationsSummary {
+  total: number;
+  waiting: number;
+  paid: number;
+  rejected: number;
+  cashboxBalance: number;
+  pendingBalance: number;
+  rejectedBalance: number;
+}
+
 export interface PublicRegistrationEvent {
   id: string;
   name: string;
@@ -547,6 +570,7 @@ export interface PublicRegistrationEvent {
   whatsappPaymentNumber?: string; // Número do vendedor WhatsApp (wa.me)
   paymentTimeoutMinutes?: number; // 5, 10, 15, 20 ou customizado (padrão: 10m)
   supportWhatsappNumber?: string; // WhatsApp de suporte quando expirar tempo limite
+  cashboxMovements?: EventCashboxMovement[]; // Histórico de entradas e estornos/reversões do caixa do evento
 
   standardFields: {
     fullName: RegistrationStandardFieldConfig;
@@ -596,4 +620,59 @@ export interface EventRegistration {
   confirmedByAdminUid?: string | null;
   confirmedByAdminName?: string | null;
   rejectionReason?: string;
+}
+
+// ==========================================
+// SISTEMA DE CHAMADA, PRESENÇA & FALTAS DE MEMBROS
+// ==========================================
+export type AttendanceDepartmentKind = 'departamento' | 'ministerio' | 'equipe';
+
+export interface AttendanceDepartment {
+  id: string;
+  name: string;
+  kind: AttendanceDepartmentKind;
+  order: number;
+  createdByUid: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AttendanceMember {
+  id: string;
+  departmentId: string;
+  name: string;
+  createdByUid: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AttendanceStatus = 'presente' | 'falta';
+
+export interface AttendanceEntry {
+  memberId: string;
+  memberName: string;
+  departmentId: string;
+  departmentName: string;
+  status: AttendanceStatus;
+  justification?: string;
+  noJustification?: boolean;
+  markedByUid: string;
+  markedByName: string;
+  markedAt: string;
+}
+
+export interface AttendanceCall {
+  id: string;
+  date: string; // YYYY-MM-DD
+  title: string;
+  includedMemberIds: string[];
+  records: Record<string, AttendanceEntry>;
+  createdByUid: string;
+  createdByName: string;
+  updatedByUid: string;
+  updatedByName: string;
+  createdAt: string;
+  updatedAt: string;
 }

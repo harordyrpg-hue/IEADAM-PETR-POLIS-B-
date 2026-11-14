@@ -38,6 +38,7 @@ import { StorageTransmissionView } from './components/views/StorageTransmissionV
 import { ProfileView } from './components/views/ProfileView.js';
 import { FinancialView } from './components/views/FinancialView.js';
 import { PublicEventsAdminView } from './components/views/PublicEventsAdminView.js';
+import { AttendanceView } from './components/views/AttendanceView.js';
 import { PublicEventRegistrationPage } from './components/public/PublicEventRegistrationPage.js';
 import { PublicChurchPage } from './components/public/PublicChurchPage.js';
 import { LoginView } from './components/auth/LoginView.js';
@@ -238,6 +239,8 @@ const MainLayout: React.FC = () => {
         return <FinancialView />;
       case 'registrations':
         return <PublicEventsAdminView />;
+      case 'attendance':
+        return <AttendanceView />;
       default:
         return (
           <DashboardView

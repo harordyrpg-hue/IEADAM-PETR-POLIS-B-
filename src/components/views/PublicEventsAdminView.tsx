@@ -37,6 +37,11 @@ import {
   Check,
   RotateCcw,
   ArrowLeft,
+  Wallet,
+  TrendingUp,
+  TrendingDown,
+  ArrowUpRight,
+  ArrowDownLeft,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import {
@@ -44,15 +49,17 @@ import {
   EventRegistration,
   RegistrationThemeColor,
   RegistrationCustomField,
+  EventRegistrationsSummary,
 } from '../../types.js';
 import { api } from '../../services/api.js';
 import { exportRegistrationTicketPDF, formatDateBR } from '../../utils/registrationTicketPdf.js';
 import { jsPDF } from 'jspdf';
 
 export const PublicEventsAdminView: React.FC = () => {
-  const { user, notify } = useApp();
+  const { user, canAccessFinances, createFinancialTransaction, notify } = useApp();
 
   const [events, setEvents] = useState<PublicRegistrationEvent[]>([]);
+  const [eventSummaries, setEventSummaries] = useState<Record<string, EventRegistrationsSummary>>({});
   const [loading, setLoading] = useState(true);
 
   // Active view: 'list' or 'attendees'
@@ -61,6 +68,8 @@ export const PublicEventsAdminView: React.FC = () => {
   const [attendeesLoading, setAttendeesLoading] = useState(false);
   const [attendeeSearch, setAttendeeSearch] = useState('');
   const [attendeeStatusFilter, setAttendeeStatusFilter] = useState<'all' | 'waiting' | 'paid' | 'expired' | 'rejected' | 'presente'>('all');
+  const [showCashboxHistory, setShowCashboxHistory] = useState(false);
+  const [isSendingToFinance, setIsSendingToFinance] = useState(false);
 
   // Event Modal (Create / Edit & Form Builder)
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -111,15 +120,27 @@ export const PublicEventsAdminView: React.FC = () => {
   const [isUploadingBanner, setIsUploadingBanner] = useState(false);
   const bannerInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Subscribe to public events list
+  // Subscribe to public events list & live per-event cashbox summary map
   useEffect(() => {
     setLoading(true);
-    const unsub = api.subscribePublicEvents((list) => {
+    const unsubEvents = api.subscribePublicEvents((list) => {
       setEvents(list);
       setLoading(false);
     });
-    return () => unsub();
+    const unsubSummary = api.subscribeAllEventRegistrationsSummary((summaryMap) => {
+      setEventSummaries(summaryMap);
+    });
+    return () => {
+      unsubEvents();
+      unsubSummary();
+    };
   }, []);
+
+  // Keep selectedEventForAttendees synced with latest Firestore document (e.g. cashboxMovements)
+  const liveSelectedEvent = useMemo(() => {
+    if (!selectedEventForAttendees) return null;
+    return events.find((e) => e.id === selectedEventForAttendees.id) || selectedEventForAttendees;
+  }, [events, selectedEventForAttendees]);
 
   // Subscribe to attendees when an event is selected (STRICT ISOLATION)
   useEffect(() => {
@@ -329,21 +350,49 @@ export const PublicEventsAdminView: React.FC = () => {
     }
   };
 
-  // Queue actions
+  // Queue actions (with instant Cashbox delta feedback)
   const handleConfirmPayment = async (attendee: EventRegistration) => {
     try {
-      await api.confirmRegistrationPayment(attendee.id, user ? { uid: user.uid, name: user.name } : undefined);
-      notify(`Pagamento de ${attendee.fullName} CONFIRMADO! Ingresso liberado na tela do inscrito.`, 'success');
+      const fallbackPrice = liveSelectedEvent?.price || 0;
+      const res = await api.confirmRegistrationPayment(
+        attendee.id,
+        user ? { uid: user.uid, name: user.name } : undefined,
+        fallbackPrice
+      );
+      if (res.wasAlreadyPaid) {
+        notify(`Pagamento de ${attendee.fullName} já estava confirmado.`, 'info');
+      } else {
+        notify(
+          `Pagamento de ${attendee.fullName} CONFIRMADO! +R$ ${res.amount.toFixed(2)} adicionado ao caixa do evento.`,
+          'success'
+        );
+      }
     } catch {
       notify('Erro ao confirmar pagamento.', 'error');
     }
   };
 
   const handleRejectPayment = async (attendee: EventRegistration) => {
-    if (!confirm(`Deseja marcar o pagamento de ${attendee.fullName} como NÃO PAGO / CANCELADO?`)) return;
+    const isCurrentlyPaid = attendee.paymentStatus === 'paid';
+    const val = Number(attendee.ticketPrice || liveSelectedEvent?.price || 0);
+    const confirmMsg = isCurrentlyPaid
+      ? `Cancelar o pagamento confirmado de ${attendee.fullName}? Isso vai DIMINUIR R$ ${val.toFixed(2)} do caixa do evento.`
+      : `Deseja marcar o pagamento de ${attendee.fullName} como NÃO PAGO / CANCELADO?`;
+    if (!confirm(confirmMsg)) return;
     try {
-      await api.rejectRegistrationPayment(attendee.id);
-      notify(`Inscrição de ${attendee.fullName} marcada como NÃO PAGA.`, 'info');
+      const res = await api.rejectRegistrationPayment(
+        attendee.id,
+        undefined,
+        user ? { uid: user.uid, name: user.name } : undefined
+      );
+      if (res.wasPaid) {
+        notify(
+          `Pagamento de ${attendee.fullName} cancelado! -R$ ${res.amount.toFixed(2)} reduzido do caixa do evento.`,
+          'info'
+        );
+      } else {
+        notify(`Inscrição de ${attendee.fullName} marcada como NÃO PAGA.`, 'info');
+      }
     } catch {
       notify('Erro ao rejeitar pagamento.', 'error');
     }
@@ -359,34 +408,74 @@ export const PublicEventsAdminView: React.FC = () => {
   };
 
   const handleResetToWaiting = async (attendee: EventRegistration) => {
+    const isCurrentlyPaid = attendee.paymentStatus === 'paid';
+    const val = Number(attendee.ticketPrice || liveSelectedEvent?.price || 0);
+    if (
+      isCurrentlyPaid &&
+      !confirm(
+        `Reverter a confirmação de pagamento de ${attendee.fullName}? Isso vai DIMINUIR R$ ${val.toFixed(2)} do caixa do evento e devolver o participante para a fila.`
+      )
+    ) {
+      return;
+    }
     try {
-      await api.resetRegistrationToWaiting(attendee.id, selectedEventForAttendees?.paymentTimeoutMinutes || 10);
-      notify(`Inscrição de ${attendee.fullName} retornada para a fila de espera.`, 'info');
+      const res = await api.resetRegistrationToWaiting(
+        attendee.id,
+        liveSelectedEvent?.paymentTimeoutMinutes || 10,
+        user ? { uid: user.uid, name: user.name } : undefined
+      );
+      if (res.wasPaid) {
+        notify(
+          `Confirmação revertida! -R$ ${res.amount.toFixed(2)} estornado do caixa e devolvido à fila.`,
+          'info'
+        );
+      } else {
+        notify(`Inscrição de ${attendee.fullName} retornada para a fila de espera.`, 'info');
+      }
     } catch {
       notify('Erro ao retornar para a fila.', 'error');
     }
   };
 
   const handleDeleteAttendee = async (attendee: EventRegistration) => {
-    if (!confirm(`Deseja realmente excluir a inscrição de "${attendee.fullName}" (${attendee.id})? Esta ação não pode ser desfeita.`)) return;
+    const isCurrentlyPaid = attendee.paymentStatus === 'paid';
+    const val = Number(attendee.ticketPrice || liveSelectedEvent?.price || 0);
+    const msg = isCurrentlyPaid
+      ? `Excluir a inscrição PAGA de "${attendee.fullName}" (${attendee.id})? Isso vai DIMINUIR R$ ${val.toFixed(2)} do caixa do evento.`
+      : `Deseja realmente excluir a inscrição de "${attendee.fullName}" (${attendee.id})? Esta ação não pode ser desfeita.`;
+    if (!confirm(msg)) return;
     try {
-      await api.deleteEventRegistration(attendee.id);
-      notify(`Inscrição de ${attendee.fullName} excluída com sucesso.`, 'success');
+      const res = await api.deleteEventRegistration(
+        attendee.id,
+        user ? { uid: user.uid, name: user.name } : undefined
+      );
+      if (res.wasPaid) {
+        notify(
+          `Inscrição excluída! -R$ ${res.amount.toFixed(2)} reduzido do caixa do evento.`,
+          'info'
+        );
+      } else {
+        notify(`Inscrição de ${attendee.fullName} excluída com sucesso.`, 'success');
+      }
     } catch {
       notify('Erro ao excluir inscrição.', 'error');
     }
   };
 
-  // Attendees Statistics Calculations (STRICTLY ISOLATED BY EVENT)
+  // Attendees Statistics & Cashbox Calculations (STRICTLY ISOLATED BY EVENT)
   const stats = useMemo(() => {
-    const isEventPaid = !!selectedEventForAttendees?.isPaid;
+    const isEventPaid = !!liveSelectedEvent?.isPaid;
+    const defaultPrice = Number(liveSelectedEvent?.price) || 0;
     const total = attendees.length;
     const checkedIn = attendees.filter((a) => a.status === 'presente').length;
     const now = Date.now();
-    const waitingPayment = attendees.filter((a) => a.paymentStatus === 'waiting_confirmation').length;
+    const waitingList = attendees.filter((a) => a.paymentStatus === 'waiting_confirmation');
+    const waitingPayment = waitingList.length;
+
     // For a paid event: ONLY count those who are explicitly marked as 'paid'!
+    const paidList = attendees.filter((a) => a.paymentStatus === 'paid');
     const confirmedPaid = isEventPaid
-      ? attendees.filter((a) => a.paymentStatus === 'paid').length
+      ? paidList.length
       : attendees.filter((a) => a.status === 'confirmada' || a.status === 'presente' || a.paymentStatus === 'free').length;
 
     const expiredPayment = attendees.filter((a) => {
@@ -396,10 +485,21 @@ export const PublicEventsAdminView: React.FC = () => {
       }
       return false;
     }).length;
-    const rejectedPayment = attendees.filter((a) => a.paymentStatus === 'rejected' || a.status === 'cancelada').length;
-    const totalRevenue = attendees
-      .filter((a) => a.paymentStatus === 'paid')
-      .reduce((acc, a) => acc + (a.ticketPrice || selectedEventForAttendees?.price || 0), 0);
+
+    const rejectedList = attendees.filter((a) => a.paymentStatus === 'rejected' || a.status === 'cancelada');
+    const rejectedPayment = rejectedList.length;
+
+    const totalRevenue = paidList.reduce((acc, a) => acc + (Number(a.ticketPrice) || defaultPrice), 0);
+    const waitingBalance = waitingList.reduce((acc, a) => acc + (Number(a.ticketPrice) || defaultPrice), 0);
+    const rejectedBalance = rejectedList.reduce((acc, a) => acc + (Number(a.ticketPrice) || defaultPrice), 0);
+
+    const pixPaidList = paidList.filter((a) => (a.paymentType || liveSelectedEvent?.paymentType || 'pix') === 'pix');
+    const whatsappPaidList = paidList.filter((a) => (a.paymentType || liveSelectedEvent?.paymentType) === 'whatsapp');
+
+    const pixPaidCount = pixPaidList.length;
+    const pixCashboxTotal = pixPaidList.reduce((acc, a) => acc + (Number(a.ticketPrice) || defaultPrice), 0);
+    const whatsappPaidCount = whatsappPaidList.length;
+    const whatsappCashboxTotal = whatsappPaidList.reduce((acc, a) => acc + (Number(a.ticketPrice) || defaultPrice), 0);
 
     const churchCount: Record<string, number> = {};
     const areaCount: Record<string, number> = {};
@@ -420,8 +520,24 @@ export const PublicEventsAdminView: React.FC = () => {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
-    return { total, checkedIn, waitingPayment, confirmedPaid, expiredPayment, rejectedPayment, totalRevenue, topChurches, topAreas };
-  }, [attendees, selectedEventForAttendees]);
+    return {
+      total,
+      checkedIn,
+      waitingPayment,
+      confirmedPaid,
+      expiredPayment,
+      rejectedPayment,
+      totalRevenue,
+      waitingBalance,
+      rejectedBalance,
+      pixPaidCount,
+      pixCashboxTotal,
+      whatsappPaidCount,
+      whatsappCashboxTotal,
+      topChurches,
+      topAreas,
+    };
+  }, [attendees, liveSelectedEvent]);
 
   // Filtered Attendees (STRICT ISOLATION)
   const filteredAttendees = useMemo(() => {
@@ -590,6 +706,207 @@ export const PublicEventsAdminView: React.FC = () => {
     document.body.removeChild(link);
   };
 
+  // Export Paid Event Cashbox Report PDF
+  const handleExportCashboxPDF = () => {
+    const targetEvent = liveSelectedEvent || selectedEventForAttendees;
+    if (!targetEvent) return;
+
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
+
+    const pageWidth = 210;
+    const margin = 16;
+    let y = 16;
+
+    doc.setFillColor(16, 185, 129);
+    doc.rect(0, 0, pageWidth, 5, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(23, 23, 23);
+    doc.text('IEADAM PETRÓPOLIS B · PT-B MÍDIA', margin, y);
+
+    y += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(115, 115, 115);
+    doc.text(`CAIXA DO EVENTO PAGO — ${targetEvent.name.toUpperCase()}`, margin, y);
+
+    doc.setFontSize(7.5);
+    doc.text(`Emitido em ${new Date().toLocaleString('pt-BR')}`, pageWidth - margin, y, { align: 'right' });
+
+    y += 8;
+    doc.setDrawColor(229, 231, 235);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 8;
+
+    // Event & Balance Box
+    doc.setFillColor(240, 253, 244);
+    doc.setDrawColor(167, 243, 208);
+    doc.roundedRect(margin, y, pageWidth - margin * 2, 28, 3, 3, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(6, 95, 70);
+    doc.text('SALDO EM CAIXA CONFIRMADO', margin + 5, y + 7);
+
+    doc.setFontSize(18);
+    doc.setTextColor(4, 120, 87);
+    doc.text(`R$ ${stats.totalRevenue.toFixed(2)}`, margin + 5, y + 16);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(55, 65, 81);
+    doc.text(
+      `${stats.confirmedPaid} ingresso(s) pago(s) · Valor unitário: R$ ${(targetEvent.price || 0).toFixed(2)} · Data do Evento: ${formatDateBR(targetEvent.date)}`,
+      margin + 5,
+      y + 23
+    );
+
+    y += 35;
+
+    // Breakdown metrics
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(23, 23, 23);
+    doc.text('RESUMO POR CANAL E SITUAÇÃO', margin, y);
+    y += 5;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(55, 65, 81);
+    doc.text(`• Pix Copie e Cole: ${stats.pixPaidCount} pago(s) — R$ ${stats.pixCashboxTotal.toFixed(2)}`, margin + 2, y);
+    y += 5;
+    doc.text(`• WhatsApp (Vendedor): ${stats.whatsappPaidCount} pago(s) — R$ ${stats.whatsappCashboxTotal.toFixed(2)}`, margin + 2, y);
+    y += 5;
+    doc.text(`• Na Fila (Aguardando Confirmação): ${stats.waitingPayment} pendente(s) — R$ ${stats.waitingBalance.toFixed(2)}`, margin + 2, y);
+    y += 5;
+    doc.text(`• Cancelados / Não Pagos: ${stats.rejectedPayment} registro(s) — R$ ${stats.rejectedBalance.toFixed(2)}`, margin + 2, y);
+    y += 9;
+
+    // Paid Attendees Table
+    const paidAttendees = attendees.filter((a) => a.paymentStatus === 'paid');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(23, 23, 23);
+    doc.text(`PAGAMENTOS CONFIRMADOS (${paidAttendees.length})`, margin, y);
+    y += 4;
+
+    doc.setFillColor(24, 24, 27);
+    doc.rect(margin, y, pageWidth - margin * 2, 7, 'F');
+    doc.setFontSize(7.5);
+    doc.setTextColor(16, 185, 129);
+    doc.text('#', margin + 3, y + 4.8);
+    doc.text('PARTICIPANTE', margin + 12, y + 4.8);
+    doc.text('MEIO', margin + 92, y + 4.8);
+    doc.text('VALOR', margin + 122, y + 4.8);
+    doc.text('CONFIRMADO EM', margin + 150, y + 4.8);
+    y += 9;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(31, 41, 55);
+    if (paidAttendees.length === 0) {
+      doc.text('Nenhum pagamento confirmado até o momento.', margin + 3, y);
+      y += 7;
+    } else {
+      paidAttendees.forEach((a, idx) => {
+        if (y > 275) {
+          doc.addPage();
+          y = 20;
+        }
+        const val = Number(a.ticketPrice) || Number(targetEvent.price) || 0;
+        const confAt = a.paidConfirmedAt ? new Date(a.paidConfirmedAt).toLocaleString('pt-BR') : '-';
+        doc.text(`${idx + 1}`, margin + 3, y);
+        doc.text(a.fullName.substring(0, 36), margin + 12, y);
+        doc.text(a.paymentType === 'whatsapp' ? 'WhatsApp' : 'Pix', margin + 92, y);
+        doc.text(`R$ ${val.toFixed(2)}`, margin + 122, y);
+        doc.text(confAt.substring(0, 22), margin + 150, y);
+        y += 5.5;
+      });
+    }
+
+    // Movements History
+    const movements = targetEvent.cashboxMovements || [];
+    if (movements.length > 0) {
+      y += 6;
+      if (y > 260) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(23, 23, 23);
+      doc.text(`EXTRATO DE MOVIMENTAÇÕES (${movements.length})`, margin, y);
+      y += 5;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      movements.slice(0, 60).forEach((m) => {
+        if (y > 280) {
+          doc.addPage();
+          y = 20;
+        }
+        const sign = m.type === 'entrada' ? '+' : '-';
+        const typeLabel = m.type === 'entrada' ? 'ENTRADA' : 'ESTORNO';
+        const dt = new Date(m.timestamp).toLocaleString('pt-BR');
+        if (m.type === 'entrada') {
+          doc.setTextColor(4, 120, 87);
+        } else {
+          doc.setTextColor(185, 28, 28);
+        }
+        doc.text(`${typeLabel} ${sign}R$ ${Number(m.amount || 0).toFixed(2)}`, margin + 2, y);
+        doc.setTextColor(55, 65, 81);
+        doc.text(`${m.attendeeName} · ${m.reason} (${m.adminName}) · ${dt}`.substring(0, 82), margin + 45, y);
+        y += 5.5;
+      });
+    }
+
+    const cleanName = targetEvent.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    doc.save(`caixa_evento_${cleanName}.pdf`);
+  };
+
+  // Optional: Sync confirmed cashbox balance into main church Financial ledger
+  const handleSendCashboxToGeneralFinance = async () => {
+    const targetEvent = liveSelectedEvent || selectedEventForAttendees;
+    if (!targetEvent || !canAccessFinances) return;
+
+    if (stats.totalRevenue <= 0) {
+      notify('O caixa deste evento está zerado. Confirme ao menos um pagamento antes de lançar.', 'info');
+      return;
+    }
+
+    if (
+      !confirm(
+        `Lançar o saldo atual de R$ ${stats.totalRevenue.toFixed(2)} (${stats.confirmedPaid} ingresso(s)) do evento "${targetEvent.name}" como ENTRADA no Livro Financeiro Geral?`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsSendingToFinance(true);
+      await createFinancialTransaction({
+        type: 'entrada',
+        title: `Caixa Evento: ${targetEvent.name}`,
+        amount: Number(stats.totalRevenue.toFixed(2)),
+        date: new Date().toISOString().split('T')[0],
+        category: 'eventos_especiais',
+        description: `Receita de ingressos do evento "${targetEvent.name}" (${stats.confirmedPaid} confirmado(s): Pix R$ ${stats.pixCashboxTotal.toFixed(2)} / WhatsApp R$ ${stats.whatsappCashboxTotal.toFixed(2)}).`,
+        counterparty: 'Inscrições do Evento',
+        paymentMethod: stats.pixCashboxTotal >= stats.whatsappCashboxTotal ? 'pix' : 'dinheiro',
+        status: 'confirmado',
+      });
+      notify(`R$ ${stats.totalRevenue.toFixed(2)} lançado como Entrada no Financeiro Geral!`, 'success');
+    } catch {
+      notify('Erro ao lançar caixa do evento no Financeiro Geral.', 'error');
+    } finally {
+      setIsSendingToFinance(false);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-20">
       {/* 1. Header Banner */}
@@ -630,7 +947,10 @@ export const PublicEventsAdminView: React.FC = () => {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-neutral-900/90 border border-neutral-800 rounded-2xl">
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setSelectedEventForAttendees(null)}
+                onClick={() => {
+                  setSelectedEventForAttendees(null);
+                  setShowCashboxHistory(false);
+                }}
                 className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
                 title="Voltar aos eventos"
               >
@@ -672,6 +992,7 @@ export const PublicEventsAdminView: React.FC = () => {
                       const target = events.find((ev) => ev.id === e.target.value);
                       if (target) {
                         setSelectedEventForAttendees(target);
+                        setShowCashboxHistory(false);
                       }
                     }}
                     className="bg-transparent text-neutral-200 text-xs font-semibold focus:outline-none cursor-pointer max-w-[150px] sm:max-w-[200px] truncate"
@@ -708,6 +1029,201 @@ export const PublicEventsAdminView: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* Paid Event Cashbox Dashboard Panel */}
+          {liveSelectedEvent?.isPaid && (
+            <div className="p-5 bg-gradient-to-br from-emerald-950/35 via-neutral-900 to-neutral-950 border border-emerald-500/30 rounded-2xl space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div className="p-3 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400 shrink-0">
+                    <Wallet className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+                        Caixa do Evento Pago
+                      </span>
+                      <span className="text-[11px] text-neutral-400 font-mono-numbers">
+                        · Ingresso: R$ {(liveSelectedEvent.price || 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-3 mt-1 flex-wrap">
+                      <span className="text-3xl sm:text-4xl font-bold font-mono-numbers text-emerald-400">
+                        R$ {stats.totalRevenue.toFixed(2)}
+                      </span>
+                      <span className="text-xs font-semibold text-emerald-300/90">
+                        {stats.confirmedPaid} ingresso(s) pago(s)
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-neutral-400 mt-1">
+                      Aumenta ao confirmar <strong className="text-neutral-200">"Pagou"</strong> · Diminui ao cancelar (<strong className="text-neutral-200">"Não Pagou"</strong>), reverter p/ fila ou excluir.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCashboxHistory((prev) => !prev)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                      showCashboxHistory
+                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                        : 'bg-neutral-800 hover:bg-neutral-700 border-neutral-700 text-neutral-200'
+                    }`}
+                  >
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Extrato do Caixa ({(liveSelectedEvent.cashboxMovements || []).length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportCashboxPDF}
+                    className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700 transition-colors cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-red-400" />
+                    <span>PDF do Caixa</span>
+                  </button>
+
+                  {canAccessFinances && (
+                    <button
+                      type="button"
+                      disabled={isSendingToFinance || stats.totalRevenue <= 0}
+                      onClick={handleSendCashboxToGeneralFinance}
+                      className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Lançar o saldo confirmado deste evento como entrada no Financeiro Geral"
+                    >
+                      <DollarSign className="w-3.5 h-3.5" />
+                      <span>{isSendingToFinance ? 'Lançando...' : 'Lançar no Caixa Geral'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Cashbox Channel & Status Breakdown */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+                <div className="p-3 bg-neutral-950/80 border border-neutral-800 rounded-xl">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1">
+                    <CreditCard className="w-3 h-3 text-amber-400" />
+                    <span>Pix Copie e Cole</span>
+                  </div>
+                  <div className="text-base font-bold font-mono-numbers text-neutral-100 mt-1">
+                    R$ {stats.pixCashboxTotal.toFixed(2)}
+                  </div>
+                  <div className="text-[10px] text-neutral-400 mt-0.5">
+                    {stats.pixPaidCount} pagamento(s)
+                  </div>
+                </div>
+
+                <div className="p-3 bg-neutral-950/80 border border-neutral-800 rounded-xl">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1">
+                    <MessageCircle className="w-3 h-3 text-emerald-400" />
+                    <span>WhatsApp</span>
+                  </div>
+                  <div className="text-base font-bold font-mono-numbers text-neutral-100 mt-1">
+                    R$ {stats.whatsappCashboxTotal.toFixed(2)}
+                  </div>
+                  <div className="text-[10px] text-neutral-400 mt-0.5">
+                    {stats.whatsappPaidCount} pagamento(s)
+                  </div>
+                </div>
+
+                <div className="p-3 bg-neutral-950/80 border border-amber-500/20 rounded-xl">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                    <Hourglass className="w-3 h-3" />
+                    <span>Na Fila (Previsto)</span>
+                  </div>
+                  <div className="text-base font-bold font-mono-numbers text-amber-400 mt-1">
+                    R$ {stats.waitingBalance.toFixed(2)}
+                  </div>
+                  <div className="text-[10px] text-neutral-400 mt-0.5">
+                    {stats.waitingPayment} pendente(s)
+                  </div>
+                </div>
+
+                <div className="p-3 bg-neutral-950/80 border border-red-500/20 rounded-xl">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-red-400 flex items-center gap-1">
+                    <TrendingDown className="w-3 h-3" />
+                    <span>Cancelados / Estornados</span>
+                  </div>
+                  <div className="text-base font-bold font-mono-numbers text-red-400 mt-1">
+                    R$ {stats.rejectedBalance.toFixed(2)}
+                  </div>
+                  <div className="text-[10px] text-neutral-400 mt-0.5">
+                    {stats.rejectedPayment} cancelado(s)
+                  </div>
+                </div>
+              </div>
+
+              {/* Expandable Cashbox Movement Ledger (Entradas e Estornos/Reversões) */}
+              {showCashboxHistory && (
+                <div className="pt-3 border-t border-emerald-500/20 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-300">
+                      Extrato de Movimentações do Caixa
+                    </h4>
+                    <span className="text-[10px] text-neutral-400">
+                      Entradas (+R$) e Estornos/Reversões (-R$) em tempo real
+                    </span>
+                  </div>
+
+                  {(!liveSelectedEvent.cashboxMovements || liveSelectedEvent.cashboxMovements.length === 0) ? (
+                    <div className="p-4 bg-neutral-950/60 border border-neutral-800 rounded-xl text-center text-xs text-neutral-400">
+                      Nenhuma movimentação registrada ainda. Confirme ou reverta pagamentos na lista abaixo para acompanhar aqui.
+                    </div>
+                  ) : (
+                    <div className="max-h-64 overflow-y-auto divide-y divide-neutral-800/70 bg-neutral-950/70 border border-neutral-800 rounded-xl">
+                      {liveSelectedEvent.cashboxMovements.map((mov) => {
+                        const isEntrada = mov.type === 'entrada';
+                        return (
+                          <div key={mov.id} className="p-3 flex items-center justify-between gap-3 text-xs">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div
+                                className={`p-1.5 rounded-lg shrink-0 ${
+                                  isEntrada
+                                    ? 'bg-emerald-500/15 text-emerald-400'
+                                    : 'bg-red-500/15 text-red-400'
+                                }`}
+                              >
+                                {isEntrada ? (
+                                  <ArrowUpRight className="w-3.5 h-3.5" />
+                                ) : (
+                                  <ArrowDownLeft className="w-3.5 h-3.5" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-semibold text-neutral-100 truncate">
+                                  {mov.attendeeName}
+                                  <span className="ml-2 text-[10px] font-normal text-neutral-400">
+                                    ({mov.paymentType === 'whatsapp' ? 'WhatsApp' : 'Pix'})
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-neutral-400 truncate">
+                                  {mov.reason} · por <span className="text-neutral-300">{mov.adminName}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <div
+                                className={`font-bold font-mono-numbers ${
+                                  isEntrada ? 'text-emerald-400' : 'text-red-400'
+                                }`}
+                              >
+                                {isEntrada ? '+' : '-'} R$ {Number(mov.amount || 0).toFixed(2)}
+                              </div>
+                              <div className="text-[10px] text-neutral-500 font-mono-numbers">
+                                {new Date(mov.timestamp).toLocaleString('pt-BR')}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Quick Stats Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -846,6 +1362,20 @@ export const PublicEventsAdminView: React.FC = () => {
                 >
                   <AlertCircle className="w-3.5 h-3.5" />
                   <span>Tempo Excedido ({stats.expiredPayment})</span>
+                </button>
+              )}
+
+              {selectedEventForAttendees.isPaid && (
+                <button
+                  onClick={() => setAttendeeStatusFilter('rejected')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer ${
+                    attendeeStatusFilter === 'rejected'
+                      ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                      : 'text-neutral-400 hover:text-red-300'
+                  }`}
+                >
+                  <X className="w-3.5 h-3.5 text-red-400" />
+                  <span>Não Pagos ({stats.rejectedPayment})</span>
                 </button>
               )}
 
@@ -1163,6 +1693,7 @@ export const PublicEventsAdminView: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {events.map((ev) => {
                 const isOpen = ev.status === 'aberto';
+                const summary = eventSummaries[ev.id];
                 return (
                   <div
                     key={ev.id}
@@ -1181,16 +1712,27 @@ export const PublicEventsAdminView: React.FC = () => {
                       )}
 
                       {/* Header badges */}
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <span
-                          className={`px-2 py-0.5 text-[10px] font-bold rounded-full uppercase ${
-                            isOpen
-                              ? 'bg-emerald-500/15 text-emerald-400'
-                              : 'bg-neutral-800 text-neutral-400'
-                          }`}
-                        >
-                          {ev.status === 'aberto' ? 'Inscrições Abertas' : ev.status === 'em_breve' ? 'Em Breve' : 'Encerrado'}
-                        </span>
+                      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`px-2 py-0.5 text-[10px] font-bold rounded-full uppercase ${
+                              isOpen
+                                ? 'bg-emerald-500/15 text-emerald-400'
+                                : 'bg-neutral-800 text-neutral-400'
+                            }`}
+                          >
+                            {ev.status === 'aberto' ? 'Inscrições Abertas' : ev.status === 'em_breve' ? 'Em Breve' : 'Encerrado'}
+                          </span>
+                          {ev.isPaid ? (
+                            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full uppercase bg-amber-500/15 text-amber-400">
+                              Pago · R$ {(ev.price || 0).toFixed(2)}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full uppercase bg-neutral-800 text-neutral-400">
+                              {summary?.total || 0} inscrito(s)
+                            </span>
+                          )}
+                        </div>
 
                         <span className="text-[11px] text-neutral-400 font-mono-numbers flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5 text-amber-400" />
@@ -1209,6 +1751,38 @@ export const PublicEventsAdminView: React.FC = () => {
                         <p className="text-xs text-neutral-300 line-clamp-2 leading-relaxed mb-3">
                           {ev.description}
                         </p>
+                      )}
+
+                      {/* Live Cashbox Mini Strip for Paid Events */}
+                      {ev.isPaid && (
+                        <div className="mt-2 p-3 bg-emerald-950/25 border border-emerald-500/25 rounded-xl flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <Wallet className="w-4 h-4 text-emerald-400 shrink-0" />
+                            <div>
+                              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                                Caixa do Evento
+                              </div>
+                              <div className="text-sm font-bold font-mono-numbers text-emerald-300">
+                                R$ {(summary?.cashboxBalance || 0).toFixed(2)}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 text-[11px] font-mono-numbers">
+                            <div className="text-right">
+                              <div className="font-bold text-emerald-400">{summary?.paid || 0}</div>
+                              <div className="text-[9px] text-neutral-400 uppercase">Pagos</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-bold text-amber-400">{summary?.waiting || 0}</div>
+                              <div className="text-[9px] text-neutral-400 uppercase">Na fila</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-bold text-neutral-200">{summary?.total || 0}</div>
+                              <div className="text-[9px] text-neutral-400 uppercase">Inscritos</div>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
 

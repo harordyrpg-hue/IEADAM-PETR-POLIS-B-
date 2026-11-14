@@ -105,16 +105,20 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
     };
   }, [eventId]);
 
-  // Real-time listener for pending paid registration
+  // Real-time listener for paid registration (waiting, confirmed, reversed, or cancelled)
+  const activeRegistrationId = pendingRegistration?.id || (event?.isPaid ? confirmedRegistration?.id : undefined);
+
   useEffect(() => {
-    if (!pendingRegistration?.id) return;
+    if (!activeRegistrationId) return;
 
-    const unsubscribe = api.subscribeSingleRegistration(pendingRegistration.id, (updatedReg) => {
-      if (!updatedReg) return;
-
-      // Update pending registration state (e.g. wait time extension by admin)
-      setPendingRegistration(updatedReg);
-      sessionStorage.setItem(`pending_reg_${eventId}`, JSON.stringify(updatedReg));
+    const unsubscribe = api.subscribeSingleRegistration(activeRegistrationId, (updatedReg) => {
+      if (!updatedReg) {
+        // Registration deleted by admin
+        setPendingRegistration(null);
+        setConfirmedRegistration(null);
+        sessionStorage.removeItem(`pending_reg_${eventId}`);
+        return;
+      }
 
       // CRITICAL: For paid events, ONLY transition to confirmed screen when paymentStatus is explicitly 'paid'!
       if (updatedReg.isPaidEvent) {
@@ -122,6 +126,11 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
           setConfirmedRegistration(updatedReg);
           setPendingRegistration(null);
           sessionStorage.removeItem(`pending_reg_${eventId}`);
+        } else {
+          // Covers 'waiting_confirmation', 'rejected', 'expired' (including admin reversals from 'paid')
+          setPendingRegistration(updatedReg);
+          setConfirmedRegistration(null);
+          sessionStorage.setItem(`pending_reg_${eventId}`, JSON.stringify(updatedReg));
         }
       } else {
         // For free events:
@@ -136,7 +145,7 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
     return () => {
       unsubscribe();
     };
-  }, [pendingRegistration?.id, eventId]);
+  }, [activeRegistrationId, eventId]);
 
   // Countdown timer for pending payment
   useEffect(() => {
@@ -518,18 +527,76 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
   // 2. PAID EVENT: PAYMENT & WAITING FOR CONFIRMATION SCREEN
   // ===============================================================
   if (pendingRegistration && event.isPaid) {
-    const isExpired = remainingSeconds !== null && remainingSeconds <= 0;
+    const isRejected = pendingRegistration.paymentStatus === 'rejected';
+    const isExpired = !isRejected && remainingSeconds !== null && remainingSeconds <= 0;
     const ticketPrice = pendingRegistration.ticketPrice ?? event.price ?? 0;
     const supportPhoneClean = cleanPhoneForWa(event.supportWhatsappNumber || event.whatsappPaymentNumber);
     const sellerPhoneClean = cleanPhoneForWa(event.whatsappPaymentNumber);
 
     const supportMsg = encodeURIComponent(
-      `Olá! Fiz a inscrição no evento "${event.name}" (Inscrição: #${pendingRegistration.id.slice(-6)}, Nome: ${pendingRegistration.fullName}), mas ainda não tive o pagamento confirmado. Poderiam me ajudar?`
+      `Olá! Fiz a inscrição no evento "${event.name}" (Inscrição: #${pendingRegistration.id.slice(-6)}, Nome: ${pendingRegistration.fullName}), mas ${isRejected ? 'meu pagamento consta como não identificado/cancelado' : 'ainda não tive o pagamento confirmado'}. Poderiam me ajudar?`
     );
 
     const sellerMsg = encodeURIComponent(
       `Olá! Estou realizando a inscrição no evento "${event.name}". Meu código é #${pendingRegistration.id.slice(-6)} (Nome: ${pendingRegistration.fullName}, Valor: R$ ${ticketPrice.toFixed(2)}). Segue meu comprovante de pagamento!`
     );
+
+    if (isRejected) {
+      return (
+        <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex items-center justify-center">
+          <div className="w-full max-w-xl bg-neutral-900 border border-red-500/40 rounded-3xl overflow-hidden shadow-2xl">
+            <div className="h-3 w-full bg-red-600" />
+            <div className="p-6 sm:p-8 space-y-6 text-center">
+              <div className="w-16 h-16 rounded-full bg-red-500/15 border border-red-500/40 text-red-400 mx-auto flex items-center justify-center">
+                <AlertCircle className="w-8 h-8" />
+              </div>
+
+              <div>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/15 border border-red-500/40 text-red-400 text-[11px] font-bold uppercase tracking-wider">
+                  Pagamento Não Identificado
+                </span>
+                <h1 className="text-xl sm:text-2xl font-bold text-neutral-100 mt-3">
+                  Inscrição Cancelada pela Organização
+                </h1>
+                <p className="text-xs text-neutral-400 mt-2 leading-relaxed">
+                  Olá <strong>{pendingRegistration.fullName}</strong> (#{pendingRegistration.id.slice(-6)}), seu pagamento de{' '}
+                  <strong className="text-neutral-200">R$ {ticketPrice.toFixed(2)}</strong> para <strong>{event.name}</strong> não foi confirmado ou foi estornado pela equipe.
+                </p>
+              </div>
+
+              <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-xs text-red-200 leading-relaxed">
+                Caso você já tenha realizado o pagamento ou tenha ocorrido algum engano, entre em contato com o suporte enviando o comprovante.
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {supportPhoneClean && (
+                  <a
+                    href={`https://wa.me/${supportPhoneClean}?text=${supportMsg}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>Falar com o Suporte no WhatsApp</span>
+                    <ExternalLink className="w-3.5 h-3.5 opacity-75" />
+                  </a>
+                )}
+
+                <button
+                  onClick={() => {
+                    setPendingRegistration(null);
+                    sessionStorage.removeItem(`pending_reg_${eventId}`);
+                  }}
+                  className="w-full py-3 px-4 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Voltar e Fazer Nova Inscrição
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex items-center justify-center">

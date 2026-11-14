@@ -134,5 +134,21 @@ service cloud.firestore {
       allow read: if true;
       allow write: if true;
     }
+
+    // 6. Member Attendance & Roll Call System
+    match /attendance_departments/{departmentId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /attendance_members/{memberId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /attendance_calls/{callId} {
+      allow read: if true;
+      allow write: if true;
+    }
   }
 }

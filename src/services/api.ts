@@ -71,6 +71,13 @@ import {
   FinancialPaymentMethod,
   PublicRegistrationEvent,
   EventRegistration,
+  EventCashboxMovement,
+  EventRegistrationsSummary,
+  AttendanceDepartmentKind,
+  AttendanceDepartment,
+  AttendanceMember,
+  AttendanceEntry,
+  AttendanceCall,
 } from '../types.js';
 import { createFileThumbnail } from '../utils/thumbnail.js';
 
@@ -3525,83 +3532,282 @@ export const api = {
   },
 
   /**
-   * Confirms payment for an attendee ("Pagou")
+   * Real-time summary grouped strictly by eventId for showing each event's live Cashbox & stats
+   * on the events list without ever mixing lists.
    */
-  async confirmRegistrationPayment(id: string, adminUser?: { uid?: string; name?: string }): Promise<void> {
-    const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-    const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
-    
-    await updateDoc(targetRef, {
-      paymentStatus: 'paid',
-      status: 'confirmada',
-      paidConfirmedAt: new Date().toISOString(),
-      confirmedByAdminUid: adminUser?.uid || 'admin',
-      confirmedByAdminName: adminUser?.name || 'Administrador / Vendedor',
-      maxWaitExceeded: false,
-    });
+  subscribeAllEventRegistrationsSummary(
+    callback: (summaryMap: Record<string, EventRegistrationsSummary>) => void
+  ): () => void {
+    const q = collection(db, 'event_registrations');
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const map: Record<string, EventRegistrationsSummary> = {};
+        snapshot.docs.forEach((d) => {
+          const r = d.data() as EventRegistration;
+          if (!r.eventId) return;
+          if (!map[r.eventId]) {
+            map[r.eventId] = {
+              total: 0,
+              waiting: 0,
+              paid: 0,
+              rejected: 0,
+              cashboxBalance: 0,
+              pendingBalance: 0,
+              rejectedBalance: 0,
+            };
+          }
+          const s = map[r.eventId];
+          s.total += 1;
+          const price = Number(r.ticketPrice) || 0;
+          if (r.paymentStatus === 'paid') {
+            s.paid += 1;
+            s.cashboxBalance += price;
+          } else if (r.paymentStatus === 'waiting_confirmation') {
+            s.waiting += 1;
+            s.pendingBalance += price;
+          } else if (r.paymentStatus === 'rejected' || r.status === 'cancelada') {
+            s.rejected += 1;
+            s.rejectedBalance += price;
+          }
+        });
+        callback(map);
+      },
+      (error) => {
+        console.warn('Real-time event summary sync:', error);
+      }
+    );
   },
 
   /**
-   * Rejects payment for an attendee ("Não Pagou")
+   * Appends a cashbox movement (entrada or estorno) to the public_events/{eventId} document
    */
-  async rejectRegistrationPayment(id: string, reason?: string): Promise<void> {
-    const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-    const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
+  async appendEventCashboxMovement(
+    eventId: string,
+    movement: Omit<EventCashboxMovement, 'id' | 'timestamp'>
+  ): Promise<void> {
+    if (!eventId) return;
+    try {
+      const eventRef = doc(db, 'public_events', eventId);
+      const eventSnap = await getDoc(eventRef);
+      if (!eventSnap.exists()) return;
+      const evData = eventSnap.data() as PublicRegistrationEvent;
+      const prevMovements = Array.isArray(evData.cashboxMovements) ? evData.cashboxMovements : [];
+      const newEntry: EventCashboxMovement = {
+        id: `cx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: new Date().toISOString(),
+        ...movement,
+      };
+      const updatedMovements = [newEntry, ...prevMovements].slice(0, 120);
+      await updateDoc(eventRef, {
+        cashboxMovements: removeUndefinedValues(updatedMovements),
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.warn('Could not append event cashbox movement:', error);
+    }
+  },
 
-    await updateDoc(targetRef, {
-      paymentStatus: 'rejected',
-      status: 'cancelada',
-      rejectionReason: reason || 'Pagamento não identificado ou cancelado pelo administrador.',
-    });
+  /**
+   * Confirms payment for an attendee ("Pagou") - increases event cashbox
+   */
+  async confirmRegistrationPayment(
+    id: string,
+    adminUser?: { uid?: string; name?: string },
+    fallbackPrice?: number
+  ): Promise<{ wasAlreadyPaid: boolean; amount: number }> {
+    try {
+      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+      const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
+      const existing = !snap.empty
+        ? (snap.docs[0].data() as EventRegistration)
+        : ((await getDoc(targetRef)).data() as EventRegistration | undefined);
+
+      const wasAlreadyPaid = existing?.paymentStatus === 'paid';
+      const effectivePrice = Number(existing?.ticketPrice) || Number(fallbackPrice) || 0;
+
+      await updateDoc(targetRef, {
+        paymentStatus: 'paid',
+        status: 'confirmada',
+        ticketPrice: effectivePrice,
+        paidConfirmedAt: new Date().toISOString(),
+        confirmedByAdminUid: adminUser?.uid || 'admin',
+        confirmedByAdminName: adminUser?.name || 'Administrador / Vendedor',
+        maxWaitExceeded: false,
+        rejectionReason: null,
+      });
+
+      if (!wasAlreadyPaid && existing?.eventId) {
+        await api.appendEventCashboxMovement(existing.eventId, {
+          type: 'entrada',
+          amount: effectivePrice,
+          registrationId: existing.id || id,
+          attendeeName: existing.fullName || 'Participante',
+          paymentType: existing.paymentType,
+          reason: 'Pagamento confirmado',
+          adminName: adminUser?.name || 'Administrador / Vendedor',
+        });
+      }
+
+      return { wasAlreadyPaid, amount: effectivePrice };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
+      return { wasAlreadyPaid: false, amount: 0 };
+    }
+  },
+
+  /**
+   * Rejects/cancels payment for an attendee ("Não Pagou") - decreases event cashbox if previously paid
+   */
+  async rejectRegistrationPayment(
+    id: string,
+    reason?: string,
+    adminUser?: { uid?: string; name?: string }
+  ): Promise<{ wasPaid: boolean; amount: number }> {
+    try {
+      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+      const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
+      const existing = !snap.empty
+        ? (snap.docs[0].data() as EventRegistration)
+        : ((await getDoc(targetRef)).data() as EventRegistration | undefined);
+
+      const wasPaid = existing?.paymentStatus === 'paid';
+      const amount = Number(existing?.ticketPrice) || 0;
+
+      await updateDoc(targetRef, {
+        paymentStatus: 'rejected',
+        status: 'cancelada',
+        paidConfirmedAt: null,
+        rejectionReason: reason || 'Pagamento não identificado ou cancelado pelo administrador.',
+      });
+
+      if (wasPaid && existing?.eventId) {
+        await api.appendEventCashboxMovement(existing.eventId, {
+          type: 'estorno',
+          amount,
+          registrationId: existing.id || id,
+          attendeeName: existing.fullName || 'Participante',
+          paymentType: existing.paymentType,
+          reason: 'Pagamento cancelado (Não Pagou)',
+          adminName: adminUser?.name || 'Administrador / Vendedor',
+        });
+      }
+
+      return { wasPaid, amount };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
+      return { wasPaid: false, amount: 0 };
+    }
   },
 
   /**
    * Extends wait time by +5 minutes for an attendee in the payment queue
    */
   async extendRegistrationWaitTime(id: string, additionalMinutes: number = 5): Promise<void> {
-    const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-    const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
-    const existing = !snap.empty ? (snap.docs[0].data() as EventRegistration) : null;
+    try {
+      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+      const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
+      const existing = !snap.empty ? (snap.docs[0].data() as EventRegistration) : null;
 
-    const currentExpires = existing?.paymentExpiresAt ? new Date(existing.paymentExpiresAt).getTime() : Date.now();
-    const baseTime = Math.max(Date.now(), currentExpires);
-    const newExpires = new Date(baseTime + additionalMinutes * 60 * 1000).toISOString();
-    const prevExtended = existing?.extendedMinutes || 0;
+      const currentExpires = existing?.paymentExpiresAt ? new Date(existing.paymentExpiresAt).getTime() : Date.now();
+      const baseTime = Math.max(Date.now(), currentExpires);
+      const newExpires = new Date(baseTime + additionalMinutes * 60 * 1000).toISOString();
+      const prevExtended = existing?.extendedMinutes || 0;
 
-    await updateDoc(targetRef, {
-      paymentExpiresAt: newExpires,
-      extendedMinutes: prevExtended + additionalMinutes,
-      maxWaitExceeded: false,
-      paymentStatus: 'waiting_confirmation',
-      status: 'pendente',
-    });
+      await updateDoc(targetRef, {
+        paymentExpiresAt: newExpires,
+        extendedMinutes: prevExtended + additionalMinutes,
+        maxWaitExceeded: false,
+        paymentStatus: 'waiting_confirmation',
+        status: 'pendente',
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
+    }
   },
 
   /**
-   * Resets registration back to waiting confirmation status
+   * Resets registration back to waiting confirmation status - decreases event cashbox if previously paid
    */
-  async resetRegistrationToWaiting(id: string, minutes: number = 10): Promise<void> {
-    const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-    const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
-    const newExpires = new Date(Date.now() + minutes * 60 * 1000).toISOString();
-    await updateDoc(targetRef, {
-      paymentStatus: 'waiting_confirmation',
-      status: 'pendente',
-      paymentExpiresAt: newExpires,
-      maxWaitExceeded: false,
-    });
-  },
-
-  async deleteEventRegistration(id: string): Promise<void> {
+  async resetRegistrationToWaiting(
+    id: string,
+    minutes: number = 10,
+    adminUser?: { uid?: string; name?: string }
+  ): Promise<{ wasPaid: boolean; amount: number }> {
     try {
       const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+      const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
+      const existing = !snap.empty
+        ? (snap.docs[0].data() as EventRegistration)
+        : ((await getDoc(targetRef)).data() as EventRegistration | undefined);
+
+      const wasPaid = existing?.paymentStatus === 'paid';
+      const amount = Number(existing?.ticketPrice) || 0;
+      const newExpires = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+
+      await updateDoc(targetRef, {
+        paymentStatus: 'waiting_confirmation',
+        status: 'pendente',
+        paidConfirmedAt: null,
+        paymentExpiresAt: newExpires,
+        maxWaitExceeded: false,
+      });
+
+      if (wasPaid && existing?.eventId) {
+        await api.appendEventCashboxMovement(existing.eventId, {
+          type: 'estorno',
+          amount,
+          registrationId: existing.id || id,
+          attendeeName: existing.fullName || 'Participante',
+          paymentType: existing.paymentType,
+          reason: 'Confirmação revertida para a fila',
+          adminName: adminUser?.name || 'Administrador / Vendedor',
+        });
+      }
+
+      return { wasPaid, amount };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
+      return { wasPaid: false, amount: 0 };
+    }
+  },
+
+  async deleteEventRegistration(
+    id: string,
+    adminUser?: { uid?: string; name?: string }
+  ): Promise<{ wasPaid: boolean; amount: number }> {
+    try {
+      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+      const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
+      const existing = !snap.empty
+        ? (snap.docs[0].data() as EventRegistration)
+        : ((await getDoc(targetRef)).data() as EventRegistration | undefined);
+
+      const wasPaid = existing?.paymentStatus === 'paid';
+      const amount = Number(existing?.ticketPrice) || 0;
+
       if (!snap.empty) {
         await deleteDoc(snap.docs[0].ref);
       } else {
         await deleteDoc(doc(db, 'event_registrations', id));
       }
+
+      if (wasPaid && existing?.eventId) {
+        await api.appendEventCashboxMovement(existing.eventId, {
+          type: 'estorno',
+          amount,
+          registrationId: existing.id || id,
+          attendeeName: existing.fullName || 'Participante',
+          paymentType: existing.paymentType,
+          reason: 'Inscrição paga excluída',
+          adminName: adminUser?.name || 'Administrador / Vendedor',
+        });
+      }
+
+      return { wasPaid, amount };
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `event_registrations/${id}`);
+      return { wasPaid: false, amount: 0 };
     }
   },
 
@@ -3675,6 +3881,320 @@ export const api = {
   // No automatic seeding - team members create and manage their own tasks and schedules
   async seedInitialTeamScheduleIfEmpty(): Promise<void> {
     // Intentionally empty: real team members create and manage their own work and schedules
+  },
+
+  // ==========================================
+  // SISTEMA DE CHAMADA, PRESENÇA & FALTAS DE MEMBROS
+  // ==========================================
+  async ensureInitialAttendanceRoster(forceRestore = false): Promise<void> {
+    try {
+      const seedRef = doc(db, 'settings', 'attendance_roster_seeded');
+      if (!forceRestore) {
+        const seedSnap = await getDoc(seedRef);
+        if (seedSnap.exists() && seedSnap.data()?.seeded) {
+          return;
+        }
+        const existingDepts = await getDocs(collection(db, 'attendance_departments'));
+        if (!existingDepts.empty) {
+          await setDoc(seedRef, { seeded: true, updatedAt: new Date().toISOString() }, { merge: true });
+          return;
+        }
+      }
+
+      const effective = api.getEffectiveUser();
+      const now = new Date().toISOString();
+
+      const initialRoster: {
+        id: string;
+        name: string;
+        kind: AttendanceDepartmentKind;
+        order: number;
+        members: string[];
+      }[] = [
+        {
+          id: 'dept_pastores',
+          name: 'Pastores',
+          kind: 'ministerio',
+          order: 1,
+          members: ['Pr. Sobreiro', 'Pra. Fatima'],
+        },
+        {
+          id: 'dept_diaconos',
+          name: 'Diáconos',
+          kind: 'ministerio',
+          order: 2,
+          members: [
+            'Dc. Benedito',
+            'Dca. Katia',
+            'Dc. Charles',
+            'Dca. Ivone',
+            'Dca. Líder Sebastiana',
+            'Dca. Líder Kélia',
+            'Dca. Líder Cícera',
+            'Dc. Líder Erick',
+            'Dca. Líder Ingrid',
+          ],
+        },
+        {
+          id: 'dept_lideres',
+          name: 'Líderes',
+          kind: 'equipe',
+          order: 3,
+          members: [
+            'Líder Dulce',
+            'Líder Lene',
+            'Líder Jane',
+            'Líder Francirema',
+            'Líder Keylah',
+            'Líder Felipe',
+            'Líder Natã',
+            'Líder Elines',
+            'Líder Emilly',
+            'Líder Isabele Cristina',
+            'Líder Rayssa',
+            'Líder Eldrinei',
+            'Líder Eduardo Kyrk',
+            'Líder Hudson',
+          ],
+        },
+        {
+          id: 'dept_louvor',
+          name: 'Membros do louvor',
+          kind: 'ministerio',
+          order: 4,
+          members: [
+            'Diego',
+            'Hildete',
+            'Stelio',
+            'Micilene',
+            'Gabriele',
+            'João Felipe',
+            'W. Felipe',
+            'Israel',
+            'Angélica',
+            'José',
+            'Vinicius',
+            'Eduardo Mateus',
+            'Djanira',
+          ],
+        },
+      ];
+
+      const batch = writeBatch(db);
+      for (const group of initialRoster) {
+        const deptDoc: AttendanceDepartment = {
+          id: group.id,
+          name: group.name,
+          kind: group.kind,
+          order: group.order,
+          createdByUid: effective.uid,
+          createdByName: effective.displayName,
+          createdAt: now,
+          updatedAt: now,
+        };
+        batch.set(doc(db, 'attendance_departments', group.id), deptDoc);
+
+        group.members.forEach((memberName, idx) => {
+          const memberId = `mem_${group.id}_${idx + 1}`;
+          const memberDoc: AttendanceMember = {
+            id: memberId,
+            departmentId: group.id,
+            name: memberName,
+            createdByUid: effective.uid,
+            createdByName: effective.displayName,
+            createdAt: now,
+            updatedAt: now,
+          };
+          batch.set(doc(db, 'attendance_members', memberId), memberDoc);
+        });
+      }
+
+      batch.set(seedRef, { seeded: true, updatedAt: now }, { merge: true });
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'attendance_departments');
+    }
+  },
+
+  subscribeAttendanceDepartments(callback: (departments: AttendanceDepartment[]) => void) {
+    return onSnapshot(
+      collection(db, 'attendance_departments'),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as AttendanceDepartment));
+        list.sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name, 'pt-BR'));
+        callback(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'attendance_departments');
+      }
+    );
+  },
+
+  subscribeAttendanceMembers(callback: (members: AttendanceMember[]) => void) {
+    return onSnapshot(
+      collection(db, 'attendance_members'),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as AttendanceMember));
+        list.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+        callback(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'attendance_members');
+      }
+    );
+  },
+
+  subscribeAttendanceCalls(callback: (calls: AttendanceCall[]) => void) {
+    return onSnapshot(
+      collection(db, 'attendance_calls'),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as AttendanceCall));
+        list.sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt.localeCompare(a.updatedAt));
+        callback(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'attendance_calls');
+      }
+    );
+  },
+
+  async createAttendanceDepartment(
+    name: string,
+    kind: AttendanceDepartmentKind,
+    order = 99
+  ): Promise<AttendanceDepartment> {
+    const effective = api.getEffectiveUser();
+    const now = new Date().toISOString();
+    const id = `dept_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const dept: AttendanceDepartment = {
+      id,
+      name: name.trim(),
+      kind,
+      order,
+      createdByUid: effective.uid,
+      createdByName: effective.displayName,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    try {
+      await setDoc(doc(db, 'attendance_departments', id), removeUndefinedValues(dept));
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'create_attendance_department',
+        actionLabel: 'Criou Departamento/Equipe na Chamada',
+        targetType: 'attendance',
+        targetName: dept.name,
+        details: `Tipo: ${kind}`,
+      });
+      return dept;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `attendance_departments/${id}`);
+    }
+  },
+
+  async deleteAttendanceDepartment(departmentId: string, departmentName?: string): Promise<void> {
+    try {
+      const membersSnap = await getDocs(
+        query(collection(db, 'attendance_members'), where('departmentId', '==', departmentId))
+      );
+      const batch = writeBatch(db);
+      membersSnap.docs.forEach((m) => batch.delete(m.ref));
+      batch.delete(doc(db, 'attendance_departments', departmentId));
+      await batch.commit();
+
+      const effective = api.getEffectiveUser();
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'delete_attendance_department',
+        actionLabel: 'Excluiu Departamento/Equipe da Chamada',
+        targetType: 'attendance',
+        targetName: departmentName || departmentId,
+        details: `${membersSnap.size} membro(s) removidos`,
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `attendance_departments/${departmentId}`);
+    }
+  },
+
+  async createAttendanceMember(departmentId: string, name: string): Promise<AttendanceMember> {
+    const effective = api.getEffectiveUser();
+    const now = new Date().toISOString();
+    const id = `mem_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const member: AttendanceMember = {
+      id,
+      departmentId,
+      name: name.trim(),
+      createdByUid: effective.uid,
+      createdByName: effective.displayName,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    try {
+      await setDoc(doc(db, 'attendance_members', id), removeUndefinedValues(member));
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'create_attendance_member',
+        actionLabel: 'Adicionou Membro na Chamada',
+        targetType: 'attendance',
+        targetName: member.name,
+        details: `Departamento ID: ${departmentId}`,
+      });
+      return member;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `attendance_members/${id}`);
+    }
+  },
+
+  async deleteAttendanceMember(memberId: string, memberName?: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, 'attendance_members', memberId));
+      const effective = api.getEffectiveUser();
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'delete_attendance_member',
+        actionLabel: 'Excluiu Membro da Chamada',
+        targetType: 'attendance',
+        targetName: memberName || memberId,
+        details: 'Membro removido da lista de chamada',
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `attendance_members/${memberId}`);
+    }
+  },
+
+  async saveAttendanceCall(call: AttendanceCall): Promise<AttendanceCall> {
+    const effective = api.getEffectiveUser();
+    const now = new Date().toISOString();
+    const payload: AttendanceCall = {
+      ...call,
+      updatedByUid: effective.uid,
+      updatedByName: effective.displayName,
+      updatedAt: now,
+      createdAt: call.createdAt || now,
+      createdByUid: call.createdByUid || effective.uid,
+      createdByName: call.createdByName || effective.displayName,
+    };
+
+    try {
+      await setDoc(doc(db, 'attendance_calls', call.id), removeUndefinedValues(payload));
+      return payload;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `attendance_calls/${call.id}`);
+    }
+  },
+
+  async deleteAttendanceCall(callId: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, 'attendance_calls', callId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `attendance_calls/${callId}`);
+    }
   },
 };
 
