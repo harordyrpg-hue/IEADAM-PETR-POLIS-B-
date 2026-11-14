@@ -248,7 +248,10 @@
         "area": { "type": "string", "maxLength": 100 },
         "responsibleLeader": { "type": "string", "maxLength": 150 },
         "responsiblePastor": { "type": "string", "maxLength": 150 },
-        "status": { "type": "string", "enum": ["confirmada", "presente", "cancelada"] },
+        "status": { "type": "string", "enum": ["confirmada", "presente", "cancelada", "pendente"] },
+        "checkInAt": { "type": "string", "format": "date-time" },
+        "checkedInByUid": { "type": "string", "maxLength": 128 },
+        "checkedInByName": { "type": "string", "maxLength": 120 },
         "registeredAt": { "type": "string", "format": "date-time" }
       },
       "required": ["eventId", "eventName", "fullName", "phone", "status"]

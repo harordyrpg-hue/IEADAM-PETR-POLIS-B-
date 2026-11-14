@@ -42,6 +42,8 @@ import {
   TrendingDown,
   ArrowUpRight,
   ArrowDownLeft,
+  ScanLine,
+  UserCheck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import {
@@ -53,6 +55,7 @@ import {
 } from '../../types.js';
 import { api } from '../../services/api.js';
 import { exportRegistrationTicketPDF, formatDateBR } from '../../utils/registrationTicketPdf.js';
+import { QrCheckInScannerModal } from '../events/QrCheckInScannerModal.js';
 import { jsPDF } from 'jspdf';
 
 export const PublicEventsAdminView: React.FC = () => {
@@ -70,6 +73,8 @@ export const PublicEventsAdminView: React.FC = () => {
   const [attendeeStatusFilter, setAttendeeStatusFilter] = useState<'all' | 'waiting' | 'paid' | 'expired' | 'rejected' | 'presente'>('all');
   const [showCashboxHistory, setShowCashboxHistory] = useState(false);
   const [isSendingToFinance, setIsSendingToFinance] = useState(false);
+  const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
+  const [scannerTargetEvent, setScannerTargetEvent] = useState<PublicRegistrationEvent | null>(null);
 
   // Event Modal (Create / Edit & Form Builder)
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -174,6 +179,17 @@ export const PublicEventsAdminView: React.FC = () => {
   const handleOpenPreview = (event: PublicRegistrationEvent) => {
     const origin = window.location.origin;
     window.open(`${origin}/?inscricao=${event.id}`, '_blank');
+  };
+
+  // Open QR Credential Scanner Panel
+  const handleOpenQrScanner = (event?: PublicRegistrationEvent | null) => {
+    const target = event || liveSelectedEvent || selectedEventForAttendees || events.find((e) => e.status === 'aberto') || events[0] || null;
+    if (!target) {
+      notify('Crie um evento primeiro para usar o leitor QR.', 'info');
+      return;
+    }
+    setScannerTargetEvent(target);
+    setIsQrScannerOpen(true);
   };
 
   // Open Edit Modal
@@ -925,16 +941,28 @@ export const PublicEventsAdminView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            resetFormBuilder();
-            setIsEventModalOpen(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 touch-manipulation cursor-pointer shrink-0"
-        >
-          <Plus className="w-4 h-4 stroke-[2.5]" />
-          <span>+ Criar Evento & Formulário</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => handleOpenQrScanner()}
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 touch-manipulation cursor-pointer whitespace-nowrap"
+            title="Abrir leitor QR para credenciar participantes e contabilizar presentes"
+          >
+            <ScanLine className="w-4 h-4" />
+            <span>Painel Leitor QR</span>
+          </button>
+
+          <button
+            onClick={() => {
+              resetFormBuilder();
+              setIsEventModalOpen(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 touch-manipulation cursor-pointer whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <span>+ Criar Evento & Formulário</span>
+          </button>
+        </div>
       </div>
 
       {/* 2. Main View Mode: Attendees View OR Events List */}
@@ -1005,6 +1033,16 @@ export const PublicEventsAdminView: React.FC = () => {
                   </select>
                 </div>
               )}
+
+              <button
+                type="button"
+                onClick={() => handleOpenQrScanner(selectedEventForAttendees)}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                title="Ler QR Code das credenciais e registrar presença automática"
+              >
+                <ScanLine className="w-3.5 h-3.5" />
+                <span>Leitor QR ({stats.checkedIn})</span>
+              </button>
 
               <button
                 onClick={() => handleCopyLink(selectedEventForAttendees)}
@@ -1226,7 +1264,7 @@ export const PublicEventsAdminView: React.FC = () => {
           )}
 
           {/* Quick Stats Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${selectedEventForAttendees.isPaid ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-4`}>
             <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
               <div className="text-xs text-neutral-400 font-semibold mb-1">Total de Participantes</div>
               <div className="text-3xl font-bold font-mono-numbers text-neutral-100">{stats.total}</div>
@@ -1239,6 +1277,17 @@ export const PublicEventsAdminView: React.FC = () => {
 
             {selectedEventForAttendees.isPaid ? (
               <>
+                <div className="p-4 bg-neutral-900 border border-emerald-500/30 rounded-2xl">
+                  <div className="text-xs text-emerald-400 font-semibold mb-1 flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Presentes no Evento</span>
+                  </div>
+                  <div className="text-3xl font-bold font-mono-numbers text-emerald-400">{stats.checkedIn}</div>
+                  <div className="text-[10px] text-emerald-400/80 mt-1">
+                    {stats.total > 0 ? ((stats.checkedIn / stats.total) * 100).toFixed(0) : 0}% fizeram check-in QR
+                  </div>
+                </div>
+
                 <div className={`p-4 bg-neutral-900 border rounded-2xl ${stats.waitingPayment > 0 ? 'border-amber-500/50 bg-amber-500/5' : 'border-neutral-800'}`}>
                   <div className="text-xs text-amber-400 font-semibold mb-1 flex items-center gap-1.5">
                     <Hourglass className="w-3.5 h-3.5" />
@@ -1809,8 +1858,18 @@ export const PublicEventsAdminView: React.FC = () => {
 
                       <div className="flex items-center gap-1.5">
                         <button
+                          type="button"
+                          onClick={() => handleOpenQrScanner(ev)}
+                          className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-emerald-500/30 transition-colors cursor-pointer whitespace-nowrap"
+                          title="Abrir leitor QR para credenciar participantes deste evento"
+                        >
+                          <ScanLine className="w-3.5 h-3.5" />
+                          <span>Ler QR</span>
+                        </button>
+
+                        <button
                           onClick={() => setSelectedEventForAttendees(ev)}
-                          className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700 transition-colors cursor-pointer"
+                          className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700 transition-colors cursor-pointer whitespace-nowrap"
                         >
                           <Users className="w-3.5 h-3.5 text-emerald-400" />
                           <span>Ver Inscritos</span>
@@ -2458,6 +2517,20 @@ export const PublicEventsAdminView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* QR Code Credential Scanner & Live Check-In Modal */}
+      <QrCheckInScannerModal
+        isOpen={isQrScannerOpen}
+        onClose={() => setIsQrScannerOpen(false)}
+        events={events}
+        selectedEvent={scannerTargetEvent || liveSelectedEvent || selectedEventForAttendees}
+        onSelectEvent={(ev) => {
+          setScannerTargetEvent(ev);
+          if (selectedEventForAttendees) {
+            setSelectedEventForAttendees(ev);
+          }
+        }}
+      />
     </div>
   );
 };

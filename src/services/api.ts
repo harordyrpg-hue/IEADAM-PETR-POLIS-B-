@@ -3531,6 +3531,77 @@ export const api = {
     }
   },
 
+  async getEventRegistrationByCode(code: string): Promise<EventRegistration | null> {
+    const cleanCode = code.trim();
+    if (!cleanCode) return null;
+    try {
+      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', cleanCode)));
+      if (!snap.empty) {
+        const d = snap.docs[0].data() as EventRegistration;
+        return { ...d, id: d.id || snap.docs[0].id };
+      }
+      const directSnap = await getDoc(doc(db, 'event_registrations', cleanCode));
+      if (directSnap.exists()) {
+        const d = directSnap.data() as EventRegistration;
+        return { ...d, id: d.id || directSnap.id };
+      }
+      return null;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `event_registrations/${cleanCode}`);
+      return null;
+    }
+  },
+
+  async markRegistrationCheckIn(
+    id: string,
+    present: boolean,
+    adminUser?: { uid: string; name: string }
+  ): Promise<EventRegistration | null> {
+    const nowIso = new Date().toISOString();
+    const updates: Partial<EventRegistration> = {
+      status: present ? 'presente' : 'confirmada',
+      checkInAt: present ? nowIso : null,
+      checkedInByUid: present ? adminUser?.uid || null : null,
+      checkedInByName: present ? adminUser?.name || 'Credenciamento' : null,
+    };
+
+    try {
+      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
+      let updatedRecord: EventRegistration | null = null;
+      if (!snap.empty) {
+        const docSnap = snap.docs[0];
+        await updateDoc(docSnap.ref, removeUndefinedValues(updates));
+        const current = docSnap.data() as EventRegistration;
+        updatedRecord = { ...current, ...updates, id: current.id || docSnap.id };
+      } else {
+        const docRef = doc(db, 'event_registrations', id);
+        const directSnap = await getDoc(docRef);
+        await updateDoc(docRef, removeUndefinedValues(updates));
+        if (directSnap.exists()) {
+          const current = directSnap.data() as EventRegistration;
+          updatedRecord = { ...current, ...updates, id: current.id || directSnap.id };
+        }
+      }
+
+      if (present && updatedRecord) {
+        await this.addActivity({
+          userId: adminUser?.uid || 'system',
+          userName: adminUser?.name || 'Credenciamento',
+          action: 'event_checkin',
+          actionLabel: 'Check-in QR no evento',
+          targetType: 'event_registration',
+          targetName: updatedRecord.fullName,
+          details: `Presença confirmada em "${updatedRecord.eventName}" (${updatedRecord.id})`,
+        }).catch(() => {});
+      }
+
+      return updatedRecord;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
+      return null;
+    }
+  },
+
   /**
    * Real-time summary grouped strictly by eventId for showing each event's live Cashbox & stats
    * on the events list without ever mixing lists.

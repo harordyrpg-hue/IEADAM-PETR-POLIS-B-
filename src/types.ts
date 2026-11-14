@@ -605,6 +605,8 @@ export interface EventRegistration {
   registeredAt: string;
   createdAt?: string;
   checkInAt?: string | null;
+  checkedInByUid?: string | null;
+  checkedInByName?: string | null;
 
   // Informações de Pagamento e Fila
   isPaidEvent?: boolean;
