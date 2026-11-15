@@ -53,6 +53,7 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
     allFiles,
     filesLoading,
     refreshStats,
+    requestConfirm,
   } = useApp();
 
   const loading = filesLoading;
@@ -153,9 +154,12 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
   const handleDeleteFolder = async (folderId: string) => {
     const targetFolder = folders.find((f) => f.id === folderId);
     const folderName = targetFolder ? targetFolder.name : 'esta pasta';
-    const confirmDelete = window.confirm(
-      `Deseja mover a pasta "${folderName}" para a Lixeira?\n\nEla ficará guardada na Lixeira e você poderá restaurá-la com todos os arquivos a qualquer momento.`
-    );
+    const confirmDelete = await requestConfirm({
+      title: 'Mover pasta para Lixeira',
+      message: `Deseja mover a pasta "${folderName}" para a Lixeira?\n\nEla ficará guardada na Lixeira e você poderá restaurá-la com todos os arquivos a qualquer momento.`,
+      confirmLabel: 'Mover para Lixeira',
+      danger: true,
+    });
     if (!confirmDelete) return;
 
     try {
@@ -191,21 +195,21 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
       {/* 1. Header Toolbar & Breadcrumbs */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-neutral-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
         {/* Breadcrumbs */}
-        <div className="flex items-center gap-1.5 text-xs overflow-x-auto no-scrollbar py-0.5 max-w-full">
+        <div className="flex items-center gap-1.5 text-sm overflow-x-auto no-scrollbar py-0.5 max-w-full">
           {breadcrumbs.map((crumb, idx) => (
             <React.Fragment key={crumb.id || 'root'}>
-              {idx > 0 && <ChevronRight className="w-3.5 h-3.5 text-neutral-500" />}
+              {idx > 0 && <ChevronRight className="w-3.5 h-3.5 text-neutral-500 shrink-0" />}
               <button
                 onClick={() => setActiveFolderId(crumb.id)}
-                className={`flex items-center gap-1 font-medium transition-colors ${
+                className={`flex items-center gap-1.5 font-medium transition-colors whitespace-nowrap cursor-pointer ${
                   idx === breadcrumbs.length - 1
                     ? 'text-amber-400 font-semibold'
                     : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
-                {idx === 0 && <Home className="w-3.5 h-3.5 mr-0.5" />}
+                {idx === 0 && <Home className="w-4 h-4 shrink-0" />}
                 <span>{crumb.name}</span>
               </button>
             </React.Fragment>
@@ -213,33 +217,28 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
         </div>
 
         {/* View mode & Action buttons */}
-        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-          {/* Create Folder button */}
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
           <button
             onClick={() => setIsNewFolderOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 min-h-[38px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
           >
             <FolderPlus className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden xs:inline">Criar pasta</span>
-            <span className="xs:hidden">Pasta</span>
+            <span>Nova pasta</span>
           </button>
 
-          {/* Upload Button */}
           <button
             onClick={() => openUpload(activeFolderId)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 min-h-[38px] bg-amber-400 hover:bg-amber-300 text-neutral-950 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer whitespace-nowrap"
           >
             <Upload className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">Enviar arquivos</span>
-            <span className="xs:hidden">Enviar</span>
+            <span>Enviar</span>
           </button>
 
-          {/* Grid / List View Toggle */}
-          <div className="flex items-center bg-neutral-800/80 border border-neutral-700/80 rounded-lg p-0.5 ml-1">
+          <div className="flex items-center bg-neutral-900 border border-neutral-800 rounded-xl p-0.5 ml-auto sm:ml-1">
             <button
               onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded transition-colors ${
-                viewMode === 'grid' ? 'bg-neutral-700 text-amber-400 shadow-xs' : 'text-neutral-400 hover:text-neutral-200'
+              className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                viewMode === 'grid' ? 'bg-neutral-800 text-amber-400' : 'text-neutral-400 hover:text-neutral-200'
               }`}
               title="Visualização em Grade"
             >
@@ -247,8 +246,8 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
             </button>
             <button
               onClick={() => setViewMode('list')}
-              className={`p-1.5 rounded transition-colors ${
-                viewMode === 'list' ? 'bg-neutral-700 text-amber-400 shadow-xs' : 'text-neutral-400 hover:text-neutral-200'
+              className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                viewMode === 'list' ? 'bg-neutral-800 text-amber-400' : 'text-neutral-400 hover:text-neutral-200'
               }`}
               title="Visualização em Lista"
             >
@@ -260,11 +259,11 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
 
       {/* 2. Subfolders Grid */}
       {subfolders.length > 0 && (
-        <div className="space-y-2">
-          <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block">
+        <div className="space-y-2.5">
+          <h2 className="text-xs font-semibold text-neutral-400">
             Pastas ({subfolders.length})
-          </span>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          </h2>
+          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
             {subfolders.map((folder) => {
               const folderFilesCount = allFiles.filter(
                 (f) => !f.inTrash && f.folderId === folder.id
@@ -410,7 +409,7 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
           </button>
         </div>
       ) : viewMode === 'grid' ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
           {files.map((file) => (
             <FileCard
               key={file.id}
@@ -422,32 +421,34 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
           ))}
         </div>
       ) : (
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900 overflow-hidden overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-neutral-800 text-[11px] font-semibold text-neutral-400 uppercase tracking-wider bg-neutral-950/40">
-                <th className="w-10 px-3 py-2.5 text-center"></th>
-                <th className="px-3 py-2.5">Nome do Arquivo</th>
-                <th className="px-3 py-2.5 hidden sm:table-cell">Categoria</th>
-                <th className="px-3 py-2.5 text-right">Tamanho</th>
-                <th className="px-3 py-2.5 hidden md:table-cell">Resolução / Tempo</th>
-                <th className="px-3 py-2.5 hidden lg:table-cell">Responsável</th>
-                <th className="px-3 py-2.5 hidden md:table-cell">Data</th>
-                <th className="px-3 py-2.5 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {files.map((file) => (
-                <FileListRow
-                  key={file.id}
-                  file={file}
-                  isSelected={selectedFileIds.includes(file.id)}
-                  onSelect={toggleSelectFile}
-                  onRefresh={loadFiles}
-                />
-              ))}
-            </tbody>
-          </table>
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-900 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-neutral-800 text-[11px] font-medium text-neutral-400 bg-neutral-950/50">
+                  <th className="w-10 px-3 py-3 text-center"></th>
+                  <th className="px-3 py-3">Nome</th>
+                  <th className="px-3 py-3 hidden sm:table-cell">Categoria</th>
+                  <th className="px-3 py-3 text-right">Tamanho</th>
+                  <th className="px-3 py-3 hidden md:table-cell">Resolução / Duração</th>
+                  <th className="px-3 py-3 hidden lg:table-cell">Responsável</th>
+                  <th className="px-3 py-3 hidden md:table-cell">Data</th>
+                  <th className="px-3 py-3 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {files.map((file) => (
+                  <FileListRow
+                    key={file.id}
+                    file={file}
+                    isSelected={selectedFileIds.includes(file.id)}
+                    onSelect={toggleSelectFile}
+                    onRefresh={loadFiles}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

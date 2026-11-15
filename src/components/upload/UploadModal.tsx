@@ -29,12 +29,22 @@ export const UploadModal: React.FC = () => {
   } = useApp();
 
   const [queue, setQueue] = useState<UploadQueueItem[]>([]);
+  const queueRef = useRef<UploadQueueItem[]>([]);
+  const isProcessingRef = useRef<boolean>(false);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(uploadFolderId);
   const [selectedEvent, setSelectedEvent] = useState<string | null>(uploadEventId);
   const [customTags, setCustomTags] = useState<string[]>(['culto', '2026']);
   const [tagInput, setTagInput] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const updateQueueState = useCallback((updater: (prev: UploadQueueItem[]) => UploadQueueItem[]) => {
+    setQueue((prev) => {
+      const next = updater(prev);
+      queueRef.current = next;
+      return next;
+    });
+  }, []);
 
   // Sync state when opened with prefill
   React.useEffect(() => {
@@ -43,6 +53,63 @@ export const UploadModal: React.FC = () => {
       setSelectedEvent(uploadEventId);
     }
   }, [isUploadOpen, uploadFolderId, uploadEventId]);
+
+  const runWorker = useCallback(async () => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+
+    try {
+      while (true) {
+        const waitingItem = queueRef.current.find((item) => item.status === 'waiting');
+        if (!waitingItem) break;
+
+        updateQueueState((prev) =>
+          prev.map((it) => (it.id === waitingItem.id ? { ...it, status: 'uploading', progress: 0 } : it))
+        );
+
+        try {
+          await api.uploadFile(
+            waitingItem.file,
+            {
+              folderId: waitingItem.folderId,
+              eventId: waitingItem.eventId,
+              tags: waitingItem.tags,
+            },
+            (progress, speed) => {
+              updateQueueState((prev) =>
+                prev.map((it) =>
+                  it.id === waitingItem.id
+                    ? {
+                        ...it,
+                        progress,
+                        speed,
+                        status: progress === 100 ? 'processing' : 'uploading',
+                      }
+                    : it
+                )
+              );
+            }
+          );
+
+          updateQueueState((prev) =>
+            prev.map((it) => (it.id === waitingItem.id ? { ...it, status: 'completed', progress: 100 } : it))
+          );
+
+          await refreshStats();
+        } catch (err: any) {
+          updateQueueState((prev) =>
+            prev.map((it) =>
+              it.id === waitingItem.id
+                ? { ...it, status: 'error', error: err?.message || 'Erro no upload' }
+                : it
+            )
+          );
+        }
+      }
+    } finally {
+      isProcessingRef.current = false;
+    }
+  }, [refreshStats, updateQueueState]);
 
   if (!isUploadOpen) return null;
 
@@ -59,86 +126,19 @@ export const UploadModal: React.FC = () => {
       tags: [...customTags],
     }));
 
-    setQueue((prev) => [...prev, ...newItems]);
-    // Automatically start processing queue
-    setTimeout(() => {
-      processQueue([...queue, ...newItems]);
-    }, 100);
-  };
-
-  const processQueue = async (currentQueue: UploadQueueItem[]) => {
-    const waitingItem = currentQueue.find((item) => item.status === 'waiting');
-    if (!waitingItem) return;
-
-    // Set to uploading
-    setQueue((prev) =>
-      prev.map((it) => (it.id === waitingItem.id ? { ...it, status: 'uploading', progress: 0 } : it))
-    );
-
-    try {
-      await api.uploadFile(
-        waitingItem.file,
-        {
-          folderId: waitingItem.folderId,
-          eventId: waitingItem.eventId,
-          tags: waitingItem.tags,
-        },
-        (progress, speed) => {
-          setQueue((prev) =>
-            prev.map((it) =>
-              it.id === waitingItem.id
-                ? {
-                    ...it,
-                    progress,
-                    speed,
-                    status: progress === 100 ? 'processing' : 'uploading',
-                  }
-                : it
-            )
-          );
-        }
-      );
-
-      // Successfully stored original
-      setQueue((prev) =>
-        prev.map((it) => (it.id === waitingItem.id ? { ...it, status: 'completed', progress: 100 } : it))
-      );
-
-      await refreshStats();
-
-      // Process next item in queue
-      setQueue((freshQueue) => {
-        setTimeout(() => processQueue(freshQueue), 100);
-        return freshQueue;
-      });
-    } catch (err: any) {
-      setQueue((prev) =>
-        prev.map((it) =>
-          it.id === waitingItem.id
-            ? { ...it, status: 'error', error: err.message || 'Erro no upload' }
-            : it
-        )
-      );
-
-      // Continue with other items
-      setQueue((freshQueue) => {
-        setTimeout(() => processQueue(freshQueue), 100);
-        return freshQueue;
-      });
-    }
+    updateQueueState((prev) => [...prev, ...newItems]);
+    void runWorker();
   };
 
   const retryUpload = (itemId: string) => {
-    setQueue((prev) =>
+    updateQueueState((prev) =>
       prev.map((it) => (it.id === itemId ? { ...it, status: 'waiting', progress: 0, error: undefined } : it))
     );
-    setTimeout(() => {
-      processQueue(queue);
-    }, 50);
+    void runWorker();
   };
 
   const removeQueueItem = (itemId: string) => {
-    setQueue((prev) => prev.filter((it) => it.id !== itemId));
+    updateQueueState((prev) => prev.filter((it) => it.id !== itemId));
   };
 
   const handleAddTag = () => {

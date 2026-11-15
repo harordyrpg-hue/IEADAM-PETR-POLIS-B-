@@ -18,15 +18,37 @@ export const VideoPlayerModal: React.FC = () => {
   const {
     videoPlayerFile,
     setVideoPlayerFile,
-    setDetailFile,
     setShareTarget,
     notify,
   } = useApp();
 
+  const [videoSrc, setVideoSrc] = React.useState<string>('');
+  const [loadingSrc, setLoadingSrc] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    setVideoSrc('');
+    if (!videoPlayerFile) return;
+    let isMounted = true;
+    setLoadingSrc(true);
+    api
+      .resolveMediaUrl(videoPlayerFile, true)
+      .then((url) => {
+        if (isMounted && url) {
+          setVideoSrc(url);
+        }
+      })
+      .finally(() => {
+        if (isMounted) setLoadingSrc(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [videoPlayerFile]);
+
   if (!videoPlayerFile) return null;
 
   const handleDownload = () => {
-    api.triggerDownload(`/api/files/${videoPlayerFile.id}/download`);
+    api.triggerDownload(videoPlayerFile, videoPlayerFile.name);
     notify(`Iniciando download do vídeo original (${formatBytes(videoPlayerFile.size)})`, 'info');
   };
 
@@ -47,7 +69,7 @@ export const VideoPlayerModal: React.FC = () => {
           </div>
           <button
             onClick={() => setVideoPlayerFile(null)}
-            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors"
+            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -55,15 +77,21 @@ export const VideoPlayerModal: React.FC = () => {
 
         {/* Video Player Viewport */}
         <div className="relative aspect-video bg-black flex items-center justify-center">
-          <video
-            controls
-            autoPlay
-            className="w-full h-full object-contain"
-            src={`/storage/originals/${videoPlayerFile.storageKey}`}
-            poster={videoPlayerFile.thumbnailUrl || undefined}
-          >
-            Seu navegador não suporta a pré-visualização deste formato de vídeo.
-          </video>
+          {videoSrc ? (
+            <video
+              controls
+              autoPlay
+              className="w-full h-full object-contain"
+              src={videoSrc}
+              poster={videoPlayerFile.thumbnailUrl || undefined}
+            >
+              Seu navegador não suporta a pré-visualização deste formato de vídeo.
+            </video>
+          ) : (
+            <div className="text-xs text-neutral-400">
+              {loadingSrc ? 'Carregando vídeo original...' : 'Pré-visualização indisponível. Clique em Baixar Vídeo Original.'}
+            </div>
+          )}
         </div>
 
         {/* Metadata & Controls Bar */}

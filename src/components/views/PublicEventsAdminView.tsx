@@ -59,7 +59,14 @@ import { QrCheckInScannerModal } from '../events/QrCheckInScannerModal.js';
 import { jsPDF } from 'jspdf';
 
 export const PublicEventsAdminView: React.FC = () => {
-  const { user, canAccessFinances, createFinancialTransaction, notify } = useApp();
+  const {
+    user,
+    canAccessFinances,
+    createFinancialTransaction,
+    notify,
+    requestConfirm,
+    openExternalUrl,
+  } = useApp();
 
   const [events, setEvents] = useState<PublicRegistrationEvent[]>([]);
   const [eventSummaries, setEventSummaries] = useState<Record<string, EventRegistrationsSummary>>({});
@@ -178,7 +185,7 @@ export const PublicEventsAdminView: React.FC = () => {
   // Open Form Preview
   const handleOpenPreview = (event: PublicRegistrationEvent) => {
     const origin = window.location.origin;
-    window.open(`${origin}/?inscricao=${event.id}`, '_blank');
+    openExternalUrl(`${origin}/?inscricao=${event.id}`);
   };
 
   // Open QR Credential Scanner Panel
@@ -394,7 +401,13 @@ export const PublicEventsAdminView: React.FC = () => {
     const confirmMsg = isCurrentlyPaid
       ? `Cancelar o pagamento confirmado de ${attendee.fullName}? Isso vai DIMINUIR R$ ${val.toFixed(2)} do caixa do evento.`
       : `Deseja marcar o pagamento de ${attendee.fullName} como NÃO PAGO / CANCELADO?`;
-    if (!confirm(confirmMsg)) return;
+    const confirmed = await requestConfirm({
+      title: isCurrentlyPaid ? 'Cancelar pagamento confirmado' : 'Marcar como não pago',
+      message: confirmMsg,
+      confirmLabel: 'Confirmar',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       const res = await api.rejectRegistrationPayment(
         attendee.id,
@@ -426,13 +439,14 @@ export const PublicEventsAdminView: React.FC = () => {
   const handleResetToWaiting = async (attendee: EventRegistration) => {
     const isCurrentlyPaid = attendee.paymentStatus === 'paid';
     const val = Number(attendee.ticketPrice || liveSelectedEvent?.price || 0);
-    if (
-      isCurrentlyPaid &&
-      !confirm(
-        `Reverter a confirmação de pagamento de ${attendee.fullName}? Isso vai DIMINUIR R$ ${val.toFixed(2)} do caixa do evento e devolver o participante para a fila.`
-      )
-    ) {
-      return;
+    if (isCurrentlyPaid) {
+      const confirmed = await requestConfirm({
+        title: 'Reverter confirmação de pagamento',
+        message: `Reverter a confirmação de pagamento de ${attendee.fullName}? Isso vai DIMINUIR R$ ${val.toFixed(2)} do caixa do evento e devolver o participante para a fila.`,
+        confirmLabel: 'Reverter para fila',
+        danger: true,
+      });
+      if (!confirmed) return;
     }
     try {
       const res = await api.resetRegistrationToWaiting(
@@ -459,7 +473,13 @@ export const PublicEventsAdminView: React.FC = () => {
     const msg = isCurrentlyPaid
       ? `Excluir a inscrição PAGA de "${attendee.fullName}" (${attendee.id})? Isso vai DIMINUIR R$ ${val.toFixed(2)} do caixa do evento.`
       : `Deseja realmente excluir a inscrição de "${attendee.fullName}" (${attendee.id})? Esta ação não pode ser desfeita.`;
-    if (!confirm(msg)) return;
+    const confirmed = await requestConfirm({
+      title: 'Excluir inscrição',
+      message: msg,
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       const res = await api.deleteEventRegistration(
         attendee.id,
@@ -894,13 +914,13 @@ export const PublicEventsAdminView: React.FC = () => {
       return;
     }
 
-    if (
-      !confirm(
-        `Lançar o saldo atual de R$ ${stats.totalRevenue.toFixed(2)} (${stats.confirmedPaid} ingresso(s)) do evento "${targetEvent.name}" como ENTRADA no Livro Financeiro Geral?`
-      )
-    ) {
-      return;
-    }
+    const confirmed = await requestConfirm({
+      title: 'Lançar caixa no Financeiro Geral',
+      message: `Lançar o saldo atual de R$ ${stats.totalRevenue.toFixed(2)} (${stats.confirmedPaid} ingresso(s)) do evento "${targetEvent.name}" como ENTRADA no Livro Financeiro Geral?`,
+      confirmLabel: 'Lançar Entrada',
+      danger: false,
+    });
+    if (!confirmed) return;
 
     try {
       setIsSendingToFinance(true);
@@ -926,30 +946,29 @@ export const PublicEventsAdminView: React.FC = () => {
   return (
     <div className="space-y-6 pb-20">
       {/* 1. Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 bg-gradient-to-r from-neutral-900 via-neutral-900/90 to-neutral-950 border border-neutral-800 rounded-2xl">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
-            <Building className="w-4 h-4" />
-            IEADAM Petrópolis B · PT-B Mídia
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 sm:p-5 bg-neutral-900 border border-neutral-800 rounded-2xl">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+            <Calendar className="w-5 h-5" />
           </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-neutral-100 tracking-tight flex items-center gap-2">
-            <Calendar className="w-6 h-6 text-amber-400" />
-            Eventos Públicos com Inscrição
-          </h1>
-          <p className="text-xs text-neutral-400 mt-1">
-            Crie eventos com formulários públicos personalizáveis, links diretos para candidatos (sem login) e credenciais com QR Code.
-          </p>
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-xl font-bold text-neutral-100 tracking-tight truncate">
+              Eventos e Inscrições
+            </h1>
+            <p className="text-xs text-neutral-400 mt-0.5 truncate">
+              Formulários públicos, credenciais QR e controle de participantes.
+            </p>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <button
             type="button"
             onClick={() => handleOpenQrScanner()}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 touch-manipulation cursor-pointer whitespace-nowrap"
-            title="Abrir leitor QR para credenciar participantes e contabilizar presentes"
+            className="flex items-center gap-1.5 px-3.5 min-h-[40px] bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-colors active:scale-95 touch-manipulation cursor-pointer whitespace-nowrap shrink-0"
           >
             <ScanLine className="w-4 h-4" />
-            <span>Painel Leitor QR</span>
+            <span>Leitor QR</span>
           </button>
 
           <button
@@ -957,145 +976,120 @@ export const PublicEventsAdminView: React.FC = () => {
               resetFormBuilder();
               setIsEventModalOpen(true);
             }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 touch-manipulation cursor-pointer whitespace-nowrap"
+            className="flex items-center gap-1.5 px-3.5 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl transition-colors active:scale-95 touch-manipulation cursor-pointer whitespace-nowrap shrink-0"
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>+ Criar Evento & Formulário</span>
+            <span>Novo Evento</span>
           </button>
         </div>
       </div>
 
       {/* 2. Main View Mode: Attendees View OR Events List */}
       {selectedEventForAttendees ? (
-        /* ======================================================== */
-        /* ATTENDEES & STATISTICS DASHBOARD VIEW                   */
-        /* ======================================================== */
-        <div className="space-y-6">
+        <div className="space-y-5">
           {/* Back button and title with event switcher */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-neutral-900/90 border border-neutral-800 rounded-2xl">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
+            <div className="flex items-start sm:items-center gap-3 min-w-0">
               <button
                 onClick={() => {
                   setSelectedEventForAttendees(null);
                   setShowCashboxHistory(false);
                 }}
-                className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
-                title="Voltar aos eventos"
+                className="px-3 min-h-[40px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>Voltar</span>
               </button>
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                    Lista de Inscritos Exclusiva
-                  </span>
-                  {selectedEventForAttendees.isPaid ? (
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase">
-                      Evento Pago · R$ {(selectedEventForAttendees.price || 0).toFixed(2)}
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold uppercase">
-                      Evento Gratuito
-                    </span>
-                  )}
-                  <span className="text-[11px] text-neutral-400 font-mono-numbers">
-                    {formatDateBR(selectedEventForAttendees.date)} · {selectedEventForAttendees.time}
-                  </span>
-                </div>
-                <h2 className="text-lg sm:text-xl font-bold text-neutral-100 mt-0.5">
+              <div className="min-w-0">
+                <h2 className="text-base sm:text-lg font-bold text-neutral-100 truncate">
                   {selectedEventForAttendees.name}
                 </h2>
+                <div className="text-xs text-neutral-400 flex items-center gap-1.5 flex-wrap mt-0.5 font-mono tabular-nums">
+                  <span>{formatDateBR(selectedEventForAttendees.date)} · {selectedEventForAttendees.time}</span>
+                  <span>·</span>
+                  <span className={selectedEventForAttendees.isPaid ? 'text-emerald-400 font-semibold' : 'text-sky-400'}>
+                    {selectedEventForAttendees.isPaid
+                      ? `Pago (R$ ${(selectedEventForAttendees.price || 0).toFixed(2)})`
+                      : 'Gratuito'}
+                  </span>
+                </div>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {/* Event switcher dropdown to prevent any mixing */}
               {events.length > 1 && (
-                <div className="flex items-center gap-1.5 bg-neutral-800/80 px-2.5 py-1.5 rounded-xl border border-neutral-700">
-                  <span className="text-[10px] uppercase font-bold text-neutral-400">Trocar:</span>
-                  <select
-                    value={selectedEventForAttendees.id}
-                    onChange={(e) => {
-                      const target = events.find((ev) => ev.id === e.target.value);
-                      if (target) {
-                        setSelectedEventForAttendees(target);
-                        setShowCashboxHistory(false);
-                      }
-                    }}
-                    className="bg-transparent text-neutral-200 text-xs font-semibold focus:outline-none cursor-pointer max-w-[150px] sm:max-w-[200px] truncate"
-                  >
-                    {events.map((ev) => (
-                      <option key={ev.id} value={ev.id} className="bg-neutral-900 text-neutral-200">
-                        {ev.name} ({formatDateBR(ev.date)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <select
+                  value={selectedEventForAttendees.id}
+                  onChange={(e) => {
+                    const target = events.find((ev) => ev.id === e.target.value);
+                    if (target) {
+                      setSelectedEventForAttendees(target);
+                      setShowCashboxHistory(false);
+                    }
+                  }}
+                  className="px-3 min-h-[38px] bg-neutral-800 border border-neutral-700 rounded-xl text-neutral-200 text-xs font-semibold focus:outline-none focus:border-amber-400 cursor-pointer max-w-[180px] truncate"
+                >
+                  {events.map((ev) => (
+                    <option key={ev.id} value={ev.id} className="bg-neutral-900 text-neutral-200">
+                      {ev.name} ({formatDateBR(ev.date)})
+                    </option>
+                  ))}
+                </select>
               )}
 
               <button
                 type="button"
                 onClick={() => handleOpenQrScanner(selectedEventForAttendees)}
-                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer whitespace-nowrap"
-                title="Ler QR Code das credenciais e registrar presença automática"
+                className="px-3 min-h-[38px] bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
               >
                 <ScanLine className="w-3.5 h-3.5" />
-                <span>Leitor QR ({stats.checkedIn})</span>
+                <span>Ler QR ({stats.checkedIn})</span>
               </button>
 
               <button
                 onClick={() => handleCopyLink(selectedEventForAttendees)}
-                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700"
+                className="px-3 min-h-[38px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700 cursor-pointer whitespace-nowrap"
               >
                 <Copy className="w-3.5 h-3.5 text-amber-400" />
-                <span>Copiar Link</span>
+                <span>Link</span>
               </button>
               <button
                 onClick={handleExportAttendeesPDF}
-                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700"
+                className="px-3 min-h-[38px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700 cursor-pointer whitespace-nowrap"
               >
                 <Download className="w-3.5 h-3.5 text-red-400" />
-                <span>Exportar PDF</span>
+                <span>PDF</span>
               </button>
               <button
                 onClick={handleExportAttendeesCSV}
-                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700"
+                className="px-3 min-h-[38px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700 cursor-pointer whitespace-nowrap"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Exportar CSV</span>
+                <span>CSV</span>
               </button>
             </div>
           </div>
 
           {/* Paid Event Cashbox Dashboard Panel */}
           {liveSelectedEvent?.isPaid && (
-            <div className="p-5 bg-gradient-to-br from-emerald-950/35 via-neutral-900 to-neutral-950 border border-emerald-500/30 rounded-2xl space-y-4">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="flex items-start gap-3.5">
-                  <div className="p-3 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400 shrink-0">
-                    <Wallet className="w-6 h-6" />
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
+              <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-neutral-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 flex items-center justify-center shrink-0">
+                    <Wallet className="w-5 h-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
-                        Caixa do Evento Pago
-                      </span>
-                      <span className="text-[11px] text-neutral-400 font-mono-numbers">
-                        · Ingresso: R$ {(liveSelectedEvent.price || 0).toFixed(2)}
-                      </span>
+                    <div className="text-xs text-neutral-400">
+                      Caixa do Evento · Ingresso R$ {(liveSelectedEvent.price || 0).toFixed(2)}
                     </div>
-                    <div className="flex items-baseline gap-3 mt-1 flex-wrap">
-                      <span className="text-3xl sm:text-4xl font-bold font-mono-numbers text-emerald-400">
+                    <div className="flex items-baseline gap-2.5 mt-0.5 flex-wrap">
+                      <span className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-emerald-400">
                         R$ {stats.totalRevenue.toFixed(2)}
                       </span>
-                      <span className="text-xs font-semibold text-emerald-300/90">
-                        {stats.confirmedPaid} ingresso(s) pago(s)
+                      <span className="text-xs text-neutral-400 font-mono tabular-nums">
+                        {stats.confirmedPaid} pago(s)
                       </span>
                     </div>
-                    <p className="text-[11px] text-neutral-400 mt-1">
-                      Aumenta ao confirmar <strong className="text-neutral-200">"Pagou"</strong> · Diminui ao cancelar (<strong className="text-neutral-200">"Não Pagou"</strong>), reverter p/ fila ou excluir.
-                    </p>
                   </div>
                 </div>
 
@@ -1103,23 +1097,23 @@ export const PublicEventsAdminView: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setShowCashboxHistory((prev) => !prev)}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                    className={`px-3 min-h-[38px] rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
                       showCashboxHistory
-                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
                         : 'bg-neutral-800 hover:bg-neutral-700 border-neutral-700 text-neutral-200'
                     }`}
                   >
                     <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Extrato do Caixa ({(liveSelectedEvent.cashboxMovements || []).length})</span>
+                    <span>Extrato ({(liveSelectedEvent.cashboxMovements || []).length})</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={handleExportCashboxPDF}
-                    className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700 transition-colors cursor-pointer"
+                    className="px-3 min-h-[38px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700 transition-colors cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5 text-red-400" />
-                    <span>PDF do Caixa</span>
+                    <span>PDF Caixa</span>
                   </button>
 
                   {canAccessFinances && (
@@ -1127,129 +1121,113 @@ export const PublicEventsAdminView: React.FC = () => {
                       type="button"
                       disabled={isSendingToFinance || stats.totalRevenue <= 0}
                       onClick={handleSendCashboxToGeneralFinance}
-                      className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
-                      title="Lançar o saldo confirmado deste evento como entrada no Financeiro Geral"
+                      className="px-3 min-h-[38px] bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <DollarSign className="w-3.5 h-3.5" />
-                      <span>{isSendingToFinance ? 'Lançando...' : 'Lançar no Caixa Geral'}</span>
+                      <span>{isSendingToFinance ? 'Lançando...' : 'Enviar p/ Caixa Geral'}</span>
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* Cashbox Channel & Status Breakdown */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-                <div className="p-3 bg-neutral-950/80 border border-neutral-800 rounded-xl">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1">
-                    <CreditCard className="w-3 h-3 text-amber-400" />
-                    <span>Pix Copie e Cole</span>
+              {/* Hairline Cashbox Channel & Status Breakdown */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-neutral-800">
+                <div className="p-3.5 bg-neutral-900">
+                  <div className="text-xs text-neutral-400 flex items-center gap-1.5">
+                    <CreditCard className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Pix</span>
                   </div>
-                  <div className="text-base font-bold font-mono-numbers text-neutral-100 mt-1">
+                  <div className="text-base font-bold font-mono tabular-nums text-neutral-100 mt-1">
                     R$ {stats.pixCashboxTotal.toFixed(2)}
                   </div>
-                  <div className="text-[10px] text-neutral-400 mt-0.5">
-                    {stats.pixPaidCount} pagamento(s)
+                  <div className="text-[11px] text-neutral-500 font-mono tabular-nums">
+                    {stats.pixPaidCount} pago(s)
                   </div>
                 </div>
 
-                <div className="p-3 bg-neutral-950/80 border border-neutral-800 rounded-xl">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1">
-                    <MessageCircle className="w-3 h-3 text-emerald-400" />
+                <div className="p-3.5 bg-neutral-900">
+                  <div className="text-xs text-neutral-400 flex items-center gap-1.5">
+                    <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
                     <span>WhatsApp</span>
                   </div>
-                  <div className="text-base font-bold font-mono-numbers text-neutral-100 mt-1">
+                  <div className="text-base font-bold font-mono tabular-nums text-neutral-100 mt-1">
                     R$ {stats.whatsappCashboxTotal.toFixed(2)}
                   </div>
-                  <div className="text-[10px] text-neutral-400 mt-0.5">
-                    {stats.whatsappPaidCount} pagamento(s)
+                  <div className="text-[11px] text-neutral-500 font-mono tabular-nums">
+                    {stats.whatsappPaidCount} pago(s)
                   </div>
                 </div>
 
-                <div className="p-3 bg-neutral-950/80 border border-amber-500/20 rounded-xl">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                    <Hourglass className="w-3 h-3" />
-                    <span>Na Fila (Previsto)</span>
+                <div className="p-3.5 bg-neutral-900">
+                  <div className="text-xs text-amber-400 flex items-center gap-1.5">
+                    <Hourglass className="w-3.5 h-3.5" />
+                    <span>Na fila</span>
                   </div>
-                  <div className="text-base font-bold font-mono-numbers text-amber-400 mt-1">
+                  <div className="text-base font-bold font-mono tabular-nums text-amber-400 mt-1">
                     R$ {stats.waitingBalance.toFixed(2)}
                   </div>
-                  <div className="text-[10px] text-neutral-400 mt-0.5">
+                  <div className="text-[11px] text-neutral-500 font-mono tabular-nums">
                     {stats.waitingPayment} pendente(s)
                   </div>
                 </div>
 
-                <div className="p-3 bg-neutral-950/80 border border-red-500/20 rounded-xl">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-red-400 flex items-center gap-1">
-                    <TrendingDown className="w-3 h-3" />
-                    <span>Cancelados / Estornados</span>
+                <div className="p-3.5 bg-neutral-900">
+                  <div className="text-xs text-red-400 flex items-center gap-1.5">
+                    <TrendingDown className="w-3.5 h-3.5" />
+                    <span>Cancelados</span>
                   </div>
-                  <div className="text-base font-bold font-mono-numbers text-red-400 mt-1">
+                  <div className="text-base font-bold font-mono tabular-nums text-red-400 mt-1">
                     R$ {stats.rejectedBalance.toFixed(2)}
                   </div>
-                  <div className="text-[10px] text-neutral-400 mt-0.5">
+                  <div className="text-[11px] text-neutral-500 font-mono tabular-nums">
                     {stats.rejectedPayment} cancelado(s)
                   </div>
                 </div>
               </div>
 
-              {/* Expandable Cashbox Movement Ledger (Entradas e Estornos/Reversões) */}
+              {/* Expandable Cashbox Movement Ledger */}
               {showCashboxHistory && (
-                <div className="pt-3 border-t border-emerald-500/20 space-y-2">
+                <div className="p-4 border-t border-neutral-800 space-y-2">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-300">
-                      Extrato de Movimentações do Caixa
+                    <h4 className="text-xs font-semibold text-neutral-200">
+                      Movimentações do Caixa
                     </h4>
-                    <span className="text-[10px] text-neutral-400">
-                      Entradas (+R$) e Estornos/Reversões (-R$) em tempo real
+                    <span className="text-[11px] text-neutral-500">
+                      Entradas e estornos
                     </span>
                   </div>
 
                   {(!liveSelectedEvent.cashboxMovements || liveSelectedEvent.cashboxMovements.length === 0) ? (
-                    <div className="p-4 bg-neutral-950/60 border border-neutral-800 rounded-xl text-center text-xs text-neutral-400">
-                      Nenhuma movimentação registrada ainda. Confirme ou reverta pagamentos na lista abaixo para acompanhar aqui.
+                    <div className="py-4 text-center text-xs text-neutral-500">
+                      Nenhuma movimentação registrada ainda.
                     </div>
                   ) : (
-                    <div className="max-h-64 overflow-y-auto divide-y divide-neutral-800/70 bg-neutral-950/70 border border-neutral-800 rounded-xl">
+                    <div className="max-h-60 overflow-y-auto divide-y divide-neutral-800 border border-neutral-800 rounded-xl bg-neutral-950">
                       {liveSelectedEvent.cashboxMovements.map((mov) => {
                         const isEntrada = mov.type === 'entrada';
                         return (
                           <div key={mov.id} className="p-3 flex items-center justify-between gap-3 text-xs">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div
-                                className={`p-1.5 rounded-lg shrink-0 ${
-                                  isEntrada
-                                    ? 'bg-emerald-500/15 text-emerald-400'
-                                    : 'bg-red-500/15 text-red-400'
-                                }`}
-                              >
-                                {isEntrada ? (
-                                  <ArrowUpRight className="w-3.5 h-3.5" />
-                                ) : (
-                                  <ArrowDownLeft className="w-3.5 h-3.5" />
-                                )}
+                            <div className="min-w-0">
+                              <div className="font-semibold text-neutral-100 truncate">
+                                {mov.attendeeName}
+                                <span className="ml-1.5 text-[11px] font-normal text-neutral-400">
+                                  · {mov.paymentType === 'whatsapp' ? 'WhatsApp' : 'Pix'}
+                                </span>
                               </div>
-                              <div className="min-w-0">
-                                <div className="font-semibold text-neutral-100 truncate">
-                                  {mov.attendeeName}
-                                  <span className="ml-2 text-[10px] font-normal text-neutral-400">
-                                    ({mov.paymentType === 'whatsapp' ? 'WhatsApp' : 'Pix'})
-                                  </span>
-                                </div>
-                                <div className="text-[11px] text-neutral-400 truncate">
-                                  {mov.reason} · por <span className="text-neutral-300">{mov.adminName}</span>
-                                </div>
+                              <div className="text-[11px] text-neutral-400 truncate">
+                                {mov.reason} · {mov.adminName}
                               </div>
                             </div>
 
                             <div className="text-right shrink-0">
                               <div
-                                className={`font-bold font-mono-numbers ${
+                                className={`font-bold font-mono tabular-nums ${
                                   isEntrada ? 'text-emerald-400' : 'text-red-400'
                                 }`}
                               >
                                 {isEntrada ? '+' : '-'} R$ {Number(mov.amount || 0).toFixed(2)}
                               </div>
-                              <div className="text-[10px] text-neutral-500 font-mono-numbers">
+                              <div className="text-[10px] text-neutral-500 font-mono tabular-nums">
                                 {new Date(mov.timestamp).toLocaleString('pt-BR')}
                               </div>
                             </div>
@@ -1263,139 +1241,111 @@ export const PublicEventsAdminView: React.FC = () => {
             </div>
           )}
 
-          {/* Quick Stats Grid */}
-          <div className={`grid grid-cols-1 sm:grid-cols-2 ${selectedEventForAttendees.isPaid ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-4`}>
-            <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
-              <div className="text-xs text-neutral-400 font-semibold mb-1">Total de Participantes</div>
-              <div className="text-3xl font-bold font-mono-numbers text-neutral-100">{stats.total}</div>
-              <div className="text-[10px] text-neutral-400 mt-1">
-                {selectedEventForAttendees.isPaid
-                  ? `Ingresso: R$ ${(selectedEventForAttendees.price || 0).toFixed(2)}`
-                  : 'Evento Gratuito'}
+          {/* Hairline Telemetry Stats Grid */}
+          <div className={`grid grid-cols-2 ${selectedEventForAttendees.isPaid ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-px bg-neutral-800 border border-neutral-800 rounded-2xl overflow-hidden`}>
+            <div className="p-4 bg-neutral-900">
+              <div className="text-xs text-neutral-400">Total de Inscritos</div>
+              <div className="text-2xl font-bold font-mono tabular-nums text-neutral-100 mt-1">{stats.total}</div>
+            </div>
+
+            <div className="p-4 bg-neutral-900">
+              <div className="text-xs text-emerald-400">Presentes (Check-in)</div>
+              <div className="text-2xl font-bold font-mono tabular-nums text-emerald-400 mt-1">{stats.checkedIn}</div>
+              <div className="text-[11px] text-neutral-500 font-mono tabular-nums">
+                {stats.total > 0 ? ((stats.checkedIn / stats.total) * 100).toFixed(0) : 0}% do total
               </div>
             </div>
 
             {selectedEventForAttendees.isPaid ? (
               <>
-                <div className="p-4 bg-neutral-900 border border-emerald-500/30 rounded-2xl">
-                  <div className="text-xs text-emerald-400 font-semibold mb-1 flex items-center gap-1.5">
-                    <UserCheck className="w-3.5 h-3.5" />
-                    <span>Presentes no Evento</span>
-                  </div>
-                  <div className="text-3xl font-bold font-mono-numbers text-emerald-400">{stats.checkedIn}</div>
-                  <div className="text-[10px] text-emerald-400/80 mt-1">
-                    {stats.total > 0 ? ((stats.checkedIn / stats.total) * 100).toFixed(0) : 0}% fizeram check-in QR
-                  </div>
+                <div className="p-4 bg-neutral-900">
+                  <div className="text-xs text-amber-400">Aguardando</div>
+                  <div className="text-2xl font-bold font-mono tabular-nums text-amber-400 mt-1">{stats.waitingPayment}</div>
                 </div>
 
-                <div className={`p-4 bg-neutral-900 border rounded-2xl ${stats.waitingPayment > 0 ? 'border-amber-500/50 bg-amber-500/5' : 'border-neutral-800'}`}>
-                  <div className="text-xs text-amber-400 font-semibold mb-1 flex items-center gap-1.5">
-                    <Hourglass className="w-3.5 h-3.5" />
-                    <span>Fila Aguardando Pagamento</span>
-                  </div>
-                  <div className="text-3xl font-bold font-mono-numbers text-amber-400">{stats.waitingPayment}</div>
-                  <div className="text-[10px] text-amber-300/80 mt-1">
-                    Aguardando conferência do vendedor
-                  </div>
+                <div className="p-4 bg-neutral-900">
+                  <div className="text-xs text-emerald-400">Pagos</div>
+                  <div className="text-2xl font-bold font-mono tabular-nums text-emerald-400 mt-1">{stats.confirmedPaid}</div>
                 </div>
 
-                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
-                  <div className="text-xs text-emerald-400 font-semibold mb-1 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Pagamentos Confirmados</span>
-                  </div>
-                  <div className="text-3xl font-bold font-mono-numbers text-emerald-400">{stats.confirmedPaid}</div>
-                  <div className="text-[10px] text-emerald-400/80 mt-1">
-                    Arrecadação: R$ {stats.totalRevenue.toFixed(2)}
-                  </div>
-                </div>
-
-                <div className={`p-4 bg-neutral-900 border rounded-2xl ${stats.expiredPayment > 0 ? 'border-red-500/60 bg-red-500/10' : 'border-neutral-800'}`}>
-                  <div className="text-xs text-red-400 font-semibold mb-1 flex items-center gap-1.5">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Tempo Excedido</span>
-                  </div>
-                  <div className="text-3xl font-bold font-mono-numbers text-red-400">{stats.expiredPayment}</div>
-                  <div className="text-[10px] text-red-300/80 mt-1">
-                    Tempo limite de espera esgotado
-                  </div>
+                <div className="p-4 bg-neutral-900 col-span-2 lg:col-span-1">
+                  <div className="text-xs text-red-400">Expirados</div>
+                  <div className="text-2xl font-bold font-mono tabular-nums text-red-400 mt-1">{stats.expiredPayment}</div>
                 </div>
               </>
             ) : (
               <>
-                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
-                  <div className="text-xs text-neutral-400 font-semibold mb-1">Check-Ins Confirmados</div>
-                  <div className="text-3xl font-bold font-mono-numbers text-emerald-400">{stats.checkedIn}</div>
-                  <div className="text-[10px] text-emerald-400/80 mt-1">
-                    {stats.total > 0 ? ((stats.checkedIn / stats.total) * 100).toFixed(0) : 0}% presentes no evento
+                <div className="p-4 bg-neutral-900">
+                  <div className="text-xs text-neutral-400 mb-1">Congregações</div>
+                  <div className="space-y-0.5">
+                    {stats.topChurches.length === 0 ? (
+                      <span className="text-xs text-neutral-500">—</span>
+                    ) : (
+                      stats.topChurches.slice(0, 2).map(([ch, cnt]) => (
+                        <div key={ch} className="text-xs text-neutral-300 flex items-center justify-between gap-2">
+                          <span className="truncate">{ch}</span>
+                          <span className="font-mono tabular-nums text-amber-400">{cnt}</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
 
-                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
-                  <div className="text-xs text-neutral-400 font-semibold mb-1">Principais Congregações</div>
-                  <div className="space-y-1 mt-2">
-                    {stats.topChurches.slice(0, 2).map(([ch, cnt]) => (
-                      <div key={ch} className="text-xs text-neutral-300 flex items-center justify-between">
-                        <span className="truncate max-w-[140px]">{ch}</span>
-                        <span className="font-bold font-mono-numbers text-amber-400">{cnt}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
-                  <div className="text-xs text-neutral-400 font-semibold mb-1">Principais Áreas</div>
-                  <div className="space-y-1 mt-2">
-                    {stats.topAreas.slice(0, 2).map(([ar, cnt]) => (
-                      <div key={ar} className="text-xs text-neutral-300 flex items-center justify-between">
-                        <span className="truncate max-w-[140px]">{ar}</span>
-                        <span className="font-bold font-mono-numbers text-purple-400">{cnt}</span>
-                      </div>
-                    ))}
+                <div className="p-4 bg-neutral-900">
+                  <div className="text-xs text-neutral-400 mb-1">Áreas</div>
+                  <div className="space-y-0.5">
+                    {stats.topAreas.length === 0 ? (
+                      <span className="text-xs text-neutral-500">—</span>
+                    ) : (
+                      stats.topAreas.slice(0, 2).map(([ar, cnt]) => (
+                        <div key={ar} className="text-xs text-neutral-300 flex items-center justify-between gap-2">
+                          <span className="truncate">{ar}</span>
+                          <span className="font-mono tabular-nums text-purple-400">{cnt}</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               </>
             )}
           </div>
 
-          {/* Attendees Table Controls */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-neutral-900/60 border border-neutral-800 rounded-xl">
+          {/* Attendees Filter Controls */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 bg-neutral-900 border border-neutral-800 rounded-xl">
             <div className="relative w-full sm:w-80">
               <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Buscar por nome, telefone, igreja, código..."
+                placeholder="Buscar nome, telefone, igreja..."
                 value={attendeeSearch}
                 onChange={(e) => setAttendeeSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400"
+                className="w-full pl-9 pr-3 min-h-[40px] bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400"
               />
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto scrollbar-none pb-1 sm:pb-0">
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
               {selectedEventForAttendees.isPaid && (
                 <button
                   onClick={() => setAttendeeStatusFilter('waiting')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer ${
+                  className={`px-3 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1 cursor-pointer shrink-0 ${
                     attendeeStatusFilter === 'waiting'
-                      ? 'bg-amber-500 text-neutral-950'
-                      : 'bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
+                      ? 'bg-amber-400 text-neutral-950 font-bold'
+                      : 'text-amber-400 bg-neutral-950 border border-neutral-800'
                   }`}
                 >
-                  <Hourglass className="w-3.5 h-3.5" />
-                  <span>Fila de Pagamento ({stats.waitingPayment})</span>
+                  <span>Fila ({stats.waitingPayment})</span>
                 </button>
               )}
 
               {selectedEventForAttendees.isPaid && (
                 <button
                   onClick={() => setAttendeeStatusFilter('paid')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer ${
+                  className={`px-3 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1 cursor-pointer shrink-0 ${
                     attendeeStatusFilter === 'paid'
-                      ? 'bg-emerald-500 text-neutral-950'
+                      ? 'bg-emerald-500 text-neutral-950 font-bold'
                       : 'text-neutral-400 hover:text-neutral-200'
                   }`}
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Pagos ({stats.confirmedPaid})</span>
                 </button>
               )}
@@ -1403,34 +1353,32 @@ export const PublicEventsAdminView: React.FC = () => {
               {selectedEventForAttendees.isPaid && stats.expiredPayment > 0 && (
                 <button
                   onClick={() => setAttendeeStatusFilter('expired')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer ${
+                  className={`px-3 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1 cursor-pointer shrink-0 ${
                     attendeeStatusFilter === 'expired'
-                      ? 'bg-red-500 text-white'
-                      : 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20'
+                      ? 'bg-red-500 text-white font-bold'
+                      : 'text-red-400 bg-neutral-950 border border-neutral-800'
                   }`}
                 >
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  <span>Tempo Excedido ({stats.expiredPayment})</span>
+                  <span>Expirados ({stats.expiredPayment})</span>
                 </button>
               )}
 
               {selectedEventForAttendees.isPaid && (
                 <button
                   onClick={() => setAttendeeStatusFilter('rejected')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer ${
+                  className={`px-3 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center gap-1 cursor-pointer shrink-0 ${
                     attendeeStatusFilter === 'rejected'
                       ? 'bg-red-500/20 text-red-300 border border-red-500/40'
                       : 'text-neutral-400 hover:text-red-300'
                   }`}
                 >
-                  <X className="w-3.5 h-3.5 text-red-400" />
                   <span>Não Pagos ({stats.rejectedPayment})</span>
                 </button>
               )}
 
               <button
                 onClick={() => setAttendeeStatusFilter('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                className={`px-3 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
                   attendeeStatusFilter === 'all'
                     ? 'bg-neutral-800 text-neutral-100'
                     : 'text-neutral-400 hover:text-neutral-200'
@@ -1441,7 +1389,7 @@ export const PublicEventsAdminView: React.FC = () => {
 
               <button
                 onClick={() => setAttendeeStatusFilter('presente')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                className={`px-3 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
                   attendeeStatusFilter === 'presente'
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                     : 'text-neutral-400 hover:text-neutral-200'
@@ -1452,266 +1400,398 @@ export const PublicEventsAdminView: React.FC = () => {
             </div>
           </div>
 
-          {/* Attendees Table */}
+          {/* Attendees Responsive Cards (Mobile) & Table (Desktop) */}
           {filteredAttendees.length === 0 ? (
-            <div className="p-12 text-center bg-neutral-900/40 border border-neutral-800 rounded-2xl text-neutral-400 text-xs">
+            <div className="p-10 text-center bg-neutral-900 border border-neutral-800 rounded-2xl text-neutral-400 text-xs">
               Nenhum participante encontrado com os filtros atuais.
             </div>
           ) : (
-            <div className="overflow-x-auto bg-neutral-900 border border-neutral-800 rounded-2xl">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-neutral-950/80 border-b border-neutral-800 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
-                  <tr>
-                    <th className="p-3.5">Check-In</th>
-                    <th className="p-3.5">Código / Nome</th>
-                    {selectedEventForAttendees.isPaid && <th className="p-3.5">Status & Fila</th>}
-                    <th className="p-3.5">Telefone / WhatsApp</th>
-                    <th className="p-3.5">Igreja & Área</th>
-                    <th className="p-3.5 text-right">Ações & Verificação</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-800/60">
-                  {filteredAttendees.map((a) => {
-                    const isPresent = a.status === 'presente';
-                    const isWaiting = a.paymentStatus === 'waiting_confirmation';
-                    const isPaidConfirmed = a.paymentStatus === 'paid';
-                    const isRejected = a.paymentStatus === 'rejected';
+            <>
+              {/* Mobile Hairline Cards */}
+              <div className="md:hidden bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden divide-y divide-neutral-800">
+                {filteredAttendees.map((a) => {
+                  const isPresent = a.status === 'presente';
+                  const isWaiting = a.paymentStatus === 'waiting_confirmation';
+                  const isPaidConfirmed = a.paymentStatus === 'paid';
+                  const isRejected = a.paymentStatus === 'rejected';
+                  const now = Date.now();
+                  const expiresMs = a.paymentExpiresAt ? new Date(a.paymentExpiresAt).getTime() : now;
+                  const diffSec = Math.floor((expiresMs - now) / 1000);
+                  const isTimedOut = isWaiting && diffSec <= 0;
+                  const remMin = Math.floor(Math.max(0, diffSec) / 60);
+                  const remSec = Math.max(0, diffSec) % 60;
+                  const timerText = `${remMin.toString().padStart(2, '0')}:${remSec.toString().padStart(2, '0')}`;
 
-                    // Check timeout
-                    const now = Date.now();
-                    const expiresMs = a.paymentExpiresAt ? new Date(a.paymentExpiresAt).getTime() : now;
-                    const diffSec = Math.floor((expiresMs - now) / 1000);
-                    const isTimedOut = isWaiting && diffSec <= 0;
-                    const remMin = Math.floor(Math.max(0, diffSec) / 60);
-                    const remSec = Math.max(0, diffSec) % 60;
-                    const timerText = `${remMin.toString().padStart(2, '0')}:${remSec.toString().padStart(2, '0')}`;
+                  return (
+                    <div key={a.id} className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-bold text-sm text-neutral-100 truncate">{a.fullName}</div>
+                          <div className="text-[11px] text-neutral-400 mt-0.5 font-mono tabular-nums">
+                            {a.id} · {a.phone || 'Sem telefone'}
+                          </div>
+                          <div className="text-[11px] text-neutral-500 truncate mt-0.5">
+                            {a.church || 'IEADAM Petrópolis B'} · Área: {a.area || 'Geral'}
+                          </div>
+                        </div>
 
-                    return (
-                      <tr key={a.id} className={`hover:bg-neutral-850/50 transition-colors ${isWaiting ? 'bg-amber-500/5' : ''}`}>
-                        <td className="p-3.5">
-                          <button
-                            onClick={() => handleToggleCheckIn(a)}
-                            className={`p-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
-                              isPresent
-                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'
-                            }`}
-                            title={isPresent ? 'Check-in confirmado' : 'Marcar check-in'}
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            <span className="hidden sm:inline">{isPresent ? 'Presente' : 'Check-in'}</span>
-                          </button>
-                        </td>
+                        <button
+                          onClick={() => handleToggleCheckIn(a)}
+                          className={`px-3 min-h-[36px] rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                            isPresent
+                              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-neutral-800 text-neutral-300'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{isPresent ? 'Presente' : 'Check-in'}</span>
+                        </button>
+                      </div>
 
-                        <td className="p-3.5">
-                          <div className="font-bold text-neutral-100">{a.fullName}</div>
-                          <div className="text-[10px] font-mono-numbers text-amber-400">{a.id}</div>
-                          {a.email && <div className="text-[10px] text-neutral-400">{a.email}</div>}
-                        </td>
+                      {selectedEventForAttendees.isPaid && (
+                        <div className="text-xs">
+                          {isWaiting && (
+                            <span className={isTimedOut ? 'text-red-400 font-semibold' : 'text-amber-400 font-semibold'}>
+                              {isTimedOut ? 'Tempo esgotado' : `Aguardando pagamento (${timerText})`}
+                              {' · '}
+                              R$ {(a.ticketPrice || 0).toFixed(2)}
+                            </span>
+                          )}
+                          {isPaidConfirmed && <span className="text-emerald-400 font-semibold">Pagamento confirmado</span>}
+                          {isRejected && <span className="text-red-400 font-semibold">Não pago / Cancelado</span>}
+                        </div>
+                      )}
 
-                        {selectedEventForAttendees.isPaid && (
-                          <td className="p-3.5">
-                            {isWaiting && (
-                              <div className="space-y-1">
-                                {isTimedOut ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 font-bold text-[10px] uppercase animate-pulse">
-                                    <AlertCircle className="w-3 h-3" />
-                                    Tempo Máximo Atingido
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 font-bold text-[10px] uppercase">
-                                    <Hourglass className="w-3 h-3 animate-spin" />
-                                    Aguardando ({timerText})
-                                  </span>
-                                )}
-                                <div className="text-[10px] text-neutral-400">
-                                  Via {a.paymentType === 'whatsapp' ? 'WhatsApp' : 'Pix Copie e Cole'} • R$ {(a.ticketPrice || 0).toFixed(2)}
-                                </div>
-                                {a.extendedMinutes && a.extendedMinutes > 0 && (
-                                  <div className="text-[9px] text-amber-400/80 font-mono">
-                                    +{a.extendedMinutes}m extras adicionados
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                      <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {selectedEventForAttendees.isPaid && (
+                            <>
+                              {isWaiting && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleConfirmPayment(a)}
+                                    className="px-3 min-h-[36px] bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer"
+                                  >
+                                    Pagou
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRejectPayment(a)}
+                                    className="px-3 min-h-[36px] bg-neutral-800 text-red-300 border border-neutral-700 rounded-xl text-xs font-medium cursor-pointer"
+                                  >
+                                    Não Pagou
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleExtendWaitTime(a)}
+                                    className="px-2.5 min-h-[36px] bg-neutral-800 text-amber-300 rounded-xl text-xs font-semibold cursor-pointer"
+                                  >
+                                    +5m
+                                  </button>
+                                </>
+                              )}
+                              {isPaidConfirmed && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleResetToWaiting(a)}
+                                    className="px-3 min-h-[36px] bg-neutral-800 text-neutral-200 rounded-xl text-xs font-medium cursor-pointer"
+                                  >
+                                    Reverter p/ Fila
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRejectPayment(a)}
+                                    className="px-3 min-h-[36px] bg-neutral-800 text-red-300 rounded-xl text-xs font-medium cursor-pointer"
+                                  >
+                                    Não Pagou
+                                  </button>
+                                </>
+                              )}
+                              {isRejected && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleConfirmPayment(a)}
+                                    className="px-3 min-h-[36px] bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer"
+                                  >
+                                    Pagou
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleResetToWaiting(a)}
+                                    className="px-3 min-h-[36px] bg-neutral-800 text-neutral-200 rounded-xl text-xs font-medium cursor-pointer"
+                                  >
+                                    Mover p/ Fila
+                                  </button>
+                                </>
+                              )}
+                              {!isWaiting && !isPaidConfirmed && !isRejected && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleConfirmPayment(a)}
+                                  className="px-3 min-h-[36px] bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer"
+                                >
+                                  Pagou
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
 
-                            {isPaidConfirmed && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 font-bold text-[10px] uppercase">
-                                <CheckCircle2 className="w-3 h-3" />
-                                Pagamento Confirmado
-                              </span>
-                            )}
-
-                            {isRejected && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 font-bold text-[10px] uppercase">
-                                <X className="w-3 h-3" />
-                                Não Pago / Cancelado
-                              </span>
-                            )}
-
-                            {!isWaiting && !isPaidConfirmed && !isRejected && (
-                              <span className="text-[10px] text-neutral-400 uppercase font-semibold">
-                                {a.paymentStatus || 'Gratuito'}
-                              </span>
-                            )}
-                          </td>
-                        )}
-
-                        <td className="p-3.5">
-                          <div className="font-mono-numbers text-neutral-200">{a.phone}</div>
+                        <div className="flex items-center gap-1">
                           {a.phone && (
                             <a
                               href={`https://wa.me/55${a.phone.replace(/\D/g, '')}`}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-[10px] text-emerald-400 hover:underline inline-flex items-center gap-1 mt-0.5"
+                              className="p-2 min-h-[36px] min-w-[36px] flex items-center justify-center text-emerald-400 hover:bg-neutral-800 rounded-lg"
+                              title="WhatsApp"
                             >
-                              <Phone className="w-2.5 h-2.5" />
-                              WhatsApp
+                              <Phone className="w-4 h-4" />
                             </a>
                           )}
-                        </td>
+                          <button
+                            onClick={() => exportRegistrationTicketPDF(a, selectedEventForAttendees)}
+                            className="p-2 min-h-[36px] min-w-[36px] flex items-center justify-center text-neutral-400 hover:text-amber-400 rounded-lg cursor-pointer"
+                            title="Baixar Credencial"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAttendee(a)}
+                            className="p-2 min-h-[36px] min-w-[36px] flex items-center justify-center text-neutral-400 hover:text-red-400 rounded-lg cursor-pointer"
+                            title="Excluir"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
-                        <td className="p-3.5">
-                          <div className="text-neutral-200">{a.church || 'IEADAM Petrópolis B'}</div>
-                          <div className="text-[10px] text-neutral-400">Área: {a.area || 'Geral'}</div>
-                        </td>
+              {/* Desktop Table */}
+              <div className="hidden md:block overflow-x-auto bg-neutral-900 border border-neutral-800 rounded-2xl">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-neutral-950/80 border-b border-neutral-800 text-xs font-semibold text-neutral-400">
+                    <tr>
+                      <th className="p-3.5">Check-In</th>
+                      <th className="p-3.5">Participante</th>
+                      {selectedEventForAttendees.isPaid && <th className="p-3.5">Pagamento</th>}
+                      <th className="p-3.5">Telefone</th>
+                      <th className="p-3.5">Igreja / Área</th>
+                      <th className="p-3.5 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-800">
+                    {filteredAttendees.map((a) => {
+                      const isPresent = a.status === 'presente';
+                      const isWaiting = a.paymentStatus === 'waiting_confirmation';
+                      const isPaidConfirmed = a.paymentStatus === 'paid';
+                      const isRejected = a.paymentStatus === 'rejected';
 
-                        <td className="p-3.5 text-right">
-                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                            {/* Verification Queue Action Buttons for Paid Events */}
-                            {selectedEventForAttendees.isPaid && (
-                              <>
-                                {isWaiting && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleConfirmPayment(a)}
-                                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 cursor-pointer"
-                                      title="Confirmar recebimento do pagamento"
-                                    >
-                                      <Check className="w-3.5 h-3.5" />
-                                      <span>Pagou</span>
-                                    </button>
+                      const now = Date.now();
+                      const expiresMs = a.paymentExpiresAt ? new Date(a.paymentExpiresAt).getTime() : now;
+                      const diffSec = Math.floor((expiresMs - now) / 1000);
+                      const isTimedOut = isWaiting && diffSec <= 0;
+                      const remMin = Math.floor(Math.max(0, diffSec) / 60);
+                      const remSec = Math.max(0, diffSec) % 60;
+                      const timerText = `${remMin.toString().padStart(2, '0')}:${remSec.toString().padStart(2, '0')}`;
 
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRejectPayment(a)}
-                                      className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-300 rounded-lg text-xs font-medium transition-all flex items-center gap-1 cursor-pointer"
-                                      title="Não pagou / Cancelar inscrição"
-                                    >
-                                      <X className="w-3.5 h-3.5" />
-                                      <span>Não Pagou</span>
-                                    </button>
+                      return (
+                        <tr key={a.id} className="hover:bg-neutral-800/30 transition-colors">
+                          <td className="p-3.5">
+                            <button
+                              onClick={() => handleToggleCheckIn(a)}
+                              className={`px-2.5 min-h-[34px] rounded-lg transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
+                                isPresent
+                                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'
+                              }`}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>{isPresent ? 'Presente' : 'Check-in'}</span>
+                            </button>
+                          </td>
 
-                                    <button
-                                      type="button"
-                                      onClick={() => handleExtendWaitTime(a)}
-                                      className="px-2 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-semibold transition-all flex items-center gap-0.5 cursor-pointer"
-                                      title="Aumentar tempo de espera em +5 minutos"
-                                    >
-                                      <span>+5m</span>
-                                    </button>
-                                  </>
-                                )}
+                          <td className="p-3.5">
+                            <div className="font-semibold text-neutral-100">{a.fullName}</div>
+                            <div className="text-[11px] font-mono tabular-nums text-amber-400">{a.id}</div>
+                            {a.email && <div className="text-[11px] text-neutral-500">{a.email}</div>}
+                          </td>
 
-                                {isPaidConfirmed && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleResetToWaiting(a)}
-                                      className="px-2 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-medium transition-all flex items-center gap-1 border border-neutral-700 cursor-pointer"
-                                      title="Reverter status para Fila de Espera"
-                                    >
-                                      <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                                      <span>Reverter p/ Fila</span>
-                                    </button>
+                          {selectedEventForAttendees.isPaid && (
+                            <td className="p-3.5">
+                              {isWaiting && (
+                                <div className="space-y-0.5">
+                                  <div className={`font-semibold text-xs ${isTimedOut ? 'text-red-400' : 'text-amber-400 font-mono tabular-nums'}`}>
+                                    {isTimedOut ? 'Tempo esgotado' : `Aguardando (${timerText})`}
+                                  </div>
+                                  <div className="text-[11px] text-neutral-400 font-mono tabular-nums">
+                                    {a.paymentType === 'whatsapp' ? 'WhatsApp' : 'Pix'} · R$ {(a.ticketPrice || 0).toFixed(2)}
+                                  </div>
+                                </div>
+                              )}
 
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRejectPayment(a)}
-                                      className="px-2 py-1.5 bg-red-950/60 hover:bg-red-900/80 border border-red-800/60 text-red-300 rounded-lg text-xs font-medium transition-all flex items-center gap-1 cursor-pointer"
-                                      title="Mudar para Não Pagou"
-                                    >
-                                      <X className="w-3.5 h-3.5" />
-                                      <span>Não Pagou</span>
-                                    </button>
-                                  </>
-                                )}
+                              {isPaidConfirmed && (
+                                <span className="text-emerald-400 font-semibold text-xs">
+                                  Confirmado
+                                </span>
+                              )}
 
-                                {isRejected && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleConfirmPayment(a)}
-                                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 cursor-pointer"
-                                      title="Confirmar recebimento do pagamento"
-                                    >
-                                      <Check className="w-3.5 h-3.5" />
-                                      <span>Pagou</span>
-                                    </button>
+                              {isRejected && (
+                                <span className="text-red-400 font-semibold text-xs">
+                                  Não Pago
+                                </span>
+                              )}
 
-                                    <button
-                                      type="button"
-                                      onClick={() => handleResetToWaiting(a)}
-                                      className="px-2 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-medium transition-all flex items-center gap-1 border border-neutral-700 cursor-pointer"
-                                      title="Mover para Fila de Espera"
-                                    >
-                                      <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                                      <span>Mover p/ Fila</span>
-                                    </button>
-                                  </>
-                                )}
+                              {!isWaiting && !isPaidConfirmed && !isRejected && (
+                                <span className="text-neutral-400 text-xs">
+                                  {a.paymentStatus || 'Gratuito'}
+                                </span>
+                              )}
+                            </td>
+                          )}
 
-                                {!isWaiting && !isPaidConfirmed && !isRejected && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleConfirmPayment(a)}
-                                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 cursor-pointer"
-                                      title="Confirmar pagamento deste participante"
-                                    >
-                                      <Check className="w-3.5 h-3.5" />
-                                      <span>Pagou</span>
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handleResetToWaiting(a)}
-                                      className="px-2 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer"
-                                      title="Colocar na fila de espera"
-                                    >
-                                      <Hourglass className="w-3.5 h-3.5" />
-                                      <span>Pôr na Fila</span>
-                                    </button>
-                                  </>
-                                )}
-                              </>
+                          <td className="p-3.5">
+                            <div className="font-mono tabular-nums text-neutral-200">{a.phone}</div>
+                            {a.phone && (
+                              <a
+                                href={`https://wa.me/55${a.phone.replace(/\D/g, '')}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] text-emerald-400 hover:underline inline-flex items-center gap-1 mt-0.5"
+                              >
+                                <Phone className="w-3 h-3" />
+                                WhatsApp
+                              </a>
                             )}
+                          </td>
 
-                            <button
-                              onClick={() => exportRegistrationTicketPDF(a, selectedEventForAttendees)}
-                              className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
-                              title="Baixar Credencial PDF com QR Code"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
+                          <td className="p-3.5">
+                            <div className="text-neutral-200">{a.church || 'IEADAM Petrópolis B'}</div>
+                            <div className="text-[11px] text-neutral-500">Área: {a.area || 'Geral'}</div>
+                          </td>
 
-                            <button
-                              onClick={() => handleDeleteAttendee(a)}
-                              className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-lg transition-colors cursor-pointer"
-                              title="Excluir inscrição permanentemente"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          <td className="p-3.5 text-right">
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                              {selectedEventForAttendees.isPaid && (
+                                <>
+                                  {isWaiting && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleConfirmPayment(a)}
+                                        className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                        <span>Pagou</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRejectPayment(a)}
+                                        className="px-2 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-red-300 rounded-lg text-xs font-medium flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                        <span>Não Pagou</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleExtendWaitTime(a)}
+                                        className="px-2 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-amber-300 rounded-lg text-xs font-semibold cursor-pointer"
+                                        title="Adicionar +5 minutos"
+                                      >
+                                        +5m
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {isPaidConfirmed && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleResetToWaiting(a)}
+                                        className="px-2 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-medium flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                                        <span>Fila</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRejectPayment(a)}
+                                        className="px-2 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-red-300 rounded-lg text-xs font-medium flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                        <span>Não Pagou</span>
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {isRejected && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleConfirmPayment(a)}
+                                        className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                        <span>Pagou</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleResetToWaiting(a)}
+                                        className="px-2 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-medium flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                                        <span>Fila</span>
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {!isWaiting && !isPaidConfirmed && !isRejected && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleConfirmPayment(a)}
+                                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                      <span>Pagou</span>
+                                    </button>
+                                  )}
+                                </>
+                              )}
+
+                              <button
+                                onClick={() => exportRegistrationTicketPDF(a, selectedEventForAttendees)}
+                                className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
+                                title="Baixar Credencial PDF"
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+
+                              <button
+                                onClick={() => handleDeleteAttendee(a)}
+                                className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-lg transition-colors cursor-pointer"
+                                title="Excluir inscrição"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       ) : (
@@ -1760,31 +1840,25 @@ export const PublicEventsAdminView: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Header badges */}
-                      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`px-2 py-0.5 text-[10px] font-bold rounded-full uppercase ${
-                              isOpen
-                                ? 'bg-emerald-500/15 text-emerald-400'
-                                : 'bg-neutral-800 text-neutral-400'
-                            }`}
-                          >
-                            {ev.status === 'aberto' ? 'Inscrições Abertas' : ev.status === 'em_breve' ? 'Em Breve' : 'Encerrado'}
+                      {/* Header metadata */}
+                      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap text-xs">
+                        <div className="flex items-center gap-1.5 font-medium">
+                          <span className={isOpen ? 'text-emerald-400' : 'text-neutral-400'}>
+                            {ev.status === 'aberto' ? 'Aberto' : ev.status === 'em_breve' ? 'Em breve' : 'Encerrado'}
                           </span>
+                          <span className="text-neutral-600">·</span>
                           {ev.isPaid ? (
-                            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full uppercase bg-amber-500/15 text-amber-400">
-                              Pago · R$ {(ev.price || 0).toFixed(2)}
+                            <span className="text-amber-400 font-mono tabular-nums">
+                              R$ {(ev.price || 0).toFixed(2)}
                             </span>
                           ) : (
-                            <span className="px-2 py-0.5 text-[10px] font-bold rounded-full uppercase bg-neutral-800 text-neutral-400">
+                            <span className="text-neutral-400 font-mono tabular-nums">
                               {summary?.total || 0} inscrito(s)
                             </span>
                           )}
                         </div>
 
-                        <span className="text-[11px] text-neutral-400 font-mono-numbers flex items-center gap-1">
-                          <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="text-neutral-400 font-mono tabular-nums">
                           {formatDateBR(ev.date)} · {ev.time}
                         </span>
                       </div>
@@ -1792,7 +1866,7 @@ export const PublicEventsAdminView: React.FC = () => {
                       {/* Title & Logistics */}
                       <h3 className="font-bold text-base text-neutral-100 mb-1">{ev.name}</h3>
                       <div className="text-xs text-neutral-400 flex items-center gap-1.5 mb-2">
-                        <MapPin className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
+                        <MapPin className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
                         <span className="truncate">{ev.location}</span>
                       </div>
 
@@ -1802,33 +1876,28 @@ export const PublicEventsAdminView: React.FC = () => {
                         </p>
                       )}
 
-                      {/* Live Cashbox Mini Strip for Paid Events */}
+                      {/* Live Cashbox Strip for Paid Events */}
                       {ev.isPaid && (
-                        <div className="mt-2 p-3 bg-emerald-950/25 border border-emerald-500/25 rounded-xl flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <Wallet className="w-4 h-4 text-emerald-400 shrink-0" />
-                            <div>
-                              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                                Caixa do Evento
-                              </div>
-                              <div className="text-sm font-bold font-mono-numbers text-emerald-300">
-                                R$ {(summary?.cashboxBalance || 0).toFixed(2)}
-                              </div>
+                        <div className="mt-2 py-2.5 px-3 bg-neutral-950 border border-neutral-800 rounded-xl flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[11px] text-neutral-400">Caixa</div>
+                            <div className="text-sm font-bold font-mono tabular-nums text-emerald-400">
+                              R$ {(summary?.cashboxBalance || 0).toFixed(2)}
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-3 text-[11px] font-mono-numbers">
+                          <div className="flex items-center gap-3 text-xs font-mono tabular-nums">
                             <div className="text-right">
                               <div className="font-bold text-emerald-400">{summary?.paid || 0}</div>
-                              <div className="text-[9px] text-neutral-400 uppercase">Pagos</div>
+                              <div className="text-[10px] text-neutral-500">Pagos</div>
                             </div>
                             <div className="text-right">
                               <div className="font-bold text-amber-400">{summary?.waiting || 0}</div>
-                              <div className="text-[9px] text-neutral-400 uppercase">Na fila</div>
+                              <div className="text-[10px] text-neutral-500">Fila</div>
                             </div>
                             <div className="text-right">
                               <div className="font-bold text-neutral-200">{summary?.total || 0}</div>
-                              <div className="text-[9px] text-neutral-400 uppercase">Inscritos</div>
+                              <div className="text-[10px] text-neutral-500">Total</div>
                             </div>
                           </div>
                         </div>
@@ -1836,12 +1905,11 @@ export const PublicEventsAdminView: React.FC = () => {
                     </div>
 
                     {/* Bottom Actions */}
-                    <div className="pt-3 border-t border-neutral-800/80 flex flex-wrap items-center justify-between gap-2">
+                    <div className="pt-3 border-t border-neutral-800 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => handleCopyLink(ev)}
-                          className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors active:scale-95 touch-manipulation cursor-pointer"
-                          title="Copiar link do formulário público"
+                          className="px-3 min-h-[38px] bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors active:scale-95 touch-manipulation cursor-pointer whitespace-nowrap"
                         >
                           <Copy className="w-3.5 h-3.5" />
                           <span>Copiar Link</span>
@@ -1849,8 +1917,8 @@ export const PublicEventsAdminView: React.FC = () => {
 
                         <button
                           onClick={() => handleOpenPreview(ev)}
-                          className="p-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl transition-colors"
-                          title="Visualizar formulário público como convidado"
+                          className="min-w-[38px] min-h-[38px] bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl flex items-center justify-center transition-colors cursor-pointer"
+                          title="Abrir página pública"
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
                         </button>
@@ -1860,8 +1928,7 @@ export const PublicEventsAdminView: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handleOpenQrScanner(ev)}
-                          className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-emerald-500/30 transition-colors cursor-pointer whitespace-nowrap"
-                          title="Abrir leitor QR para credenciar participantes deste evento"
+                          className="px-3 min-h-[38px] bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-emerald-500/30 transition-colors cursor-pointer whitespace-nowrap"
                         >
                           <ScanLine className="w-3.5 h-3.5" />
                           <span>Ler QR</span>
@@ -1869,28 +1936,39 @@ export const PublicEventsAdminView: React.FC = () => {
 
                         <button
                           onClick={() => setSelectedEventForAttendees(ev)}
-                          className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700 transition-colors cursor-pointer whitespace-nowrap"
+                          className="px-3 min-h-[38px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-neutral-700 transition-colors cursor-pointer whitespace-nowrap"
                         >
                           <Users className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Ver Inscritos</span>
+                          <span>Inscritos</span>
                         </button>
 
                         <button
                           onClick={() => handleOpenEdit(ev)}
-                          className="p-2 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded-xl transition-colors"
-                          title="Editar evento e formulário"
+                          className="min-w-[38px] min-h-[38px] hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded-xl flex items-center justify-center transition-colors cursor-pointer"
+                          title="Editar"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
 
                         <button
                           onClick={async () => {
-                            if (window.confirm(`Excluir evento "${ev.name}" e todas as suas inscrições?`)) {
-                              await api.deletePublicEvent(ev.id);
+                            const confirmed = await requestConfirm({
+                              title: 'Excluir evento público',
+                              message: `Excluir evento "${ev.name}" e todas as suas inscrições?`,
+                              confirmLabel: 'Excluir evento',
+                              danger: true,
+                            });
+                            if (confirmed) {
+                              try {
+                                await api.deletePublicEvent(ev.id);
+                                notify(`Evento "${ev.name}" excluído.`, 'info');
+                              } catch {
+                                notify('Erro ao excluir evento.', 'error');
+                              }
                             }
                           }}
-                          className="p-2 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-xl transition-colors"
-                          title="Excluir evento"
+                          className="min-w-[38px] min-h-[38px] hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-xl flex items-center justify-center transition-colors cursor-pointer"
+                          title="Excluir"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

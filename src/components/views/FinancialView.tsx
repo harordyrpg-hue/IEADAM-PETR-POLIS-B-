@@ -66,6 +66,7 @@ export const FinancialView: React.FC = () => {
     deleteFinancialBill,
     settleFinancialBill,
     notify,
+    requestConfirm,
   } = useApp();
 
   // Active inner sub-tab
@@ -537,39 +538,37 @@ export const FinancialView: React.FC = () => {
   return (
     <div className="space-y-6 pb-20">
       {/* 1. Header Banner & Quick Actions */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 bg-gradient-to-r from-neutral-900 via-neutral-900/90 to-neutral-950 border border-neutral-800 rounded-2xl">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
-            <Building className="w-4 h-4" />
-            IEADAM Petrópolis B · PT-B Mídia
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 sm:p-5 bg-neutral-900 border border-neutral-800 rounded-2xl">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+            <DollarSign className="w-5 h-5" />
           </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-neutral-100 tracking-tight flex items-center gap-2">
-            <DollarSign className="w-6 h-6 text-amber-400" />
-            Livro Financeiro & Caixa
-          </h1>
-          <p className="text-xs text-neutral-400 mt-1">
-            Controle profissional de entradas, saídas, contas a pagar/receber e previsões de gastos futuros.
-          </p>
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-xl font-bold text-neutral-100 tracking-tight truncate">
+              Livro Financeiro
+            </h1>
+            <p className="text-xs text-neutral-400 mt-0.5 truncate">
+              Entradas, saídas, contas e previsões de caixa.
+            </p>
+          </div>
         </div>
 
         {/* Export & New Entry Buttons */}
-        <div className="flex flex-wrap items-center gap-2 pt-2 md:pt-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             onClick={handleExportPDF}
-            className="flex items-center gap-2 px-3.5 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl border border-neutral-700 shadow-sm transition-colors active:scale-95 touch-manipulation"
-            title="Baixar extrato completo em documento PDF"
+            className="flex items-center gap-1.5 px-3 min-h-[40px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl border border-neutral-700 transition-colors active:scale-95 cursor-pointer whitespace-nowrap"
           >
             <Download className="w-3.5 h-3.5 text-red-400" />
-            <span>Extrato PDF</span>
+            <span>PDF</span>
           </button>
 
           <button
             onClick={handleExportImage}
-            className="flex items-center gap-2 px-3.5 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl border border-neutral-700 shadow-sm transition-colors active:scale-95 touch-manipulation"
-            title="Baixar card em imagem de alta definição para envio no WhatsApp"
+            className="flex items-center gap-1.5 px-3 min-h-[40px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl border border-neutral-700 transition-colors active:scale-95 cursor-pointer whitespace-nowrap"
           >
-            <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
-            <span>Extrato Imagem (PNG)</span>
+            <ImageIcon className="w-3.5 h-3.5 text-sky-400" />
+            <span>Imagem</span>
           </button>
 
           <button
@@ -578,10 +577,10 @@ export const FinancialView: React.FC = () => {
               setTxType('entrada');
               setIsTxModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md transition-colors active:scale-95 touch-manipulation"
+            className="flex items-center gap-1.5 px-3.5 min-h-[40px] bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-colors active:scale-95 cursor-pointer whitespace-nowrap"
           >
             <ArrowUpRight className="w-4 h-4" />
-            <span>+ Nova Entrada</span>
+            <span>Entrada</span>
           </button>
 
           <button
@@ -590,161 +589,113 @@ export const FinancialView: React.FC = () => {
               setTxType('saida');
               setIsTxModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl shadow-md transition-colors active:scale-95 touch-manipulation"
+            className="flex items-center gap-1.5 px-3.5 min-h-[40px] bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-colors active:scale-95 cursor-pointer whitespace-nowrap"
           >
             <ArrowDownLeft className="w-4 h-4" />
-            <span>- Nova Saída</span>
+            <span>Saída</span>
           </button>
         </div>
       </div>
 
-      {/* 2. KPI Cards Grid: Saldo Atual, Entradas, Saídas, Contas a Pagar, Contas a Receber */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Saldo Atual Consolidado */}
-        <div className="p-5 bg-neutral-900/90 border border-neutral-800 rounded-2xl relative overflow-hidden group">
-          <div
-            className={`absolute top-0 left-0 right-0 h-1.5 ${
-              summary.currentBalance >= 0 ? 'bg-emerald-500' : 'bg-red-500'
-            }`}
-          />
-          <div className="flex items-center justify-between text-neutral-400 text-xs font-semibold mb-2">
-            <span>Saldo Atual em Caixa</span>
-            <div className={`p-2 rounded-xl ${summary.currentBalance >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <div className={`text-2xl sm:text-3xl font-bold tracking-tight font-mono-numbers ${summary.currentBalance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+      {/* 2. KPI Hairline Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-neutral-800 border border-neutral-800 rounded-2xl overflow-hidden">
+        <div className="p-4 bg-neutral-900">
+          <div className="text-xs text-neutral-400">Saldo em caixa</div>
+          <div className={`text-xl sm:text-2xl font-bold font-mono tabular-nums mt-1 ${summary.currentBalance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
             {formatCurrency(summary.currentBalance)}
           </div>
-          <p className="text-[11px] text-neutral-400 mt-2 flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            Disponível para uso imediato
-          </p>
+          <div className="text-[11px] text-neutral-500 mt-0.5">Disponível</div>
         </div>
 
-        {/* Card 2: Total Entradas (Período) */}
-        <div className="p-5 bg-neutral-900/90 border border-neutral-800 rounded-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-1.5 bg-emerald-500/60" />
-          <div className="flex items-center justify-between text-neutral-400 text-xs font-semibold mb-2">
-            <span>Entradas ({periodBounds.label})</span>
-            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
-              <TrendingUp className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl sm:text-3xl font-bold tracking-tight text-neutral-100 font-mono-numbers">
+        <div className="p-4 bg-neutral-900">
+          <div className="text-xs text-neutral-400 truncate">Entradas ({periodBounds.label})</div>
+          <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-neutral-100 mt-1">
             {formatCurrency(summary.totalIncome)}
           </div>
-          <p className="text-[11px] text-emerald-400 mt-2 flex items-center gap-1 font-semibold">
-            <ArrowUpRight className="w-3.5 h-3.5" />
-            {filteredTransactions.filter((t) => t.type === 'entrada').length} recebimentos registrados
-          </p>
+          <div className="text-[11px] text-emerald-400 mt-0.5 font-mono tabular-nums">
+            {filteredTransactions.filter((t) => t.type === 'entrada').length} registro(s)
+          </div>
         </div>
 
-        {/* Card 3: Total Saídas (Período) */}
-        <div className="p-5 bg-neutral-900/90 border border-neutral-800 rounded-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-1.5 bg-rose-500/60" />
-          <div className="flex items-center justify-between text-neutral-400 text-xs font-semibold mb-2">
-            <span>Saídas ({periodBounds.label})</span>
-            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400">
-              <TrendingDown className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl sm:text-3xl font-bold tracking-tight text-neutral-100 font-mono-numbers">
+        <div className="p-4 bg-neutral-900">
+          <div className="text-xs text-neutral-400 truncate">Saídas ({periodBounds.label})</div>
+          <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-neutral-100 mt-1">
             {formatCurrency(summary.totalExpense)}
           </div>
-          <p className="text-[11px] text-rose-400 mt-2 flex items-center gap-1 font-semibold">
-            <ArrowDownLeft className="w-3.5 h-3.5" />
-            {filteredTransactions.filter((t) => t.type === 'saida').length} despesas realizadas
-          </p>
+          <div className="text-[11px] text-rose-400 mt-0.5 font-mono tabular-nums">
+            {filteredTransactions.filter((t) => t.type === 'saida').length} registro(s)
+          </div>
         </div>
 
-        {/* Card 4: Contas a Pagar & Gastos Futuros */}
-        <div className="p-5 bg-neutral-900/90 border border-neutral-800 rounded-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-1.5 bg-amber-500/60" />
-          <div className="flex items-center justify-between text-neutral-400 text-xs font-semibold mb-2">
-            <span>Contas a Pagar Pendentes</span>
-            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400">
-              <Clock className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl sm:text-3xl font-bold tracking-tight text-amber-400 font-mono-numbers">
+        <div className="p-4 bg-neutral-900">
+          <div className="text-xs text-neutral-400">A pagar</div>
+          <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-amber-400 mt-1">
             {formatCurrency(summary.pendingPayable)}
           </div>
-          <p className="text-[11px] text-neutral-400 mt-2 flex items-center gap-1">
-            <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-            {financialBills.filter((b) => b.type === 'a_pagar' && b.status === 'pendente').length} contas aguardando quitação
-          </p>
+          <div className="text-[11px] text-neutral-500 mt-0.5 font-mono tabular-nums">
+            {financialBills.filter((b) => b.type === 'a_pagar' && b.status === 'pendente').length} pendente(s)
+          </div>
         </div>
       </div>
 
-      {/* 3. Sub-Tabs Navigation (Livro Caixa, Contas a Pagar/Receber, Gastos Futuros, Categorias) */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 pb-3">
-        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-neutral-950 rounded-xl border border-neutral-800">
+      {/* 3. Sub-Tabs Navigation */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-1 p-1 bg-neutral-900 rounded-xl border border-neutral-800 overflow-x-auto no-scrollbar">
           <button
             onClick={() => setActiveSubTab('ledger')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 ${
+            className={`px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               activeSubTab === 'ledger'
-                ? 'bg-amber-400 text-neutral-950 shadow-sm'
-                : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900'
+                ? 'bg-amber-400 text-neutral-950 font-bold'
+                : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Extrato / Livro Caixa</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-neutral-900/40">
-              {filteredTransactions.length}
-            </span>
+            <span>Livro Caixa ({filteredTransactions.length})</span>
           </button>
 
           <button
             onClick={() => setActiveSubTab('bills')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 ${
+            className={`px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               activeSubTab === 'bills'
-                ? 'bg-amber-400 text-neutral-950 shadow-sm'
-                : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900'
+                ? 'bg-amber-400 text-neutral-950 font-bold'
+                : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
             <Clock className="w-3.5 h-3.5" />
-            <span>Contas a Pagar & Receber</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-neutral-900/40">
-              {financialBills.filter((b) => b.status === 'pendente').length}
-            </span>
+            <span>Contas ({financialBills.filter((b) => b.status === 'pendente').length})</span>
           </button>
 
           <button
             onClick={() => setActiveSubTab('forecast')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 ${
+            className={`px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               activeSubTab === 'forecast'
-                ? 'bg-amber-400 text-neutral-950 shadow-sm'
-                : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900'
+                ? 'bg-amber-400 text-neutral-950 font-bold'
+                : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
             <CalendarDays className="w-3.5 h-3.5" />
-            <span>Gastos Futuros & Previsões</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-neutral-900/40">
-              {futureExpensesWithDate.length + futureExpensesWithoutForecast.length}
-            </span>
+            <span>Previsões ({futureExpensesWithDate.length + futureExpensesWithoutForecast.length})</span>
           </button>
 
           <button
             onClick={() => setActiveSubTab('categories')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 ${
+            className={`px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               activeSubTab === 'categories'
-                ? 'bg-amber-400 text-neutral-950 shadow-sm'
-                : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900'
+                ? 'bg-amber-400 text-neutral-950 font-bold'
+                : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
             <PieChart className="w-3.5 h-3.5" />
-            <span>Gastos Mensais por Categoria</span>
+            <span>Categorias</span>
           </button>
         </div>
 
         {/* Period Selector Dropdown */}
-        <div className="flex items-center gap-2">
-          <Calendar className="w-3.5 h-3.5 text-neutral-400" />
+        <div className="flex items-center gap-2 self-start sm:self-auto">
           <select
             value={periodFilter}
             onChange={(e) => setPeriodFilter(e.target.value as any)}
-            className="px-3 py-1.5 bg-neutral-900 border border-neutral-800 rounded-xl text-neutral-200 text-xs font-semibold focus:outline-none focus:border-amber-400 cursor-pointer"
+            className="px-3 min-h-[40px] bg-neutral-900 border border-neutral-800 rounded-xl text-neutral-200 text-xs font-semibold focus:outline-none focus:border-amber-400 cursor-pointer"
           >
             <option value="this_month">Este Mês</option>
             <option value="last_month">Mês Anterior</option>
@@ -755,85 +706,68 @@ export const FinancialView: React.FC = () => {
         </div>
       </div>
 
-      {/* 4. CONTENT SECTIONS ACCORDING TO SUB-TAB */}
-
-      {/* SUB-TAB 1: LIVRO CAIXA & EXTRATO */}
+      {/* SUB-TAB 1: LIVRO CAIXA */}
       {activeSubTab === 'ledger' && (
         <div className="space-y-4">
-          {/* Filters Bar: Search + Type + Category */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-neutral-900/60 border border-neutral-800 rounded-xl">
-            {/* Search Input */}
-            <div className="relative w-full sm:w-72">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-3 bg-neutral-900 border border-neutral-800 rounded-xl">
+            <div className="relative flex-1">
               <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Buscar por motivo, origem, destino..."
+                placeholder="Buscar lançamento..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400"
+                className="w-full pl-9 pr-3 min-h-[40px] bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400"
               />
             </div>
 
-            {/* Type Filter Buttons */}
-            <div className="flex items-center gap-1.5 w-full sm:w-auto">
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setTypeFilter('all')}
-                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  typeFilter === 'all'
-                    ? 'bg-neutral-800 text-neutral-100'
-                    : 'text-neutral-400 hover:text-neutral-200'
+                className={`flex-1 sm:flex-none px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  typeFilter === 'all' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
                 Todas
               </button>
               <button
                 onClick={() => setTypeFilter('entrada')}
-                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1 ${
-                  typeFilter === 'entrada'
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                    : 'text-neutral-400 hover:text-emerald-400'
+                className={`flex-1 sm:flex-none px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  typeFilter === 'entrada' ? 'bg-emerald-500/20 text-emerald-400' : 'text-neutral-400 hover:text-emerald-400'
                 }`}
               >
-                <ArrowUpRight className="w-3.5 h-3.5" />
                 Entradas
               </button>
               <button
                 onClick={() => setTypeFilter('saida')}
-                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1 ${
-                  typeFilter === 'saida'
-                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                    : 'text-neutral-400 hover:text-rose-400'
+                className={`flex-1 sm:flex-none px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  typeFilter === 'saida' ? 'bg-rose-500/20 text-rose-400' : 'text-neutral-400 hover:text-rose-400'
                 }`}
               >
-                <ArrowDownLeft className="w-3.5 h-3.5" />
                 Saídas
               </button>
             </div>
 
-            {/* Category Filter */}
-            <div className="w-full sm:w-auto">
-              <select
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-                className="w-full sm:w-auto px-3 py-1.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-300 focus:outline-none focus:border-amber-400"
-              >
-                <option value="all">Todas Categorias</option>
-                {Object.entries(FINANCIAL_CATEGORY_LABELS).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="w-full sm:w-auto px-3 min-h-[40px] bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-300 focus:outline-none focus:border-amber-400 cursor-pointer"
+            >
+              <option value="all">Todas Categorias</option>
+              {Object.entries(FINANCIAL_CATEGORY_LABELS).map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Transactions List */}
           {filteredTransactions.length === 0 ? (
-            <div className="p-12 text-center bg-neutral-900/40 border border-neutral-800 rounded-2xl">
-              <FileText className="w-10 h-10 text-neutral-600 mx-auto mb-3" />
-              <h3 className="text-sm font-semibold text-neutral-300 mb-1">Nenhum lançamento no período</h3>
-              <p className="text-xs text-neutral-400 max-w-sm mx-auto mb-4">
-                Não há registros de entradas ou saídas de caixa correspondentes aos filtros selecionados.
+            <div className="p-10 text-center bg-neutral-900 border border-neutral-800 rounded-2xl">
+              <FileText className="w-9 h-9 text-neutral-600 mx-auto mb-2" />
+              <h3 className="text-sm font-semibold text-neutral-300">Nenhum lançamento no período</h3>
+              <p className="text-xs text-neutral-500 mt-1 mb-4">
+                Registre uma entrada ou saída para acompanhar o caixa.
               </p>
               <div className="flex justify-center gap-2">
                 <button
@@ -842,9 +776,9 @@ export const FinancialView: React.FC = () => {
                     setTxType('entrada');
                     setIsTxModalOpen(true);
                   }}
-                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors"
+                  className="px-4 min-h-[38px] bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold cursor-pointer"
                 >
-                  Registrar Entrada
+                  Nova Entrada
                 </button>
                 <button
                   onClick={() => {
@@ -852,120 +786,93 @@ export const FinancialView: React.FC = () => {
                     setTxType('saida');
                     setIsTxModalOpen(true);
                   }}
-                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors"
+                  className="px-4 min-h-[38px] bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold cursor-pointer"
                 >
-                  Registrar Saída
+                  Nova Saída
                 </button>
               </div>
             </div>
           ) : (
-            <div className="space-y-2.5">
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden divide-y divide-neutral-800">
               {filteredTransactions.map((tx) => {
                 const isIncome = tx.type === 'entrada';
                 return (
                   <div
                     key={tx.id}
-                    className="p-4 bg-neutral-900/80 hover:bg-neutral-900 border border-neutral-800 rounded-2xl transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
+                    className="p-4 hover:bg-neutral-800/30 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
-                    <div className="flex items-start gap-3 flex-1 min-w-0">
-                      {/* Type Icon Badge */}
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
                       <div
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-                          isIncome
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                          isIncome ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
                         }`}
                       >
-                        {isIncome ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDownLeft className="w-5 h-5" />}
+                        {isIncome ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
                       </div>
 
-                      {/* Info & Motivo */}
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                          <span className="font-bold text-sm text-neutral-100">{tx.title}</span>
-                          <span
-                            className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                              isIncome
-                                ? 'bg-emerald-500/15 text-emerald-400'
-                                : 'bg-rose-500/15 text-rose-400'
-                            }`}
-                          >
-                            {isIncome ? 'ENTRADA' : 'SAÍDA'}
-                          </span>
-                          <span className="text-[11px] text-neutral-400 flex items-center gap-1 font-mono-numbers">
-                            <Calendar className="w-3 h-3" />
-                            {formatDateBR(tx.date)}
-                          </span>
+                        <div className="font-semibold text-sm text-neutral-100 truncate">{tx.title}</div>
+                        <div className="text-xs text-neutral-400 mt-0.5 truncate">
+                          {tx.counterparty}
+                          {tx.description && ` · ${tx.description}`}
                         </div>
-
-                        {/* Motivo detalhado (De onde veio ou para onde vai) */}
-                        <div className="text-xs text-neutral-300 mb-1 flex flex-wrap items-center gap-x-2">
-                          <span className="font-semibold text-neutral-200">
-                            {isIncome ? 'Origem (De quem):' : 'Destino (Favorecido):'}
-                          </span>
-                          <span className="text-neutral-100 font-medium">{tx.counterparty}</span>
-                          {tx.description && (
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-neutral-500 mt-1">
+                          <span className="font-mono tabular-nums">{formatDateBR(tx.date)}</span>
+                          <span>·</span>
+                          <span>{FINANCIAL_CATEGORY_LABELS[tx.category] || tx.category}</span>
+                          <span>·</span>
+                          <span>{PAYMENT_METHOD_LABELS[tx.paymentMethod] || tx.paymentMethod}</span>
+                          {tx.receipt && (
                             <>
-                              <span className="text-neutral-600">·</span>
-                              <span className="text-neutral-400 italic">Motivo: {tx.description}</span>
+                              <span>·</span>
+                              <button
+                                onClick={() => setViewingReceipt(tx.receipt!)}
+                                className="text-sky-400 hover:underline font-medium inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Paperclip className="w-3 h-3" />
+                                Comprovante
+                              </button>
                             </>
-                          )}
-                        </div>
-
-                        {/* Metadata badges: Categoria, Método, Comprovante */}
-                        <div className="flex flex-wrap items-center gap-2 text-[10px] text-neutral-400">
-                          <span className="px-2 py-0.5 bg-neutral-950 rounded-md border border-neutral-800 text-neutral-300">
-                            {FINANCIAL_CATEGORY_LABELS[tx.category] || tx.category}
-                          </span>
-                          <span className="px-2 py-0.5 bg-neutral-950 rounded-md border border-neutral-800 text-neutral-300">
-                            {PAYMENT_METHOD_LABELS[tx.paymentMethod] || tx.paymentMethod}
-                          </span>
-                          {tx.receipt ? (
-                            <button
-                              onClick={() => setViewingReceipt(tx.receipt!)}
-                              className="px-2 py-0.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-md font-semibold flex items-center gap-1 transition-colors"
-                            >
-                              <Paperclip className="w-2.5 h-2.5" />
-                              Ver Comprovante ({tx.receipt.type.toUpperCase()})
-                            </button>
-                          ) : (
-                            <span className="text-neutral-400 italic">Sem comprovante anexado</span>
                           )}
                         </div>
                       </div>
                     </div>
 
-                    {/* Amount & Actions */}
-                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:text-right shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-neutral-800/80">
-                      <div>
+                    <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-neutral-800/70">
+                      <div className="sm:text-right">
                         <div
-                          className={`text-base sm:text-lg font-bold font-mono-numbers ${
+                          className={`text-sm sm:text-base font-bold font-mono tabular-nums ${
                             isIncome ? 'text-emerald-400' : 'text-rose-400'
                           }`}
                         >
                           {isIncome ? '+ ' : '- '}
                           {formatCurrency(tx.amount)}
                         </div>
-                        <div className="text-[10px] text-neutral-400">Lançado por {tx.createdByName}</div>
+                        <div className="text-[11px] text-neutral-500">por {tx.createdByName}</div>
                       </div>
 
-                      {/* Edit & Delete Action Buttons */}
-                      <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1">
                         <button
                           onClick={() => handleOpenEditTx(tx)}
-                          className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded-lg transition-colors"
-                          title="Editar lançamento"
+                          className="p-2 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
+                          title="Editar"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={async () => {
-                            if (window.confirm(`Tem certeza que deseja excluir o lançamento "${tx.title}" de ${formatCurrency(tx.amount)}?`)) {
+                            const confirmed = await requestConfirm({
+                              title: 'Excluir lançamento',
+                              message: `Excluir o lançamento "${tx.title}" de ${formatCurrency(tx.amount)}?`,
+                              confirmLabel: 'Excluir',
+                              danger: true,
+                            });
+                            if (confirmed) {
                               await deleteFinancialTransaction(tx.id);
                             }
                           }}
-                          className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-lg transition-colors"
-                          title="Excluir lançamento"
+                          className="p-2 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-lg transition-colors cursor-pointer"
+                          title="Excluir"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -979,73 +886,61 @@ export const FinancialView: React.FC = () => {
         </div>
       )}
 
-      {/* SUB-TAB 2: CONTAS A PAGAR & CONTAS A RECEBER */}
+      {/* SUB-TAB 2: CONTAS A PAGAR & RECEBER */}
       {activeSubTab === 'bills' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-neutral-900/60 border border-neutral-800 rounded-xl">
-            {/* Toggle A Pagar vs A Receber */}
-            <div className="flex items-center gap-1.5 w-full sm:w-auto p-1 bg-neutral-950 rounded-xl border border-neutral-800">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 bg-neutral-900 border border-neutral-800 rounded-xl">
+            <div className="flex items-center gap-1 p-1 bg-neutral-950 rounded-xl border border-neutral-800">
               <button
                 onClick={() => setBillTypeFilter('a_pagar')}
-                className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 ${
-                  billTypeFilter === 'a_pagar'
-                    ? 'bg-rose-500 text-white shadow-sm'
-                    : 'text-neutral-400 hover:text-neutral-200'
+                className={`flex-1 sm:flex-none px-3.5 min-h-[36px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  billTypeFilter === 'a_pagar' ? 'bg-rose-500 text-white' : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
-                <ArrowDownLeft className="w-3.5 h-3.5" />
-                Contas a Pagar ({financialBills.filter((b) => b.type === 'a_pagar' && b.status === 'pendente').length})
+                A Pagar ({financialBills.filter((b) => b.type === 'a_pagar' && b.status === 'pendente').length})
               </button>
               <button
                 onClick={() => setBillTypeFilter('a_receber')}
-                className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 ${
-                  billTypeFilter === 'a_receber'
-                    ? 'bg-emerald-500 text-white shadow-sm'
-                    : 'text-neutral-400 hover:text-neutral-200'
+                className={`flex-1 sm:flex-none px-3.5 min-h-[36px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  billTypeFilter === 'a_receber' ? 'bg-emerald-500 text-white' : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
-                <ArrowUpRight className="w-3.5 h-3.5" />
-                Contas a Receber ({financialBills.filter((b) => b.type === 'a_receber' && b.status === 'pendente').length})
+                A Receber ({financialBills.filter((b) => b.type === 'a_receber' && b.status === 'pendente').length})
               </button>
             </div>
 
-            {/* New Bill Button */}
             <button
               onClick={() => {
                 resetBillForm();
                 setBillType(billTypeFilter);
                 setIsBillModalOpen(true);
               }}
-              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl shadow-md transition-colors"
+              className="flex items-center justify-center gap-1.5 px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl transition-colors cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
-              <span>{billTypeFilter === 'a_pagar' ? '+ Nova Conta a Pagar' : '+ Nova Conta a Receber'}</span>
+              <span>{billTypeFilter === 'a_pagar' ? 'Nova Conta a Pagar' : 'Nova Conta a Receber'}</span>
             </button>
           </div>
 
-          {/* Bills List */}
           {financialBills.filter((b) => b.type === billTypeFilter).length === 0 ? (
-            <div className="p-12 text-center bg-neutral-900/40 border border-neutral-800 rounded-2xl">
-              <Clock className="w-10 h-10 text-neutral-600 mx-auto mb-3" />
-              <h3 className="text-sm font-semibold text-neutral-300 mb-1">
-                Nenhuma conta {billTypeFilter === 'a_pagar' ? 'a pagar' : 'a receber'} cadastrada
+            <div className="p-10 text-center bg-neutral-900 border border-neutral-800 rounded-2xl">
+              <Clock className="w-9 h-9 text-neutral-600 mx-auto mb-2" />
+              <h3 className="text-sm font-semibold text-neutral-300">
+                Nenhuma conta {billTypeFilter === 'a_pagar' ? 'a pagar' : 'a receber'}
               </h3>
-              <p className="text-xs text-neutral-400 max-w-sm mx-auto mb-4">
-                Cadastre compromissos com vencimento ou previsão para manter o fluxo financeiro planejado.
-              </p>
               <button
                 onClick={() => {
                   resetBillForm();
                   setBillType(billTypeFilter);
                   setIsBillModalOpen(true);
                 }}
-                className="px-4 py-2 bg-amber-400 text-neutral-950 font-bold rounded-xl text-xs"
+                className="mt-4 px-4 min-h-[38px] bg-amber-400 text-neutral-950 font-bold rounded-xl text-xs cursor-pointer"
               >
-                Cadastrar Agora
+                Cadastrar Conta
               </button>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden divide-y divide-neutral-800">
               {financialBills
                 .filter((b) => b.type === billTypeFilter)
                 .map((b) => {
@@ -1056,93 +951,66 @@ export const FinancialView: React.FC = () => {
                   return (
                     <div
                       key={b.id}
-                      className={`p-4 bg-neutral-900/80 border rounded-2xl transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-                        isPaid
-                          ? 'border-neutral-800 opacity-60'
-                          : isOverdue
-                          ? 'border-red-500/40 bg-red-950/10'
-                          : 'border-neutral-800'
-                      }`}
+                      className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isPaid ? 'opacity-65' : ''}`}
                     >
-                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
                         <div
-                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                          className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                             isPaid
-                              ? 'bg-neutral-800 text-neutral-400'
+                              ? 'bg-neutral-800 text-emerald-400'
                               : isOverdue
-                              ? 'bg-red-500/20 text-red-400'
-                              : b.type === 'a_pagar'
-                              ? 'bg-amber-500/20 text-amber-400'
-                              : 'bg-emerald-500/20 text-emerald-400'
+                              ? 'bg-red-500/15 text-red-400'
+                              : 'bg-amber-500/15 text-amber-400'
                           }`}
                         >
-                          {isPaid ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> : <Clock className="w-5 h-5" />}
+                          {isPaid ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2 mb-1">
-                            <span className="font-bold text-sm text-neutral-100">{b.title}</span>
-                            <span
-                              className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                                isPaid
-                                  ? 'bg-emerald-500/20 text-emerald-400'
-                                  : isOverdue
-                                  ? 'bg-red-500/20 text-red-400 animate-pulse'
-                                  : 'bg-amber-500/20 text-amber-400'
-                              }`}
-                            >
-                              {isPaid ? 'PAGO / LIQUIDADO' : isOverdue ? 'VENCIDO' : 'A VENCER'}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-sm text-neutral-100 truncate">{b.title}</span>
+                            <span className={`text-[11px] font-semibold ${isPaid ? 'text-emerald-400' : isOverdue ? 'text-red-400' : 'text-amber-400'}`}>
+                              {isPaid ? '· Pago' : isOverdue ? '· Vencido' : '· A vencer'}
                             </span>
                             {b.priority === 'urgente' && (
-                              <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-500 text-white">
-                                URGENTE
-                              </span>
+                              <span className="text-[11px] font-semibold text-red-400">· Urgente</span>
                             )}
                           </div>
 
-                          <div className="text-xs text-neutral-300 mb-1">
-                            <span className="font-semibold text-neutral-200">
-                              {b.type === 'a_pagar' ? 'Favorecido:' : 'Pagador:'}
-                            </span>{' '}
+                          <div className="text-xs text-neutral-400 mt-0.5 truncate">
                             {b.counterparty}
-                            {b.description && <span className="text-neutral-400 italic"> · {b.description}</span>}
+                            {b.description && ` · ${b.description}`}
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-2 text-[10px] text-neutral-400">
-                            <span className="font-mono-numbers text-neutral-300 flex items-center gap-1">
-                              <Calendar className="w-3 h-3 text-neutral-400" />
-                              {b.hasNoForecast
-                                ? 'Gasto sem previsão de data'
-                                : `Vencimento: ${formatDateBR(b.dueDate)}`}
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-neutral-500 mt-1">
+                            <span className="font-mono tabular-nums">
+                              {b.hasNoForecast ? 'Sem previsão' : `Vence em ${formatDateBR(b.dueDate)}`}
                             </span>
-                            <span className="px-2 py-0.5 bg-neutral-950 rounded-md border border-neutral-800 text-neutral-300">
-                              {FINANCIAL_CATEGORY_LABELS[b.category] || b.category}
-                            </span>
+                            <span>·</span>
+                            <span>{FINANCIAL_CATEGORY_LABELS[b.category] || b.category}</span>
                             {b.receipt && (
-                              <button
-                                onClick={() => setViewingReceipt(b.receipt!)}
-                                className="px-2 py-0.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-md font-semibold flex items-center gap-1"
-                              >
-                                <Paperclip className="w-2.5 h-2.5" />
-                                Comprovante Anexo
-                              </button>
+                              <>
+                                <span>·</span>
+                                <button
+                                  onClick={() => setViewingReceipt(b.receipt!)}
+                                  className="text-sky-400 hover:underline font-medium inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Paperclip className="w-3 h-3" />
+                                  Anexo
+                                </button>
+                              </>
                             )}
                           </div>
                         </div>
                       </div>
 
-                      {/* Right: Value & Settle Action */}
-                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-neutral-800">
+                      <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-neutral-800/70">
                         <div className="sm:text-right">
-                          <div className="text-lg font-bold font-mono-numbers text-neutral-100">
+                          <div className="text-base font-bold font-mono tabular-nums text-neutral-100">
                             {formatCurrency(b.amount)}
-                          </div>
-                          <div className="text-[10px] text-neutral-400">
-                            {isPaid ? `Liquidado em ${formatDateBR(b.paidAt?.split('T')[0])}` : 'Aguardando pagamento'}
                           </div>
                         </div>
 
-                        {/* Liquidate button */}
                         {isPending && (
                           <button
                             onClick={() => {
@@ -1150,29 +1018,35 @@ export const FinancialView: React.FC = () => {
                               setSettleMethod('pix');
                               setSettleCreateTx(true);
                             }}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center gap-1 active:scale-95 touch-manipulation"
+                            className="px-3 min-h-[36px] bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap"
                           >
                             <Check className="w-3.5 h-3.5" />
-                            <span>{b.type === 'a_pagar' ? 'Pagar / Baixar' : 'Receber / Baixar'}</span>
+                            <span>{b.type === 'a_pagar' ? 'Pagar' : 'Receber'}</span>
                           </button>
                         )}
 
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => handleOpenEditBill(b)}
-                            className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded-lg transition-colors"
-                            title="Editar conta"
+                            className="p-2 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
+                            title="Editar"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={async () => {
-                              if (window.confirm(`Excluir conta "${b.title}"?`)) {
+                              const confirmed = await requestConfirm({
+                                title: 'Excluir conta',
+                                message: `Excluir conta "${b.title}"?`,
+                                confirmLabel: 'Excluir',
+                                danger: true,
+                              });
+                              if (confirmed) {
                                 await deleteFinancialBill(b.id);
                               }
                             }}
-                            className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-lg transition-colors"
-                            title="Excluir conta"
+                            className="p-2 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 rounded-lg transition-colors cursor-pointer"
+                            title="Excluir"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1189,14 +1063,13 @@ export const FinancialView: React.FC = () => {
       {/* SUB-TAB 3: GASTOS FUTUROS & PREVISÕES */}
       {activeSubTab === 'forecast' && (
         <div className="space-y-6">
-          <div className="p-4 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h3 className="text-base font-bold text-neutral-100 flex items-center gap-2">
-                <CalendarDays className="w-5 h-5 text-amber-400" />
-                Planejamento de Gastos Futuros da Mídia
+              <h3 className="text-sm sm:text-base font-bold text-neutral-100">
+                Planejamento de Gastos Futuros
               </h3>
               <p className="text-xs text-neutral-400 mt-0.5">
-                Identifique quanto sairá do caixa para cada necessidade planejada, quando pagaremos, ou adicione itens em &ldquo;Gasto Sem Previsão&rdquo; para futuras aquisições.
+                Despesas previstas com data ou demandas sem data definida.
               </p>
             </div>
             <button
@@ -1205,56 +1078,37 @@ export const FinancialView: React.FC = () => {
                 setBillType('a_pagar');
                 setIsBillModalOpen(true);
               }}
-              className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shrink-0"
+              className="px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>+ Novo Gasto Planejado</span>
+              <span>Novo Gasto Planejado</span>
             </button>
           </div>
 
-          {/* Section 1: Gastos Futuros Com Data Definida (Quando Pagaremos) */}
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
-              <h4 className="text-sm font-bold text-neutral-200 flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-emerald-400" />
-                Gastos com Data Marcada (Quando Pagaremos)
-              </h4>
-              <span className="text-xs font-semibold text-emerald-400 font-mono-numbers">
-                Total Previsto: {formatCurrency(summary.futureExpensesWithDate)}
+              <h4 className="text-sm font-semibold text-neutral-200">Com data marcada</h4>
+              <span className="text-xs font-semibold text-emerald-400 font-mono tabular-nums">
+                {formatCurrency(summary.futureExpensesWithDate)}
               </span>
             </div>
 
             {futureExpensesWithDate.length === 0 ? (
-              <div className="p-6 text-center bg-neutral-900/40 border border-neutral-800 rounded-xl text-neutral-400 text-xs">
+              <div className="p-6 text-center bg-neutral-900 border border-neutral-800 rounded-xl text-neutral-500 text-xs">
                 Nenhum gasto futuro com data marcada.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden divide-y divide-neutral-800">
                 {futureExpensesWithDate.map((b) => (
-                  <div
-                    key={b.id}
-                    className="p-4 bg-neutral-900/90 border border-neutral-800 rounded-2xl flex items-start justify-between gap-3"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-bold text-sm text-neutral-100">{b.title}</span>
-                        <span className="px-2 py-0.5 bg-emerald-500/15 text-emerald-400 text-[10px] font-bold rounded-full">
-                          {formatDateBR(b.dueDate)}
-                        </span>
-                      </div>
-                      <p className="text-xs text-neutral-400 mb-2">
-                        Favorecido: <strong className="text-neutral-200">{b.counterparty}</strong>
-                        {b.description && ` · ${b.description}`}
-                      </p>
-                      <div className="text-[10px] text-neutral-400">
-                        Categoria: {FINANCIAL_CATEGORY_LABELS[b.category] || b.category}
+                  <div key={b.id} className="p-4 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-sm text-neutral-100 truncate">{b.title}</div>
+                      <div className="text-xs text-neutral-400 mt-0.5 truncate">
+                        {formatDateBR(b.dueDate)} · {b.counterparty} · {FINANCIAL_CATEGORY_LABELS[b.category] || b.category}
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-base font-bold text-amber-400 font-mono-numbers">
-                        {formatCurrency(b.amount)}
-                      </div>
-                      <span className="text-[10px] text-neutral-400">Sairá do caixa</span>
+                    <div className="text-sm sm:text-base font-bold text-amber-400 font-mono tabular-nums shrink-0">
+                      {formatCurrency(b.amount)}
                     </div>
                   </div>
                 ))}
@@ -1262,57 +1116,37 @@ export const FinancialView: React.FC = () => {
             )}
           </div>
 
-          {/* Section 2: Gastos Sem Previsão (Demandas Mapeadas) */}
-          <div className="space-y-3 pt-4">
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
-              <div>
-                <h4 className="text-sm font-bold text-neutral-200 flex items-center gap-2">
-                  <HelpCircle className="w-4 h-4 text-purple-400" />
-                  Gastos Sem Previsão (Demandas Mapeadas para o Futuro)
-                </h4>
-                <p className="text-[11px] text-neutral-400">
-                  Equipamentos, reformas ou compras identificadas que ainda não possuem data de pagamento agendada.
-                </p>
-              </div>
-              <span className="text-xs font-semibold text-purple-400 font-mono-numbers">
-                Estimativa: {formatCurrency(summary.futureExpensesWithoutForecast)}
+              <h4 className="text-sm font-semibold text-neutral-200">Sem previsão de data</h4>
+              <span className="text-xs font-semibold text-purple-400 font-mono tabular-nums">
+                {formatCurrency(summary.futureExpensesWithoutForecast)}
               </span>
             </div>
 
             {futureExpensesWithoutForecast.length === 0 ? (
-              <div className="p-6 text-center bg-neutral-900/40 border border-neutral-800 rounded-xl text-neutral-400 text-xs">
+              <div className="p-6 text-center bg-neutral-900 border border-neutral-800 rounded-xl text-neutral-500 text-xs">
                 Nenhum gasto sem previsão mapeado.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden divide-y divide-neutral-800">
                 {futureExpensesWithoutForecast.map((b) => (
-                  <div
-                    key={b.id}
-                    className="p-4 bg-purple-950/20 border border-purple-500/20 rounded-2xl flex items-start justify-between gap-3"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-bold text-sm text-neutral-100">{b.title}</span>
-                        <span className="px-2 py-0.5 bg-purple-500/20 text-purple-300 text-[10px] font-bold rounded-full">
-                          SEM PREVISÃO
-                        </span>
-                      </div>
-                      <p className="text-xs text-neutral-300 mb-2">
-                        {b.description || 'Necessidade identificada para a estrutura de mídia.'}
-                      </p>
-                      <div className="text-[10px] text-neutral-400">
-                        Destino previsto: {b.counterparty} · {FINANCIAL_CATEGORY_LABELS[b.category] || b.category}
+                  <div key={b.id} className="p-4 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-sm text-neutral-100 truncate">{b.title}</div>
+                      <div className="text-xs text-neutral-400 mt-0.5 truncate">
+                        {b.counterparty} · {FINANCIAL_CATEGORY_LABELS[b.category] || b.category}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className="text-base font-bold text-purple-300 font-mono-numbers">
+                      <div className="text-sm sm:text-base font-bold text-purple-300 font-mono tabular-nums">
                         {formatCurrency(b.amount)}
                       </div>
                       <button
                         onClick={() => handleOpenEditBill(b)}
-                        className="text-[10px] text-amber-400 hover:underline mt-1 block"
+                        className="text-xs text-amber-400 hover:underline mt-0.5 cursor-pointer"
                       >
-                        Definir Data
+                        Definir data
                       </button>
                     </div>
                   </div>
@@ -1323,50 +1157,48 @@ export const FinancialView: React.FC = () => {
         </div>
       )}
 
-      {/* SUB-TAB 4: GASTOS MENSAIS POR CATEGORIA */}
+      {/* SUB-TAB 4: CATEGORIAS */}
       {activeSubTab === 'categories' && (
-        <div className="space-y-6">
-          <div className="p-4 bg-neutral-900/60 border border-neutral-800 rounded-2xl">
-            <h3 className="text-base font-bold text-neutral-100 mb-1 flex items-center gap-2">
-              <PieChart className="w-5 h-5 text-amber-400" />
-              Distribuição de Gastos por Categoria ({periodBounds.label})
+        <div className="p-4 sm:p-5 bg-neutral-900 border border-neutral-800 rounded-2xl space-y-5">
+          <div>
+            <h3 className="text-sm sm:text-base font-bold text-neutral-100">
+              Gastos por Categoria ({periodBounds.label})
             </h3>
-            <p className="text-xs text-neutral-400 mb-6">
-              Veja onde o ministério de mídia mais investiu e alocou recursos durante o período selecionado.
+            <p className="text-xs text-neutral-400 mt-0.5">
+              Resumo proporcional das despesas no período.
             </p>
+          </div>
 
-            {categoryExpenses.entries.length === 0 ? (
-              <div className="p-8 text-center text-neutral-400 text-xs">
-                Nenhuma despesa registrada para o período selecionado.
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {categoryExpenses.entries.map((item) => (
-                  <div key={item.category} className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-neutral-200">{item.label}</span>
-                      <div className="flex items-center gap-3">
-                        <span className="text-neutral-400 font-mono-numbers">{item.percentage.toFixed(1)}%</span>
-                        <span className="font-bold text-neutral-100 font-mono-numbers">{formatCurrency(item.amount)}</span>
-                      </div>
-                    </div>
-                    {/* Progress Bar */}
-                    <div className="w-full h-2.5 bg-neutral-950 rounded-full overflow-hidden border border-neutral-800">
-                      <div
-                        className="h-full bg-gradient-to-r from-amber-500 to-amber-300 rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min(100, Math.max(3, item.percentage))}%` }}
-                      />
+          {categoryExpenses.entries.length === 0 ? (
+            <div className="p-8 text-center text-neutral-500 text-xs">
+              Nenhuma despesa registrada no período.
+            </div>
+          ) : (
+            <div className="space-y-3.5">
+              {categoryExpenses.entries.map((item) => (
+                <div key={item.category} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-neutral-200 truncate pr-2">{item.label}</span>
+                    <div className="flex items-center gap-3 shrink-0 font-mono tabular-nums">
+                      <span className="text-neutral-400">{item.percentage.toFixed(1)}%</span>
+                      <span className="font-bold text-neutral-100">{formatCurrency(item.amount)}</span>
                     </div>
                   </div>
-                ))}
-
-                <div className="pt-4 border-t border-neutral-800 flex items-center justify-between text-sm font-bold text-neutral-100">
-                  <span>Total Geral Despesas</span>
-                  <span className="text-rose-400 font-mono-numbers">{formatCurrency(categoryExpenses.total)}</span>
+                  <div className="w-full h-2 bg-neutral-950 rounded-full overflow-hidden border border-neutral-800">
+                    <div
+                      className="h-full bg-amber-400 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.min(100, Math.max(3, item.percentage))}%` }}
+                    />
+                  </div>
                 </div>
+              ))}
+
+              <div className="pt-3 border-t border-neutral-800 flex items-center justify-between text-sm font-bold text-neutral-100">
+                <span>Total</span>
+                <span className="text-rose-400 font-mono tabular-nums">{formatCurrency(categoryExpenses.total)}</span>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1450,7 +1282,7 @@ export const FinancialView: React.FC = () => {
                     value={txAmount}
                     onChange={(e) => setTxAmount(e.target.value)}
                     placeholder="0,00"
-                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 font-mono-numbers text-sm font-bold"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 font-mono tabular-nums text-sm font-bold"
                   />
                 </div>
 
@@ -1463,7 +1295,7 @@ export const FinancialView: React.FC = () => {
                     required
                     value={txDate}
                     onChange={(e) => setTxDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 text-xs font-mono-numbers"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 text-xs font-mono tabular-nums"
                   />
                 </div>
               </div>
@@ -1703,7 +1535,7 @@ export const FinancialView: React.FC = () => {
                     value={billAmount}
                     onChange={(e) => setBillAmount(e.target.value)}
                     placeholder="0,00"
-                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 font-mono-numbers text-sm font-bold"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 font-mono tabular-nums text-sm font-bold"
                   />
                 </div>
 
@@ -1762,7 +1594,7 @@ export const FinancialView: React.FC = () => {
                       required={!billHasNoForecast}
                       value={billDueDate}
                       onChange={(e) => setBillDueDate(e.target.value)}
-                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 text-xs font-mono-numbers"
+                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 text-xs font-mono tabular-nums"
                     />
                   </div>
                 )}
@@ -1862,7 +1694,7 @@ export const FinancialView: React.FC = () => {
             <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800 space-y-1">
               <div className="text-xs text-neutral-400">Conta a liquidar:</div>
               <div className="font-bold text-sm text-neutral-100">{settlingBill.title}</div>
-              <div className="text-lg font-bold text-amber-400 font-mono-numbers">
+              <div className="text-lg font-bold text-amber-400 font-mono tabular-nums">
                 {formatCurrency(settlingBill.amount)}
               </div>
               <div className="text-[11px] text-neutral-400">

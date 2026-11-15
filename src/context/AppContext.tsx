@@ -23,6 +23,18 @@ interface Toast {
   type: 'success' | 'error' | 'info';
 }
 
+export interface ConfirmOptions {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+}
+
+interface ConfirmDialogState extends ConfirmOptions {
+  resolve: (accepted: boolean) => void;
+}
+
 interface AppContextType {
   user: User | null;
   firebaseUser: FirebaseUser | null;
@@ -104,6 +116,10 @@ interface AppContextType {
   toasts: Toast[];
   notify: (message: string, type?: 'success' | 'error' | 'info') => void;
   dismissToast: (id: string) => void;
+  confirmDialog: ConfirmOptions | null;
+  requestConfirm: (options: ConfirmOptions) => Promise<boolean>;
+  resolveConfirm: (accepted: boolean) => void;
+  openExternalUrl: (url: string) => void;
   mobileMenuOpen: boolean;
   setMobileMenuOpen: (open: boolean) => void;
   isTransmitting: boolean;
@@ -153,6 +169,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [shareTarget, setShareTarget] = useState<{ type: 'file' | 'folder' | 'event'; id: string; name: string } | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Sync theme with html document element
@@ -180,6 +197,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const dismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
+
+  const requestConfirm = useCallback((options: ConfirmOptions): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setConfirmState((prev) => {
+        if (prev) {
+          prev.resolve(false);
+        }
+        return { ...options, resolve };
+      });
+    });
+  }, []);
+
+  const resolveConfirm = useCallback((accepted: boolean) => {
+    setConfirmState((prev) => {
+      if (prev) {
+        prev.resolve(accepted);
+      }
+      return null;
+    });
+  }, []);
+
+  const openExternalUrl = useCallback(
+    (url: string) => {
+      try {
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          link.remove();
+        }, 500);
+      } catch {
+        notify('Não foi possível abrir o link automaticamente. Use o botão de copiar link.', 'info');
+      }
+    },
+    [notify]
+  );
 
   const refreshStats = useCallback(async () => {
     try {
@@ -374,21 +430,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    setStorageStats({
+    setStorageStats((prev) => ({
       totalBytesUsed: totalBytes,
       totalQuota: quota,
       availableBytes,
       usedPercentage,
       counts: {
         totalFiles: allFiles.filter((f) => !f.inTrash).length,
-        totalFolders: folders.length,
+        totalFolders: folders.filter((f) => !f.inTrash).length,
         totalEvents: events.length,
-        totalUsers: 1,
-        totalShares: 0,
+        totalUsers: prev?.counts.totalUsers || 1,
+        totalShares: prev?.counts.totalShares || 0,
       },
       breakdown,
-      recentActivities: [],
-    });
+      recentActivities: prev?.recentActivities || [],
+    }));
   }, [allFiles, folders, events]);
 
   const loginWithEmail = async (email: string, pass: string) => {
@@ -804,6 +860,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toasts,
         notify,
         dismissToast,
+        confirmDialog: confirmState
+          ? {
+              title: confirmState.title,
+              message: confirmState.message,
+              confirmLabel: confirmState.confirmLabel,
+              cancelLabel: confirmState.cancelLabel,
+              danger: confirmState.danger,
+            }
+          : null,
+        requestConfirm,
+        resolveConfirm,
+        openExternalUrl,
         mobileMenuOpen,
         setMobileMenuOpen,
         isTransmitting,

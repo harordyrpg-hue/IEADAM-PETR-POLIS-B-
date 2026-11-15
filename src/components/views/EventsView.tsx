@@ -33,6 +33,7 @@ export const EventsView: React.FC = () => {
     activeEventId,
     setActiveEventId,
     notify,
+    requestConfirm,
   } = useApp();
 
   const [selectedEventDetails, setSelectedEventDetails] = useState<{
@@ -74,7 +75,14 @@ export const EventsView: React.FC = () => {
     }
   };
 
-  const handleDeleteEvent = async (evtId: string) => {
+  const handleDeleteEvent = async (evtId: string, evtName?: string) => {
+    const confirmed = await requestConfirm({
+      title: 'Excluir evento',
+      message: `Deseja realmente excluir o evento${evtName ? ` "${evtName}"` : ''}? Os arquivos vinculados não serão apagados do armazenamento, mas o evento será removido.`,
+      confirmLabel: 'Excluir evento',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteEvent(evtId);
       notify('Evento removido com sucesso', 'info');
@@ -119,8 +127,8 @@ export const EventsView: React.FC = () => {
               </button>
 
               <button
-                onClick={() => handleDeleteEvent(selectedEventDetails.event.id)}
-                className="p-1.5 rounded-lg bg-neutral-800 hover:bg-red-500/20 text-neutral-400 hover:text-red-400 text-xs"
+                onClick={() => handleDeleteEvent(selectedEventDetails.event.id, selectedEventDetails.event.name)}
+                className="p-1.5 rounded-lg bg-neutral-800 hover:bg-red-500/20 text-neutral-400 hover:text-red-400 text-xs cursor-pointer"
                 title="Excluir evento"
               >
                 <Trash2 className="w-4 h-4" />
@@ -128,132 +136,132 @@ export const EventsView: React.FC = () => {
             </div>
           </div>
 
-          {/* Event Cover Banner & Quick Stats */}
-          <div className="relative rounded-2xl overflow-hidden bg-neutral-900 border border-neutral-800">
-            <div className="relative h-48 sm:h-64 w-full">
+          {/* Event Cover Banner & Info */}
+          <div className="rounded-2xl overflow-hidden bg-neutral-900 border border-neutral-800">
+            <div className="relative h-40 sm:h-56 w-full bg-black">
               <img
                 src={selectedEventDetails.event.coverUrl}
                 alt={selectedEventDetails.event.name}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover"
               />
-              <div className="absolute inset-0 bg-linear-to-t from-neutral-950 via-neutral-950/60 to-transparent" />
+              <div className="absolute inset-0 bg-linear-to-t from-neutral-900 via-neutral-900/20 to-transparent" />
+              <div className="absolute top-3 left-3 flex items-center gap-2 text-xs">
+                <span className="px-2.5 py-0.5 rounded-lg bg-amber-400 text-neutral-950 font-bold text-[11px]">
+                  {selectedEventDetails.event.category}
+                </span>
+                <span className="px-2 py-0.5 rounded-lg bg-black/75 text-neutral-200 font-mono tabular-nums text-[11px]">
+                  {formatDate(selectedEventDetails.event.date)}
+                </span>
+              </div>
+            </div>
 
-              {/* Banner Content */}
-              <div className="absolute bottom-4 left-4 right-4 sm:left-6 sm:right-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="px-2.5 py-0.5 rounded-full bg-amber-400/90 text-neutral-950 font-bold uppercase tracking-wider text-[10px]">
-                      {selectedEventDetails.event.category}
-                    </span>
-                    <span className="text-neutral-300 font-mono-numbers">
-                      {formatDate(selectedEventDetails.event.date)}
-                    </span>
-                  </div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-neutral-100">
-                    {selectedEventDetails.event.name}
-                  </h1>
-                  <p className="text-xs text-neutral-400 max-w-xl">
+            <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1 min-w-0">
+                <h1 className="text-lg sm:text-xl font-bold text-neutral-100 truncate">
+                  {selectedEventDetails.event.name}
+                </h1>
+                {selectedEventDetails.event.description && (
+                  <p className="text-xs text-neutral-400 max-w-2xl">
                     {selectedEventDetails.event.description}
                   </p>
-                  <p className="text-[11px] text-neutral-400">
-                    Responsáveis: <span className="text-neutral-200">{selectedEventDetails.event.responsibles.join(', ')}</span>
-                  </p>
-                </div>
+                )}
+                <p className="text-[11px] text-neutral-400">
+                  Responsáveis: <span className="text-neutral-200">{selectedEventDetails.event.responsibles.join(', ')}</span>
+                </p>
+              </div>
 
-                {/* Main Download Complete Event Button */}
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openUpload(null, selectedEventDetails.event.id)}
-                    className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Adicionar mídias</span>
-                  </button>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  onClick={() => openUpload(null, selectedEventDetails.event.id)}
+                  className="px-3.5 min-h-[38px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Adicionar mídias</span>
+                </button>
 
-                  <button
-                    onClick={() =>
-                      handleDownloadFullEventZip(
-                        selectedEventDetails.event.id,
-                        selectedEventDetails.event.name
-                      )
-                    }
-                    className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-md active:scale-95"
-                  >
-                    <Archive className="w-4 h-4" />
-                    <span>Baixar Evento Completo (ZIP)</span>
-                  </button>
-                </div>
+                <button
+                  onClick={() =>
+                    handleDownloadFullEventZip(
+                      selectedEventDetails.event.id,
+                      selectedEventDetails.event.name
+                    )
+                  }
+                  className="px-4 min-h-[38px] bg-amber-400 hover:bg-amber-300 text-neutral-950 rounded-xl text-xs font-bold flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
+                >
+                  <Archive className="w-4 h-4" />
+                  <span>Baixar ZIP Completo</span>
+                </button>
               </div>
             </div>
           </div>
 
-          {/* Media Count Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          {/* Hairline Media Count Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-neutral-800 border border-neutral-800 rounded-2xl overflow-hidden text-xs">
             <button
               onClick={() => setEventMediaFilter(eventMediaFilter === 'photo' ? 'all' : 'photo')}
-              className={`p-3 rounded-xl border text-left transition-all ${
+              className={`p-3.5 text-left transition-colors cursor-pointer ${
                 eventMediaFilter === 'photo'
-                  ? 'bg-amber-500/15 border-amber-400 text-amber-300'
-                  : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700 text-neutral-300'
+                  ? 'bg-amber-500/15 text-amber-300'
+                  : 'bg-neutral-900 hover:bg-neutral-800/60 text-neutral-300'
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
                 <ImageIcon className="w-4 h-4 text-amber-400" />
                 <span className="font-medium">Fotos</span>
               </div>
-              <span className="text-lg font-bold font-mono-numbers">
+              <span className="text-lg font-bold font-mono tabular-nums">
                 {selectedEventDetails.files.filter((f) => f.type === 'photo').length}
               </span>
             </button>
 
             <button
               onClick={() => setEventMediaFilter(eventMediaFilter === 'video' ? 'all' : 'video')}
-              className={`p-3 rounded-xl border text-left transition-all ${
+              className={`p-3.5 text-left transition-colors cursor-pointer ${
                 eventMediaFilter === 'video'
-                  ? 'bg-blue-500/15 border-blue-400 text-blue-300'
-                  : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700 text-neutral-300'
+                  ? 'bg-blue-500/15 text-blue-300'
+                  : 'bg-neutral-900 hover:bg-neutral-800/60 text-neutral-300'
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
                 <Film className="w-4 h-4 text-blue-400" />
-                <span className="font-medium">Vídeos 4K</span>
+                <span className="font-medium">Vídeos</span>
               </div>
-              <span className="text-lg font-bold font-mono-numbers">
+              <span className="text-lg font-bold font-mono tabular-nums">
                 {selectedEventDetails.files.filter((f) => f.type === 'video').length}
               </span>
             </button>
 
             <button
               onClick={() => setEventMediaFilter(eventMediaFilter === 'art' ? 'all' : 'art')}
-              className={`p-3 rounded-xl border text-left transition-all ${
+              className={`p-3.5 text-left transition-colors cursor-pointer ${
                 eventMediaFilter === 'art'
-                  ? 'bg-purple-500/15 border-purple-400 text-purple-300'
-                  : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700 text-neutral-300'
+                  ? 'bg-purple-500/15 text-purple-300'
+                  : 'bg-neutral-900 hover:bg-neutral-800/60 text-neutral-300'
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
                 <Palette className="w-4 h-4 text-purple-400" />
-                <span className="font-medium">Artes & Divulgação</span>
+                <span className="font-medium">Artes</span>
               </div>
-              <span className="text-lg font-bold font-mono-numbers">
+              <span className="text-lg font-bold font-mono tabular-nums">
                 {selectedEventDetails.files.filter((f) => f.type === 'art').length}
               </span>
             </button>
 
             <button
               onClick={() => setEventMediaFilter(eventMediaFilter === 'audio' ? 'all' : 'audio')}
-              className={`p-3 rounded-xl border text-left transition-all ${
+              className={`p-3.5 text-left transition-colors cursor-pointer ${
                 eventMediaFilter === 'audio'
-                  ? 'bg-emerald-500/15 border-emerald-400 text-emerald-300'
-                  : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700 text-neutral-300'
+                  ? 'bg-emerald-500/15 text-emerald-300'
+                  : 'bg-neutral-900 hover:bg-neutral-800/60 text-neutral-300'
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
                 <Music className="w-4 h-4 text-emerald-400" />
-                <span className="font-medium">Áudios & Louvor</span>
+                <span className="font-medium">Áudios</span>
               </div>
-              <span className="text-lg font-bold font-mono-numbers">
+              <span className="text-lg font-bold font-mono tabular-nums">
                 {selectedEventDetails.files.filter((f) => f.type === 'audio').length}
               </span>
             </button>
@@ -297,14 +305,13 @@ export const EventsView: React.FC = () => {
       ) : (
         /* View 2: All Church Events Grid */
         <div className="space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
             <div>
-              <h1 className="text-lg font-bold text-neutral-100 flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-amber-400" />
-                Eventos da Igreja & Coberturas de Mídia
+              <h1 className="text-xl font-bold text-neutral-100">
+                Eventos e Coberturas
               </h1>
               <p className="text-xs text-neutral-400 mt-0.5">
-                Organização central de fotos, gravações 4K, multitracks e artes de cada culto ou conferência.
+                Acervo de fotos, vídeos, áudios e artes por culto ou conferência.
               </p>
             </div>
 
@@ -313,7 +320,7 @@ export const EventsView: React.FC = () => {
                 setEditingEvent(null);
                 setIsEventModalOpen(true);
               }}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs shadow-sm transition-all"
+              className="flex items-center justify-center gap-2 px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer"
             >
               <CalendarPlus className="w-4 h-4" />
               <span>Novo evento</span>
@@ -357,11 +364,11 @@ export const EventsView: React.FC = () => {
 
                     <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
                       {evt.time && (
-                        <span className="px-2 py-0.5 rounded bg-amber-400 text-neutral-950 font-extrabold text-[10px] font-mono-numbers">
+                        <span className="px-2 py-0.5 rounded bg-amber-400 text-neutral-950 font-extrabold text-[10px] font-mono tabular-nums">
                           {evt.time}
                         </span>
                       )}
-                      <span className="px-2 py-0.5 rounded bg-black/80 text-[11px] text-neutral-200 font-mono-numbers">
+                      <span className="px-2 py-0.5 rounded bg-black/80 text-[11px] text-neutral-200 font-mono tabular-nums">
                         {formatDate(evt.date)}
                       </span>
                     </div>
@@ -377,22 +384,22 @@ export const EventsView: React.FC = () => {
                       </p>
 
                       {/* Event Media Inventory Breakdown */}
-                      <div className="grid grid-cols-4 gap-1.5 mt-3 pt-3 border-t border-neutral-800 text-[11px] text-neutral-400 font-mono-numbers">
+                      <div className="grid grid-cols-4 gap-1.5 mt-3 pt-3 border-t border-neutral-800 text-[11px] text-neutral-400 font-mono tabular-nums">
                         <div className="flex items-center gap-1">
-                          <ImageIcon className="w-3 h-3 text-amber-400" />
-                          <span>{evt.stats?.photos || 0} fotos</span>
+                          <ImageIcon className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span>{evt.stats?.photos || 0}</span>
                         </div>
                         <div className="flex items-center gap-1">
-                          <Film className="w-3 h-3 text-blue-400" />
-                          <span>{evt.stats?.videos || 0} vídeos</span>
+                          <Film className="w-3 h-3 text-blue-400 shrink-0" />
+                          <span>{evt.stats?.videos || 0}</span>
                         </div>
                         <div className="flex items-center gap-1">
-                          <Palette className="w-3 h-3 text-purple-400" />
-                          <span>{evt.stats?.arts || 0} artes</span>
+                          <Palette className="w-3 h-3 text-purple-400 shrink-0" />
+                          <span>{evt.stats?.arts || 0}</span>
                         </div>
                         <div className="flex items-center gap-1">
-                          <Music className="w-3 h-3 text-emerald-400" />
-                          <span>{evt.stats?.audios || 0} áudios</span>
+                          <Music className="w-3 h-3 text-emerald-400 shrink-0" />
+                          <span>{evt.stats?.audios || 0}</span>
                         </div>
                       </div>
                     </div>

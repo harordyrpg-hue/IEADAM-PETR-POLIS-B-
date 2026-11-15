@@ -181,12 +181,12 @@ export const FileCard: React.FC<FileCardProps> = ({
             </div>
           )}
           {file.resolution && (
-            <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/80 text-[10px] text-neutral-200 font-mono-numbers rounded backdrop-blur-xs">
+            <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/80 text-[10px] text-neutral-200 font-mono tabular-nums rounded backdrop-blur-xs">
               {file.resolution}
             </span>
           )}
           {file.duration && (
-            <span className="absolute bottom-2 left-2 px-1.5 py-0.5 bg-black/80 text-[10px] text-neutral-200 font-mono-numbers rounded backdrop-blur-xs">
+            <span className="absolute bottom-2 left-2 px-1.5 py-0.5 bg-black/80 text-[10px] text-neutral-200 font-mono tabular-nums rounded backdrop-blur-xs">
               {file.duration}
             </span>
           )}
@@ -245,12 +245,12 @@ export const FileCard: React.FC<FileCardProps> = ({
           <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner group-hover:scale-105 transition-transform">
             <Music className="w-7 h-7" />
           </div>
-          {/* Sound wave equalizer effect */}
+          {/* Static crisp audio waveform */}
           <div className="flex items-center gap-1 mt-3">
-            <span className="w-1 h-3 bg-emerald-500/60 rounded-full animate-pulse" />
+            <span className="w-1 h-3 bg-emerald-500/60 rounded-full" />
             <span className="w-1 h-5 bg-emerald-400 rounded-full" />
             <span className="w-1 h-2 bg-emerald-500/60 rounded-full" />
-            <span className="w-1 h-6 bg-emerald-400 rounded-full animate-pulse" />
+            <span className="w-1 h-6 bg-emerald-400 rounded-full" />
             <span className="w-1 h-4 bg-emerald-500/60 rounded-full" />
           </div>
           <span className="mt-2 text-[10px] font-mono uppercase tracking-wider text-emerald-300/80">
@@ -270,7 +270,7 @@ export const FileCard: React.FC<FileCardProps> = ({
             Vídeo Original · .{file.extension}
           </span>
           {file.duration && (
-            <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/80 text-[10px] text-neutral-200 font-mono-numbers rounded">
+            <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/80 text-[10px] text-neutral-200 font-mono tabular-nums rounded">
               {file.duration}
             </span>
           )}
@@ -312,10 +312,10 @@ export const FileCard: React.FC<FileCardProps> = ({
           e.stopPropagation();
           onSelect(file.id);
         }}
-        className={`absolute top-2 left-2 z-10 w-6 h-6 rounded-md flex items-center justify-center transition-all cursor-pointer ${
+        className={`absolute top-2 left-2 z-10 w-7 h-7 rounded-lg flex items-center justify-center transition-all cursor-pointer touch-manipulation ${
           isSelected
             ? 'bg-amber-400 text-neutral-950 shadow-sm opacity-100'
-            : 'bg-black/60 text-neutral-300 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-black/80 hover:text-white'
+            : 'bg-black/65 text-neutral-200 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-black/80 hover:text-white'
         }`}
         title={isSelected ? 'Desmarcar arquivo' : 'Selecionar arquivo'}
       >
@@ -325,20 +325,20 @@ export const FileCard: React.FC<FileCardProps> = ({
       {/* Favorite Star Button */}
       <button
         onClick={handleToggleFavorite}
-        className={`absolute top-2 right-2 z-10 p-1.5 rounded-md backdrop-blur-xs transition-all cursor-pointer ${
+        className={`absolute top-2 right-2 z-10 p-1.5 rounded-lg backdrop-blur-xs transition-all cursor-pointer touch-manipulation ${
           file.isFavorite
-            ? 'bg-amber-500/20 text-amber-400 opacity-100'
-            : 'bg-black/50 text-neutral-300 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 hover:text-amber-400'
+            ? 'bg-amber-500/25 text-amber-400 opacity-100'
+            : 'bg-black/60 text-neutral-200 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-amber-400'
         }`}
         title={file.isFavorite ? 'Remover dos favoritos' : 'Favoritar'}
       >
         <Star className={`w-3.5 h-3.5 ${file.isFavorite ? 'fill-amber-400' : ''}`} />
       </button>
 
-      {/* Thumbnail area (Always visual, never broken text) */}
+      {/* Thumbnail area */}
       {renderThumbnail()}
 
-      {/* Card Content & Zero-Pill Metadata */}
+      {/* Card Content */}
       <div className="p-3">
         <h3
           title={file.name}
@@ -347,8 +347,7 @@ export const FileCard: React.FC<FileCardProps> = ({
           {file.name}
         </h3>
 
-        {/* Clean unboxed metadata with · separator */}
-        <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-mono-numbers mt-1 truncate">
+        <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-mono tabular-nums mt-1 truncate">
           <span>{formatBytes(file.size)}</span>
           <span aria-hidden="true">·</span>
           <span>{formatDate(file.createdAt)}</span>

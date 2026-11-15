@@ -18,7 +18,7 @@ import { formatDate, getRoleBadgeStyle } from '../../utils/formatters.js';
 import { api } from '../../services/api.js';
 
 export const UsersView: React.FC = () => {
-  const { user, notify } = useApp();
+  const { user, notify, requestConfirm } = useApp();
   const [usersList, setUsersList] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
@@ -110,7 +110,13 @@ export const UsersView: React.FC = () => {
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!window.confirm('Remover este usuário da equipe? Esta ação não pode ser desfeita.')) return;
+    const confirmed = await requestConfirm({
+      title: 'Remover membro da equipe',
+      message: 'Remover este usuário da equipe? Esta ação não pode ser desfeita.',
+      confirmLabel: 'Remover',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteTeamUser(userId);
       notify('Usuário removido da equipe', 'info');
@@ -134,21 +140,20 @@ export const UsersView: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
         <div>
-          <h1 className="text-lg font-bold text-neutral-100 flex items-center gap-2">
-            <Users className="w-5 h-5 text-amber-400" />
-            Membros da Equipe & Controle de Acesso (RBAC)
+          <h1 className="text-xl font-bold text-neutral-100">
+            Equipe e Permissões
           </h1>
           <p className="text-xs text-neutral-400 mt-0.5">
-            Gerenciamento real de contas no Firebase Auth, papéis e permissões no Cloud Firestore.
+            Contas, níveis de acesso e autorizações ({usersList.length} membros).
           </p>
         </div>
 
         {isSuperAdmin && (
           <button
             onClick={() => setIsAddUserOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs shadow-sm transition-all"
+            className="flex items-center justify-center gap-2 px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer"
           >
             <UserPlus className="w-4 h-4" />
             <span>Adicionar membro</span>
@@ -156,178 +161,297 @@ export const UsersView: React.FC = () => {
         )}
       </div>
 
-      {/* Permissions Legend */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="p-3.5 rounded-xl bg-neutral-900 border border-neutral-800">
-          <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs mb-1">
-            <ShieldAlert className="w-4 h-4" />
-            <span>Super Administrador</span>
+      {/* Hairline Permissions Legend */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-neutral-800 border border-neutral-800 rounded-2xl overflow-hidden">
+        <div className="p-4 bg-neutral-900">
+          <div className="text-amber-400 font-semibold text-xs mb-1">
+            Super Administrador
           </div>
           <p className="text-[11px] text-neutral-400">
-            Controle total sobre armazenamento, criação e bloqueio de usuários, exclusão permanente e configurações de nuvem.
+            Controle total sobre usuários, permissões e configurações.
           </p>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-neutral-900 border border-neutral-800">
-          <div className="flex items-center gap-2 text-blue-400 font-semibold text-xs mb-1">
-            <span>Administrador de Mídia</span>
+        <div className="p-4 bg-neutral-900">
+          <div className="text-blue-400 font-semibold text-xs mb-1">
+            Administrador de Mídia
           </div>
           <p className="text-[11px] text-neutral-400">
-            Criação de eventos, pastas, upload e download em lote e gerenciamento de arquivos originais.
+            Criação de eventos, pastas e organização de arquivos.
           </p>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-neutral-900 border border-neutral-800">
-          <div className="flex items-center gap-2 text-neutral-300 font-semibold text-xs mb-1">
-            <span>Membro da Mídia</span>
+        <div className="p-4 bg-neutral-900">
+          <div className="text-neutral-200 font-semibold text-xs mb-1">
+            Membro da Mídia
           </div>
           <p className="text-[11px] text-neutral-400">
-            Acesso para visualização, upload de arquivos originais sem compressão e compartilhamento.
+            Visualização, envio de arquivos originais e compartilhamento.
           </p>
         </div>
       </div>
 
-      {/* Users Table */}
+      {/* Users List */}
       {loading ? (
-        <div className="p-8 text-center text-xs text-neutral-400">Carregando membros do Firebase Firestore...</div>
+        <div className="p-8 text-center text-xs text-neutral-400">Carregando membros...</div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-900">
-          <table className="w-full text-left text-xs text-neutral-200">
-            <thead className="bg-neutral-800/80 text-[11px] uppercase tracking-wider text-neutral-400 border-b border-neutral-700/80">
-              <tr>
-                <th className="px-4 py-3">Membro</th>
-                <th className="px-4 py-3">E-mail</th>
-                <th className="px-4 py-3">Nível de Acesso</th>
-                <th className="px-4 py-3">Página da Igreja</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Membro desde</th>
-                <th className="px-4 py-3 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {usersList.map((u) => {
-                const roleBadge = getRoleBadgeStyle(u.role);
-                const isEditingThis = editingUserId === u.uid;
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-900 overflow-hidden">
+          {/* Mobile Cards */}
+          <div className="md:hidden divide-y divide-neutral-800">
+            {usersList.map((u) => {
+              const roleBadge = getRoleBadgeStyle(u.role);
+              const isEditingThis = editingUserId === u.uid;
+              const initials = (u.name || 'M').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
 
-                return (
-                  <tr key={u.uid} className="border-b border-neutral-800/60 hover:bg-neutral-800/40 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
+              return (
+                <div key={u.uid} className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {u.avatar ? (
                         <img
                           src={u.avatar}
                           alt={u.name}
                           referrerPolicy="no-referrer"
-                          className="w-7 h-7 rounded-full object-cover ring-1 ring-neutral-700"
+                          className="w-9 h-9 rounded-full object-cover ring-1 ring-neutral-700 shrink-0"
                         />
-                        <span className="font-semibold text-neutral-200">{u.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-neutral-400 font-mono text-[11px]">
-                      {u.email}
-                    </td>
-                    <td className="px-4 py-3">
-                      {isEditingThis ? (
-                        <div className="flex items-center gap-1.5">
-                          <select
-                            value={editRole}
-                            onChange={(e) => setEditRole(e.target.value as UserRole)}
-                            className="bg-neutral-800 border border-neutral-700 rounded p-1 text-xs text-neutral-200"
-                          >
-                            <option value="super_admin">Super Administrador</option>
-                            <option value="media_admin">Administrador de Mídia</option>
-                            <option value="media_member">Membro da Mídia</option>
-                          </select>
-                          <button
-                            onClick={() => handleUpdateRole(u.uid, editRole)}
-                            className="p-1 bg-amber-400 text-neutral-950 rounded hover:bg-amber-300"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => setEditingUserId(null)}
-                            className="p-1 bg-neutral-800 text-neutral-300 rounded hover:bg-neutral-700"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
                       ) : (
-                        <span className={`font-medium ${roleBadge.textClass}`}>
+                        <div className="w-9 h-9 rounded-full bg-amber-500/15 text-amber-400 font-bold text-xs flex items-center justify-center shrink-0">
+                          {initials}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-semibold text-neutral-100 text-sm truncate">{u.name}</p>
+                        <p className="text-[11px] text-neutral-400 font-mono truncate">{u.email}</p>
+                      </div>
+                    </div>
+
+                    <span className={`text-[11px] font-medium shrink-0 ${u.status === 'active' ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {u.status === 'active' ? 'Ativo' : 'Bloqueado'}
+                    </span>
+                  </div>
+
+                  {isEditingThis ? (
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={editRole}
+                        onChange={(e) => setEditRole(e.target.value as UserRole)}
+                        className="flex-1 bg-neutral-800 border border-neutral-700 rounded-xl px-2.5 min-h-[36px] text-xs text-neutral-200"
+                      >
+                        <option value="super_admin">Super Administrador</option>
+                        <option value="media_admin">Administrador de Mídia</option>
+                        <option value="media_member">Membro da Mídia</option>
+                      </select>
+                      <button
+                        onClick={() => handleUpdateRole(u.uid, editRole)}
+                        className="p-2 bg-amber-400 text-neutral-950 rounded-xl cursor-pointer"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setEditingUserId(null)}
+                        className="p-2 bg-neutral-800 text-neutral-300 rounded-xl cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-medium ${roleBadge.textClass}`}>
                           {u.roleLabel}
                         </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {u.role === 'super_admin' ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[10px] text-amber-300 font-medium">
-                          <Church className="w-3 h-3" />
-                          Super Admin
-                        </span>
-                      ) : isSuperAdmin ? (
-                        <button
-                          onClick={() => handleToggleChurchPermission(u)}
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors cursor-pointer ${
-                            u.canManageChurchPage
-                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
-                              : 'bg-neutral-800/80 border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:border-neutral-600'
-                          }`}
-                          title="Clique para alternar se este membro pode gerenciar a página pública da igreja"
-                        >
-                          <Church className={`w-3 h-3 ${u.canManageChurchPage ? 'text-emerald-400' : 'text-neutral-500'}`} />
-                          <span>{u.canManageChurchPage ? 'Autorizado' : 'Não autorizado'}</span>
-                        </button>
-                      ) : (
-                        <span className={`text-[11px] font-medium ${u.canManageChurchPage ? 'text-emerald-400' : 'text-neutral-500'}`}>
-                          {u.canManageChurchPage ? 'Autorizado' : 'Não autorizado'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-[11px] font-medium ${u.status === 'active' ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {u.status === 'active' ? '● Ativo' : '● Bloqueado'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-neutral-400 font-mono-numbers">
-                      {formatDate(u.createdAt)}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {isSuperAdmin && (
-                          <>
-                            <button
-                              onClick={() => {
-                                setEditingUserId(u.uid);
-                                setEditRole(u.role);
-                              }}
-                              className="p-1.5 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg"
-                              title="Alterar permissões"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-
-                            <button
-                              onClick={() => handleToggleBlock(u)}
-                              className="p-1.5 text-neutral-400 hover:text-amber-400 hover:bg-neutral-800 rounded-lg"
-                              title={u.status === 'active' ? 'Bloquear usuário' : 'Desbloquear usuário'}
-                            >
-                              {u.status === 'active' ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                            </button>
-
-                            <button
-                              onClick={() => handleDeleteUser(u.uid)}
-                              className="p-1.5 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded-lg"
-                              title="Remover usuário"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </>
+                        {u.role !== 'super_admin' && isSuperAdmin && (
+                          <button
+                            onClick={() => handleToggleChurchPermission(u)}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-medium border cursor-pointer ${
+                              u.canManageChurchPage
+                                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                                : 'bg-neutral-800 border-neutral-700 text-neutral-400'
+                            }`}
+                          >
+                            {u.canManageChurchPage ? 'Site: Sim' : 'Site: Não'}
+                          </button>
                         )}
                       </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+
+                      {isSuperAdmin && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => {
+                              setEditingUserId(u.uid);
+                              setEditRole(u.role);
+                            }}
+                            className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-xl cursor-pointer"
+                            title="Alterar permissões"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleToggleBlock(u)}
+                            className="p-2 text-neutral-400 hover:text-amber-400 hover:bg-neutral-800 rounded-xl cursor-pointer"
+                            title={u.status === 'active' ? 'Bloquear' : 'Desbloquear'}
+                          >
+                            {u.status === 'active' ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUser(u.uid)}
+                            className="p-2 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded-xl cursor-pointer"
+                            title="Remover"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop Table */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-left text-xs text-neutral-200">
+              <thead className="bg-neutral-950/50 text-[11px] font-medium text-neutral-400 border-b border-neutral-800">
+                <tr>
+                  <th className="px-4 py-3">Membro</th>
+                  <th className="px-4 py-3">E-mail</th>
+                  <th className="px-4 py-3">Acesso</th>
+                  <th className="px-4 py-3">Site da Igreja</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Desde</th>
+                  <th className="px-4 py-3 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-800/70">
+                {usersList.map((u) => {
+                  const roleBadge = getRoleBadgeStyle(u.role);
+                  const isEditingThis = editingUserId === u.uid;
+                  const initials = (u.name || 'M').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
+
+                  return (
+                    <tr key={u.uid} className="hover:bg-neutral-800/40 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          {u.avatar ? (
+                            <img
+                              src={u.avatar}
+                              alt={u.name}
+                              referrerPolicy="no-referrer"
+                              className="w-7 h-7 rounded-full object-cover ring-1 ring-neutral-700"
+                            />
+                          ) : (
+                            <div className="w-7 h-7 rounded-full bg-amber-500/15 text-amber-400 font-bold text-[10px] flex items-center justify-center">
+                              {initials}
+                            </div>
+                          )}
+                          <span className="font-semibold text-neutral-200">{u.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-neutral-400 font-mono text-[11px]">
+                        {u.email}
+                      </td>
+                      <td className="px-4 py-3">
+                        {isEditingThis ? (
+                          <div className="flex items-center gap-1.5">
+                            <select
+                              value={editRole}
+                              onChange={(e) => setEditRole(e.target.value as UserRole)}
+                              className="bg-neutral-800 border border-neutral-700 rounded-lg p-1.5 text-xs text-neutral-200"
+                            >
+                              <option value="super_admin">Super Administrador</option>
+                              <option value="media_admin">Administrador de Mídia</option>
+                              <option value="media_member">Membro da Mídia</option>
+                            </select>
+                            <button
+                              onClick={() => handleUpdateRole(u.uid, editRole)}
+                              className="p-1.5 bg-amber-400 text-neutral-950 rounded-lg hover:bg-amber-300 cursor-pointer"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setEditingUserId(null)}
+                              className="p-1.5 bg-neutral-800 text-neutral-300 rounded-lg hover:bg-neutral-700 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className={`font-medium ${roleBadge.textClass}`}>
+                            {u.roleLabel}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {u.role === 'super_admin' ? (
+                          <span className="text-[11px] text-amber-300 font-medium">
+                            Super Admin
+                          </span>
+                        ) : isSuperAdmin ? (
+                          <button
+                            onClick={() => handleToggleChurchPermission(u)}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors cursor-pointer ${
+                              u.canManageChurchPage
+                                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                                : 'bg-neutral-800/80 border-neutral-700 text-neutral-400 hover:text-neutral-200'
+                            }`}
+                          >
+                            <span>{u.canManageChurchPage ? 'Autorizado' : 'Não autorizado'}</span>
+                          </button>
+                        ) : (
+                          <span className={`text-[11px] font-medium ${u.canManageChurchPage ? 'text-emerald-400' : 'text-neutral-500'}`}>
+                            {u.canManageChurchPage ? 'Autorizado' : 'Não autorizado'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-[11px] font-medium ${u.status === 'active' ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {u.status === 'active' ? 'Ativo' : 'Bloqueado'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-neutral-400 font-mono tabular-nums">
+                        {formatDate(u.createdAt)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {isSuperAdmin && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditingUserId(u.uid);
+                                  setEditRole(u.role);
+                                }}
+                                className="p-1.5 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg cursor-pointer"
+                                title="Alterar permissões"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                onClick={() => handleToggleBlock(u)}
+                                className="p-1.5 text-neutral-400 hover:text-amber-400 hover:bg-neutral-800 rounded-lg cursor-pointer"
+                                title={u.status === 'active' ? 'Bloquear usuário' : 'Desbloquear usuário'}
+                              >
+                                {u.status === 'active' ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                              </button>
+
+                              <button
+                                onClick={() => handleDeleteUser(u.uid)}
+                                className="p-1.5 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded-lg cursor-pointer"
+                                title="Remover usuário"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

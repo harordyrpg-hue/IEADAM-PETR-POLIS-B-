@@ -26,13 +26,25 @@ export const AudioPlayerModal: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState('00:00');
-  const [isMuted, setIsMuted] = useState(false);
+  const [audioSrc, setAudioSrc] = useState<string>('');
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     setIsPlaying(false);
     setProgress(0);
     setCurrentTime('00:00');
+    setAudioSrc('');
+    if (!audioPlayerFile) return;
+
+    let isMounted = true;
+    api.resolveMediaUrl(audioPlayerFile, true).then((url) => {
+      if (isMounted && url) {
+        setAudioSrc(url);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
   }, [audioPlayerFile]);
 
   if (!audioPlayerFile) return null;
@@ -68,8 +80,8 @@ export const AudioPlayerModal: React.FC = () => {
   };
 
   const handleDownload = () => {
-    api.triggerDownload(`/api/files/${audioPlayerFile.id}/download`);
-    notify(`Iniciando download do áudio master WAV/MP3 (${formatBytes(audioPlayerFile.size)})`, 'info');
+    api.triggerDownload(audioPlayerFile, audioPlayerFile.name);
+    notify(`Iniciando download do áudio original (${formatBytes(audioPlayerFile.size)})`, 'info');
   };
 
   const handleShare = () => {
@@ -82,7 +94,7 @@ export const AudioPlayerModal: React.FC = () => {
         {/* Audio Element */}
         <audio
           ref={audioRef}
-          src={`/storage/originals/${audioPlayerFile.storageKey}`}
+          src={audioSrc || undefined}
           onTimeUpdate={handleTimeUpdate}
           onEnded={() => setIsPlaying(false)}
         />

@@ -59,6 +59,7 @@ export const ProfileView: React.FC = () => {
   // Avatar upload state
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarImgError, setAvatarImgError] = useState(false);
 
   // Tasks filter state
   const [taskFilter, setTaskFilter] = useState<'all' | 'pending' | 'completed' | 'private'>('all');
@@ -283,54 +284,50 @@ export const ProfileView: React.FC = () => {
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* 1. Header & Identity Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 sm:p-6 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-sm">
-        <div className="flex items-start sm:items-center gap-3.5">
-          <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl shrink-0">
-            <UserIcon className="w-6 h-6" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
+        <div>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-xl font-bold text-neutral-100">
+              Meu Perfil
+            </h1>
+            <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border ${roleStyle.textClass} ${roleStyle.borderClass} bg-neutral-900`}>
+              {user.roleLabel}
+            </span>
           </div>
-          <div>
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-bold text-neutral-100 tracking-tight">
-                Meu Perfil & Central do Membro
-              </h1>
-              <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${roleStyle.textClass} ${roleStyle.borderClass} bg-neutral-800/80`}>
-                {user.roleLabel}
-              </span>
-            </div>
-            <p className="text-xs sm:text-sm text-neutral-400 mt-1">
-              Gerencie seus dados pessoais, altere foto e nome, consulte sua escala de cultos e baixe seus afazeres em PDF.
-            </p>
-          </div>
+          <p className="text-xs text-neutral-400 mt-0.5">
+            Seus dados pessoais, escala de cultos e afazeres privados.
+          </p>
         </div>
 
-        {/* Global Export PDF Button */}
-        <div className="flex items-center gap-2 self-start md:self-center shrink-0">
-          <button
-            onClick={handleExportSchedulePDF}
-            className="flex items-center gap-2 px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
-            title="Baixar escala completa e afazeres em PDF"
-          >
-            <FileDown className="w-4 h-4" />
-            <span>Baixar Minha Escala em PDF</span>
-          </button>
-        </div>
+        <button
+          onClick={handleExportSchedulePDF}
+          className="flex items-center justify-center gap-2 px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer"
+          title="Baixar escala completa e afazeres em PDF"
+        >
+          <FileDown className="w-4 h-4" />
+          <span>Baixar Escala PDF</span>
+        </button>
       </div>
 
       {/* 2. User Profile Card & Role Card Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left Card: Photo & Name Editing */}
-        <div className="lg:col-span-1 p-6 rounded-2xl bg-neutral-900 border border-neutral-800 flex flex-col items-center text-center space-y-4 shadow-xs">
+        <div className="lg:col-span-1 p-6 rounded-2xl bg-neutral-900 border border-neutral-800 flex flex-col items-center text-center space-y-4">
           {/* Avatar with Camera Trigger */}
           <div className="relative group">
-            <img
-              src={
-                user.avatar ||
-                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'
-              }
-              alt={user.name}
-              referrerPolicy="no-referrer"
-              className="w-28 h-28 sm:w-32 sm:h-32 rounded-full object-cover ring-4 ring-amber-500/30 border-2 border-neutral-800 shadow-xl"
-            />
+            {user.avatar && !avatarImgError ? (
+              <img
+                src={user.avatar}
+                alt={user.name}
+                onError={() => setAvatarImgError(true)}
+                referrerPolicy="no-referrer"
+                className="w-28 h-28 rounded-full object-cover ring-2 ring-amber-400/50 border-2 border-neutral-800"
+              />
+            ) : (
+              <div className="w-28 h-28 rounded-full bg-amber-400/15 text-amber-400 ring-2 ring-amber-400/40 border border-neutral-800 flex items-center justify-center text-2xl font-bold">
+                {(user.name || 'M').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()}
+              </div>
+            )}
 
             {/* Hover/Touch Overlay */}
             <button
@@ -415,71 +412,70 @@ export const ProfileView: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Cards: Cargo / Role Details & Permissions */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Cargo Details Card */}
-          <div className="p-6 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-4 shadow-xs">
+        {/* Right Card: Cargo / Role Details */}
+        <div className="lg:col-span-2">
+          <div className="p-5 sm:p-6 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
               <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-amber-400" />
-                <h3 className="text-sm font-bold text-neutral-100 uppercase tracking-wider">
-                  Cargo & Atribuições na Igreja
+                <Shield className="w-4 h-4 text-amber-400" />
+                <h3 className="text-sm font-bold text-neutral-100">
+                  Cargo e Atribuições
                 </h3>
               </div>
-              <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${roleStyle.textClass} ${roleStyle.borderClass} bg-neutral-800/90`}>
+              <span className="text-xs font-semibold text-amber-400">
                 {user.roleLabel}
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-              <div className="p-3.5 rounded-xl bg-neutral-950/60 border border-neutral-800 space-y-1">
-                <span className="text-[10px] uppercase font-bold text-neutral-400 block tracking-wider">
-                  Ministério / Equipe
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-neutral-800 border border-neutral-800 rounded-xl overflow-hidden text-xs">
+              <div className="p-3.5 bg-neutral-950/70 space-y-0.5">
+                <span className="text-[11px] text-neutral-400 block">
+                  Ministério
                 </span>
                 <p className="font-semibold text-neutral-200">PT-B Mídia & Comunicação</p>
                 <p className="text-[11px] text-neutral-400">IEADAM Petrópolis B</p>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-neutral-950/60 border border-neutral-800 space-y-1">
-                <span className="text-[10px] uppercase font-bold text-neutral-400 block tracking-wider">
-                  Status da Conta
+              <div className="p-3.5 bg-neutral-950/70 space-y-0.5">
+                <span className="text-[11px] text-neutral-400 block">
+                  Status
                 </span>
                 <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Membro Ativo & Verificado</span>
+                  <span>Membro Ativo</span>
                 </div>
-                <p className="text-[11px] text-neutral-400">Sincronização em tempo real</p>
+                <p className="text-[11px] text-neutral-400">Conta verificada</p>
               </div>
             </div>
 
             {/* Permissions summary */}
-            <div className="space-y-2 pt-2">
-              <span className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider block">
-                Permissões do seu Cargo:
+            <div className="space-y-2 pt-1">
+              <span className="text-xs font-semibold text-neutral-400 block">
+                Permissões liberadas
               </span>
               <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-neutral-300">
-                <li className="flex items-center gap-2 p-2 rounded-lg bg-neutral-950/40 border border-neutral-800/80">
+                <li className="flex items-center gap-2 p-2.5 rounded-xl bg-neutral-950/50 border border-neutral-800">
                   <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>Upload e Download de fotos e vídeos em 4K</span>
+                  <span>Upload e download em resolução original</span>
                 </li>
-                <li className="flex items-center gap-2 p-2 rounded-lg bg-neutral-950/40 border border-neutral-800/80">
+                <li className="flex items-center gap-2 p-2.5 rounded-xl bg-neutral-950/50 border border-neutral-800">
                   <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>Acesso à agenda oficial e escalas de cultos</span>
+                  <span>Agenda oficial e escalas de cultos</span>
                 </li>
-                <li className="flex items-center gap-2 p-2 rounded-lg bg-neutral-950/40 border border-neutral-800/80">
+                <li className="flex items-center gap-2 p-2.5 rounded-xl bg-neutral-950/50 border border-neutral-800">
                   <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>Gerenciamento de afazeres privados e notas</span>
+                  <span>Afazeres privados e exportação em PDF</span>
                 </li>
                 {user.role === 'super_admin' && (
-                  <li className="flex items-center gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300">
+                  <li className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300">
                     <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span>Acesso Total Super Admin (Usuários, Configs)</span>
+                    <span>Super Admin (Usuários e Configurações)</span>
                   </li>
                 )}
                 {(user.role === 'super_admin' || user.canManageChurchPage) && (
-                  <li className="flex items-center gap-2 p-2 rounded-lg bg-neutral-950/40 border border-neutral-800/80">
+                  <li className="flex items-center gap-2 p-2.5 rounded-xl bg-neutral-950/50 border border-neutral-800">
                     <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Gerenciamento do Site Público da Igreja</span>
+                    <span>Gestão da página pública da igreja</span>
                   </li>
                 )}
               </ul>
@@ -490,45 +486,43 @@ export const ProfileView: React.FC = () => {
 
       {/* 3. Escala Pessoal & Afazeres Privados */}
       <div className="space-y-4">
-        {/* Section Header & Actions */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-neutral-900 border border-neutral-800 rounded-2xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-neutral-800">
           <div>
-            <h2 className="text-base font-bold text-neutral-100 flex items-center gap-2">
-              <CalendarDays className="w-5 h-5 text-amber-400" />
-              <span>Minha Escala & Afazeres Pessoais</span>
+            <h2 className="text-base font-bold text-neutral-100">
+              Minha Escala e Afazeres
             </h2>
             <p className="text-xs text-neutral-400 mt-0.5">
-              Visualize suas tarefas atribuídas, marque como concluídas ou exporte a lista completa em PDF.
+              Tarefas atribuídas e afazeres privados.
             </p>
           </div>
 
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
             <button
               onClick={() => setIsNewTaskOpen(true)}
-              className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 font-semibold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3.5 min-h-[38px] bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 font-semibold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 text-amber-400" />
-              <span>Novo Afazer Privado</span>
+              <span>Novo afazer</span>
             </button>
 
             <button
               onClick={handleExportSchedulePDF}
-              className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3.5 min-h-[38px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <FileDown className="w-3.5 h-3.5" />
-              <span>Baixar Escala (PDF)</span>
+              <span>Escala PDF</span>
             </button>
           </div>
         </div>
 
         {/* Filter Tabs & Search */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-1 p-1 bg-neutral-900 border border-neutral-800 rounded-xl w-fit">
+          <div className="flex items-center gap-1 p-1 bg-neutral-900 border border-neutral-800 rounded-xl w-full sm:w-fit overflow-x-auto no-scrollbar">
             <button
               onClick={() => setTaskFilter('all')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              className={`px-3 min-h-[34px] rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                 taskFilter === 'all'
-                  ? 'bg-amber-400 text-neutral-950 shadow-xs'
+                  ? 'bg-amber-400 text-neutral-950'
                   : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
@@ -536,9 +530,9 @@ export const ProfileView: React.FC = () => {
             </button>
             <button
               onClick={() => setTaskFilter('pending')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              className={`px-3 min-h-[34px] rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                 taskFilter === 'pending'
-                  ? 'bg-amber-400 text-neutral-950 shadow-xs'
+                  ? 'bg-amber-400 text-neutral-950'
                   : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
@@ -546,9 +540,9 @@ export const ProfileView: React.FC = () => {
             </button>
             <button
               onClick={() => setTaskFilter('completed')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              className={`px-3 min-h-[34px] rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                 taskFilter === 'completed'
-                  ? 'bg-amber-400 text-neutral-950 shadow-xs'
+                  ? 'bg-amber-400 text-neutral-950'
                   : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
@@ -556,13 +550,13 @@ export const ProfileView: React.FC = () => {
             </button>
             <button
               onClick={() => setTaskFilter('private')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              className={`px-3 min-h-[34px] rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                 taskFilter === 'private'
-                  ? 'bg-amber-400 text-neutral-950 shadow-xs'
+                  ? 'bg-amber-400 text-neutral-950'
                   : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
-              Afazeres Privados ({privateCount})
+              Privados ({privateCount})
             </button>
           </div>
 
@@ -572,7 +566,7 @@ export const ProfileView: React.FC = () => {
               value={taskSearch}
               onChange={(e) => setTaskSearch(e.target.value)}
               placeholder="Filtrar tarefas..."
-              className="w-full px-3 py-1.5 text-xs bg-neutral-900 border border-neutral-800 rounded-xl text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-amber-500/80 focus:ring-1 focus:ring-amber-500/40"
+              className="w-full px-3 min-h-[38px] text-xs bg-neutral-900 border border-neutral-800 rounded-xl text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-amber-500/80"
             />
           </div>
         </div>
@@ -682,7 +676,7 @@ export const ProfileView: React.FC = () => {
 
                   {/* Footer: Date, Status toggle & PDF Download */}
                   <div className="pt-2 border-t border-neutral-800/80 flex items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-1.5 text-neutral-400 font-mono-numbers text-[11px]">
+                    <div className="flex items-center gap-1.5 text-neutral-400 font-mono tabular-nums text-[11px]">
                       <Calendar className="w-3.5 h-3.5 text-amber-400" />
                       <span>{formatDate(task.dueDate)}</span>
                       {task.dueTime && (
@@ -833,7 +827,7 @@ export const ProfileView: React.FC = () => {
                     type="date"
                     value={newDueDate}
                     onChange={(e) => setNewDueDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 font-mono-numbers"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 font-mono tabular-nums"
                   />
                 </div>
 
@@ -845,7 +839,7 @@ export const ProfileView: React.FC = () => {
                     type="time"
                     value={newDueTime}
                     onChange={(e) => setNewDueTime(e.target.value)}
-                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 font-mono-numbers"
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 font-mono tabular-nums"
                   />
                 </div>
               </div>

@@ -47,9 +47,15 @@ export const ChurchDownloads: React.FC<ChurchDownloadsProps> = ({ downloads }) =
     try {
       setDownloadingId(item.id);
       await api.incrementChurchDownloadCount(item.id);
-      api.triggerDownload(item.fileUrl, `${item.title}.${item.format || 'pdf'}`);
+      await api.triggerDownload(item.fileUrl, `${item.title}.${item.format || 'pdf'}`);
     } catch {
-      window.open(item.fileUrl, '_blank');
+      const link = document.createElement('a');
+      link.href = item.fileUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => link.remove(), 500);
     } finally {
       setTimeout(() => {
         setDownloadingId(null);

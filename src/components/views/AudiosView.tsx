@@ -59,20 +59,19 @@ export const AudiosView: React.FC = () => {
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
         <div>
-          <h1 className="text-lg font-bold text-neutral-100 flex items-center gap-2">
-            <Music className="w-5 h-5 text-emerald-400" />
-            Acervo de Áudios, Pregações & Multitracks
+          <h1 className="text-xl font-bold text-neutral-100">
+            Acervo de Áudios
           </h1>
           <p className="text-xs text-neutral-400 mt-0.5">
-            Gravações de cultos em master WAV 96kHz, multitracks da equipe de louvor e podcasts da igreja.
+            Pregações, ensaios, louvor e multitracks ({audios.length} faixas).
           </p>
         </div>
 
         <button
           onClick={() => openUpload()}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs shadow-sm transition-all"
+          className="flex items-center justify-center gap-2 px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer"
         >
           <Upload className="w-4 h-4" />
           <span>Enviar áudios</span>
@@ -97,12 +96,12 @@ export const AudiosView: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="space-y-2.5">
+        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden divide-y divide-neutral-800">
           {audios.map((audio) => (
             <div
               key={audio.id}
               onClick={() => setAudioPlayerFile(audio)}
-              className="group p-4 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 hover:bg-neutral-800/60 cursor-pointer transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+              className="group p-4 hover:bg-neutral-800/40 cursor-pointer transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 group-hover:bg-amber-400 group-hover:text-neutral-950 transition-colors">
@@ -110,10 +109,10 @@ export const AudiosView: React.FC = () => {
                 </div>
 
                 <div className="min-w-0">
-                  <span className="font-semibold text-neutral-200 text-xs truncate block group-hover:text-amber-300">
+                  <span className="font-semibold text-neutral-200 text-xs sm:text-sm truncate block group-hover:text-amber-300">
                     {audio.name}
                   </span>
-                  <div className="flex items-center gap-2 text-[11px] text-neutral-400 font-mono-numbers mt-0.5">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-neutral-400 font-mono tabular-nums mt-0.5">
                     <span className="uppercase text-emerald-400 font-medium">{audio.extension}</span>
                     <span aria-hidden="true">·</span>
                     <span>{formatBytes(audio.size)}</span>
@@ -122,7 +121,7 @@ export const AudiosView: React.FC = () => {
                     {audio.duration && (
                       <>
                         <span aria-hidden="true">·</span>
-                        <span>Duração: {audio.duration}</span>
+                        <span>{audio.duration}</span>
                       </>
                     )}
                   </div>
@@ -133,7 +132,7 @@ export const AudiosView: React.FC = () => {
               <div className="flex items-center gap-2 self-end sm:self-auto shrink-0" onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={(e) => handleShare(e, audio)}
-                  className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+                  className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-xl transition-colors cursor-pointer"
                   title="Compartilhar"
                 >
                   <Share2 className="w-4 h-4" />
@@ -141,7 +140,7 @@ export const AudiosView: React.FC = () => {
 
                 <button
                   onClick={() => setAudioPlayerFile(audio)}
-                  className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors"
+                  className="px-3 min-h-[36px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Play className="w-3 h-3 fill-current" />
                   <span>Ouvir</span>
@@ -149,10 +148,10 @@ export const AudiosView: React.FC = () => {
 
                 <button
                   onClick={(e) => handleDownload(e, audio)}
-                  className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors shadow-xs"
+                  className="px-3 min-h-[36px] bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Download className="w-3 h-3" />
-                  <span>Baixar Master</span>
+                  <span>Baixar</span>
                 </button>
               </div>
             </div>

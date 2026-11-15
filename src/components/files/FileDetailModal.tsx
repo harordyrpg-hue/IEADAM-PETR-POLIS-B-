@@ -53,7 +53,7 @@ export const FileDetailModal: React.FC = () => {
   const currentEvent = events.find((e) => e.id === detailFile.eventId);
 
   const handleDownload = () => {
-    api.triggerDownload(`/api/files/${detailFile.id}/download`);
+    api.triggerDownload(detailFile, detailFile.name);
     notify(`Iniciando download do original: ${detailFile.name}`, 'info');
   };
 

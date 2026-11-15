@@ -41,7 +41,7 @@ import {
 type AdminChurchSubTab = 'profile' | 'announcements' | 'events' | 'articles' | 'gallery' | 'downloads';
 
 export const ChurchAdminView: React.FC = () => {
-  const { user } = useApp();
+  const { user, requestConfirm, openExternalUrl } = useApp();
   const isSuperAdmin = user?.role === 'super_admin';
   const canManage = isSuperAdmin || user?.canManageChurchPage === true;
 
@@ -214,7 +214,13 @@ export const ChurchAdminView: React.FC = () => {
   };
 
   const handleDeleteAnnouncement = async (id: string) => {
-    if (!confirm('Deseja realmente excluir este comunicado?')) return;
+    const confirmed = await requestConfirm({
+      title: 'Excluir comunicado',
+      message: 'Deseja realmente excluir este comunicado?',
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteChurchAnnouncement(id);
       notifySuccess('Comunicado removido');
@@ -259,7 +265,13 @@ export const ChurchAdminView: React.FC = () => {
   };
 
   const handleDeleteEvent = async (id: string) => {
-    if (!confirm('Deseja realmente excluir este evento?')) return;
+    const confirmed = await requestConfirm({
+      title: 'Excluir evento',
+      message: 'Deseja realmente excluir este evento?',
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteChurchPublicEvent(id);
       notifySuccess('Evento removido');
@@ -304,7 +316,13 @@ export const ChurchAdminView: React.FC = () => {
   };
 
   const handleDeleteArticle = async (id: string) => {
-    if (!confirm('Deseja excluir este artigo?')) return;
+    const confirmed = await requestConfirm({
+      title: 'Excluir artigo',
+      message: 'Deseja excluir este artigo?',
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteChurchArticle(id);
       notifySuccess('Artigo excluído');
@@ -349,7 +367,13 @@ export const ChurchAdminView: React.FC = () => {
   };
 
   const handleDeleteAlbum = async (id: string) => {
-    if (!confirm('Deseja excluir este álbum de fotos e vídeos?')) return;
+    const confirmed = await requestConfirm({
+      title: 'Excluir álbum',
+      message: 'Deseja excluir este álbum de fotos e vídeos?',
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteChurchAlbum(id);
       notifySuccess('Álbum excluído');
@@ -393,7 +417,13 @@ export const ChurchAdminView: React.FC = () => {
   };
 
   const handleDeleteDownload = async (id: string) => {
-    if (!confirm('Deseja remover este arquivo de download?')) return;
+    const confirmed = await requestConfirm({
+      title: 'Remover material',
+      message: 'Deseja remover este arquivo de download?',
+      confirmLabel: 'Remover',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteChurchDownload(id);
       notifySuccess('Material removido');
@@ -407,29 +437,21 @@ export const ChurchAdminView: React.FC = () => {
     <div className="space-y-6">
       
       {/* Header with Church info & Quick View Button */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-stone-900/90 border border-stone-800 p-5 rounded-2xl shadow-sm">
-        <div className="flex items-center gap-3.5">
-          <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl">
-            <Church className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
-              Gestão da Página da Igreja
-              <span className="text-xs font-normal px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                Pública: /?site ou #site
-              </span>
-            </h1>
-            <p className="text-xs sm:text-sm text-stone-400 mt-0.5">
-              Gerencie todo o conteúdo institucional, avisos, cultos, artigos e mídias visíveis aos visitantes.
-            </p>
-          </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
+        <div>
+          <h1 className="text-xl font-bold text-neutral-100">
+            Site Público da Igreja
+          </h1>
+          <p className="text-xs text-neutral-400 mt-0.5">
+            Avisos, agenda de cultos, artigos, galeria e downloads públicos.
+          </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={loadAllData}
             disabled={loading}
-            className="p-2.5 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-xl transition-colors border border-stone-700 cursor-pointer"
+            className="p-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl transition-colors border border-neutral-800 cursor-pointer"
             title="Recarregar dados"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -438,29 +460,24 @@ export const ChurchAdminView: React.FC = () => {
           <button
             type="button"
             onClick={() => {
-              window.open(`${window.location.origin}/?site`, '_blank');
+              openExternalUrl(`${window.location.origin}/?site`);
             }}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-medium text-sm shadow-md shadow-amber-950/40 transition-all cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 min-h-[40px] rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold text-xs transition-all cursor-pointer whitespace-nowrap"
           >
             <Eye className="w-4 h-4" />
-            <span>Ver Site da Igreja</span>
+            <span>Ver Site</span>
             <ExternalLink className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
       {/* Public Link Sharing Box */}
-      <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
-            <ExternalLink className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <span className="text-xs font-semibold text-amber-300 block">Link Oficial para Divulgação da Igreja</span>
-            <span className="text-xs text-stone-300 font-mono select-all truncate block">
-              {typeof window !== 'undefined' ? `${window.location.origin}/?site` : '/?site'}
-            </span>
-          </div>
+      <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="min-w-0">
+          <span className="text-xs font-semibold text-amber-400 block">Link Público da Igreja</span>
+          <span className="text-xs text-neutral-300 font-mono select-all truncate block mt-0.5">
+            {typeof window !== 'undefined' ? `${window.location.origin}/?site` : '/?site'}
+          </span>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -471,7 +488,7 @@ export const ChurchAdminView: React.FC = () => {
               navigator.clipboard.writeText(url);
               notifySuccess('Link copiado! Envie pelo WhatsApp ou redes sociais.');
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition-all cursor-pointer shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold transition-all cursor-pointer"
           >
             <Copy className="w-3.5 h-3.5" />
             <span>Copiar Link</span>
@@ -482,104 +499,104 @@ export const ChurchAdminView: React.FC = () => {
             onClick={() => {
               window.location.hash = '#site';
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium border border-stone-700 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium border border-neutral-700 transition-all cursor-pointer"
           >
             <Eye className="w-3.5 h-3.5" />
-            <span>Visualizar Aqui</span>
+            <span>Abrir</span>
           </button>
         </div>
       </div>
 
       {/* Alerts */}
       {successMessage && (
-        <div className="p-4 bg-emerald-950/60 border border-emerald-800/80 rounded-xl text-emerald-200 text-sm flex items-center gap-2.5">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+        <div className="p-3.5 bg-emerald-950/60 border border-emerald-800/80 rounded-xl text-emerald-200 text-xs flex items-center gap-2.5">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{successMessage}</span>
         </div>
       )}
       {errorMessage && (
-        <div className="p-4 bg-red-950/60 border border-red-800/80 rounded-xl text-red-200 text-sm flex items-center justify-between gap-2.5">
+        <div className="p-3.5 bg-red-950/60 border border-red-800/80 rounded-xl text-red-200 text-xs flex items-center justify-between gap-2.5">
           <div className="flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
             <span>{errorMessage}</span>
           </div>
-          <button onClick={() => setErrorMessage(null)} className="text-stone-400 hover:text-white">
+          <button onClick={() => setErrorMessage(null)} className="text-neutral-400 hover:text-white cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
       {/* Sub-Tabs Nav */}
-      <div className="flex overflow-x-auto gap-2 p-1.5 bg-stone-900 border border-stone-800 rounded-2xl scrollbar-none">
+      <div className="flex overflow-x-auto no-scrollbar gap-1.5 p-1 bg-neutral-900 border border-neutral-800 rounded-xl">
         <button
           onClick={() => setActiveSubTab('profile')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+          className={`flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
             activeSubTab === 'profile'
-              ? 'bg-amber-600 text-white shadow-sm'
-              : 'text-stone-400 hover:text-stone-200 hover:bg-stone-850'
+              ? 'bg-amber-400 text-neutral-950'
+              : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <Church className="w-4 h-4" />
-          <span>Dados & Institucional</span>
+          <Church className="w-3.5 h-3.5" />
+          <span>Dados Gerais</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('announcements')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+          className={`flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
             activeSubTab === 'announcements'
-              ? 'bg-amber-600 text-white shadow-sm'
-              : 'text-stone-400 hover:text-stone-200 hover:bg-stone-850'
+              ? 'bg-amber-400 text-neutral-950'
+              : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <Bell className="w-4 h-4" />
+          <Bell className="w-3.5 h-3.5" />
           <span>Comunicados ({announcements.length})</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('events')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+          className={`flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
             activeSubTab === 'events'
-              ? 'bg-amber-600 text-white shadow-sm'
-              : 'text-stone-400 hover:text-stone-200 hover:bg-stone-850'
+              ? 'bg-amber-400 text-neutral-950'
+              : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <Calendar className="w-4 h-4" />
-          <span>Agenda & Cultos ({events.length})</span>
+          <Calendar className="w-3.5 h-3.5" />
+          <span>Cultos ({events.length})</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('articles')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+          className={`flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
             activeSubTab === 'articles'
-              ? 'bg-amber-600 text-white shadow-sm'
-              : 'text-stone-400 hover:text-stone-200 hover:bg-stone-850'
+              ? 'bg-amber-400 text-neutral-950'
+              : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <BookOpen className="w-4 h-4" />
-          <span>Artigos & Devocionais ({articles.length})</span>
+          <BookOpen className="w-3.5 h-3.5" />
+          <span>Artigos ({articles.length})</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('gallery')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+          className={`flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
             activeSubTab === 'gallery'
-              ? 'bg-amber-600 text-white shadow-sm'
-              : 'text-stone-400 hover:text-stone-200 hover:bg-stone-850'
+              ? 'bg-amber-400 text-neutral-950'
+              : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <ImageIcon className="w-4 h-4" />
-          <span>Álbuns & Vídeos ({albums.length})</span>
+          <ImageIcon className="w-3.5 h-3.5" />
+          <span>Galeria ({albums.length})</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('downloads')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+          className={`flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
             activeSubTab === 'downloads'
-              ? 'bg-amber-600 text-white shadow-sm'
-              : 'text-stone-400 hover:text-stone-200 hover:bg-stone-850'
+              ? 'bg-amber-400 text-neutral-950'
+              : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
-          <Download className="w-4 h-4" />
+          <Download className="w-3.5 h-3.5" />
           <span>Downloads ({downloads.length})</span>
         </button>
       </div>

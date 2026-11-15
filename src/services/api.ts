@@ -2018,11 +2018,10 @@ export const api = {
   // ==========================================
   // 9. DOWNLOAD & MEDIA RESOLUTION HELPERS
   // ==========================================
-  async resolveMediaUrl(file: FileRecord): Promise<string | null> {
-    if (file.thumbnailUrl && !file.thumbnailUrl.startsWith('chunked://')) {
-      return file.thumbnailUrl;
-    }
-    const source = file.thumbnailUrl || file.downloadUrl;
+  async resolveMediaUrl(file: FileRecord, preferOriginal: boolean = false): Promise<string | null> {
+    const primary = preferOriginal ? file.downloadUrl : file.thumbnailUrl;
+    const secondary = preferOriginal ? file.thumbnailUrl : file.downloadUrl;
+    const source = primary || secondary;
     if (!source) return null;
 
     if (source.startsWith('data:') || source.startsWith('http') || source.startsWith('/uploads/')) {
@@ -2049,14 +2048,59 @@ export const api = {
           }
           byteArrays.push(u8arr);
         }
-        const blob = new Blob(byteArrays as any, { type: file.mimeType || 'image/jpeg' });
+        const blob = new Blob(byteArrays as any, {
+          type: file.mimeType || (preferOriginal ? 'application/octet-stream' : 'image/jpeg'),
+        });
         return URL.createObjectURL(blob);
       } catch (err) {
         console.warn('Error resolving chunked media URL:', err);
         return null;
       }
     }
-    return null;
+    return source;
+  },
+
+  async resolveFileBlob(file: FileRecord): Promise<Blob | null> {
+    const url = file.downloadUrl || file.thumbnailUrl;
+    if (!url) return null;
+
+    if (url.startsWith('chunked://')) {
+      const fileId = url.replace('chunked://', '');
+      const q = query(collection(db, 'file_chunks'), where('fileId', '==', fileId));
+      const snap = await getDocs(q);
+      const sortedDocs = snap.docs
+        .map((d) => d.data() as { chunkIndex: number; data: string })
+        .sort((a, b) => a.chunkIndex - b.chunkIndex);
+
+      if (sortedDocs.length === 0) return null;
+
+      const byteArrays: Uint8Array[] = [];
+      for (const docItem of sortedDocs) {
+        const bstr = atob(docItem.data);
+        const u8arr = new Uint8Array(bstr.length);
+        for (let i = 0; i < bstr.length; i++) {
+          u8arr[i] = bstr.charCodeAt(i);
+        }
+        byteArrays.push(u8arr);
+      }
+      return new Blob(byteArrays as any, { type: file.mimeType || 'application/octet-stream' });
+    }
+
+    if (url.startsWith('data:')) {
+      const arr = url.split(',');
+      const mime = arr[0].match(/:(.*?);/)?.[1] || file.mimeType || 'application/octet-stream';
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      return new Blob([u8arr] as any, { type: mime });
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return await response.blob();
   },
 
   async triggerDownload(urlOrRecord: string | FileRecord, customFilename?: string) {
@@ -2198,9 +2242,10 @@ export const api = {
 
     for (const file of files) {
       try {
-        const response = await fetch(file.downloadUrl);
-        const blob = await response.blob();
-        zip.file(file.name, blob);
+        const blob = await api.resolveFileBlob(file);
+        if (blob) {
+          zip.file(file.name, blob);
+        }
       } catch (err) {
         console.warn(`Could not fetch file for zip: ${file.name}`, err);
       }
@@ -2213,8 +2258,10 @@ export const api = {
     link.download = `${zipName}.zip`;
     document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
-    document.body.removeChild(link);
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      link.remove();
+    }, 1000);
   },
 
   async downloadFolderZip(folder: Folder) {
@@ -2238,9 +2285,10 @@ export const api = {
     for (const file of files) {
       try {
         const folderName = categorySubfolders[file.type] || '06_Outros';
-        const response = await fetch(file.downloadUrl);
-        const blob = await response.blob();
-        zip.folder(folderName)?.file(file.name, blob);
+        const blob = await api.resolveFileBlob(file);
+        if (blob) {
+          zip.folder(folderName)?.file(file.name, blob);
+        }
       } catch (err) {
         console.warn(`Could not download file for event zip: ${file.name}`, err);
       }
@@ -2253,8 +2301,10 @@ export const api = {
     link.download = `${event.name.replace(/[^a-zA-Z0-9_\-\s]/g, '')}_COMPLETO.zip`;
     document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
-    document.body.removeChild(link);
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      link.remove();
+    }, 1000);
   },
 
   // ==========================================

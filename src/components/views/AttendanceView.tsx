@@ -81,7 +81,7 @@ function getTodayISO(): string {
 }
 
 export const AttendanceView: React.FC = () => {
-  const { user, notify } = useApp();
+  const { user, notify, requestConfirm } = useApp();
 
   const [departments, setDepartments] = useState<AttendanceDepartment[]>([]);
   const [members, setMembers] = useState<AttendanceMember[]>([]);
@@ -723,13 +723,13 @@ export const AttendanceView: React.FC = () => {
 
   const handleDeleteDepartment = async (dept: AttendanceDepartment) => {
     const count = members.filter((m) => m.departmentId === dept.id).length;
-    if (
-      !confirm(
-        `Excluir "${dept.name}"${count > 0 ? ` e seus ${count} membro(s)` : ''}? Esta ação não pode ser desfeita.`
-      )
-    ) {
-      return;
-    }
+    const confirmed = await requestConfirm({
+      title: `Excluir "${dept.name}"`,
+      message: `Excluir "${dept.name}"${count > 0 ? ` e seus ${count} membro(s)` : ''}? Esta ação não pode ser desfeita.`,
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteAttendanceDepartment(dept.id, dept.name);
       if (departmentFilter === dept.id) setDepartmentFilter('all');
@@ -825,7 +825,13 @@ export const AttendanceView: React.FC = () => {
 
   const handleDeleteMember = async (member: AttendanceMember) => {
     setOpenMenuMemberId(null);
-    if (!confirm(`Excluir o membro "${member.name}" permanentemente?`)) return;
+    const confirmed = await requestConfirm({
+      title: 'Excluir membro',
+      message: `Excluir o membro "${member.name}" permanentemente?`,
+      confirmLabel: 'Excluir',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteAttendanceMember(member.id, member.name);
       if (
@@ -928,13 +934,13 @@ export const AttendanceView: React.FC = () => {
     }
 
     const callLabel = draftTitle.trim() || activeCall?.title || 'Chamada Geral';
-    if (
-      !confirm(
-        `Deseja restaurar a chamada "${callLabel}" (${formatAttendanceDateBR(selectedDate)}) e reiniciar do zero? Todas as marcações deste dia serão apagadas.`
-      )
-    ) {
-      return;
-    }
+    const confirmed = await requestConfirm({
+      title: 'Restaurar chamada do zero',
+      message: `Deseja restaurar a chamada "${callLabel}" (${formatAttendanceDateBR(selectedDate)}) e reiniciar do zero? Todas as marcações deste dia serão apagadas.`,
+      confirmLabel: 'Restaurar chamada',
+      danger: true,
+    });
+    if (!confirmed) return;
 
     try {
       setIsResettingCall(true);
@@ -1564,7 +1570,14 @@ export const AttendanceView: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => api.ensureInitialAttendanceRoster(true)}
+                  onClick={async () => {
+                    try {
+                      await api.ensureInitialAttendanceRoster(true);
+                      notify('Lista inicial de departamentos e membros restaurada!', 'success');
+                    } catch {
+                      notify('Erro ao restaurar a lista inicial.', 'error');
+                    }
+                  }}
                   className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl border border-neutral-700 cursor-pointer flex items-center gap-1.5"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -1587,9 +1600,9 @@ export const AttendanceView: React.FC = () => {
                   return (
                     <section
                       key={group.department.id}
-                      className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden"
+                      className="bg-neutral-900 border border-neutral-800 rounded-2xl"
                     >
-                      <div className="px-4 py-3 bg-neutral-950/70 border-b border-neutral-800 flex flex-wrap items-center justify-between gap-2">
+                      <div className="px-4 py-3 bg-neutral-950/70 border-b border-neutral-800 rounded-t-2xl flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <h3 className="text-sm font-bold text-neutral-100 truncate">
                             {group.department.name}
@@ -1737,10 +1750,10 @@ export const AttendanceView: React.FC = () => {
                 return (
                   <section
                     key={group.department.id}
-                    className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden"
+                    className="bg-neutral-900 border border-neutral-800 rounded-2xl"
                   >
                     {/* Department Header */}
-                    <div className="px-4 py-3 bg-neutral-950/70 border-b border-neutral-800 flex flex-wrap items-center justify-between gap-2.5">
+                    <div className="px-4 py-3 bg-neutral-950/70 border-b border-neutral-800 rounded-t-2xl flex flex-wrap items-center justify-between gap-2.5">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-sm font-bold text-neutral-100">
@@ -1812,7 +1825,9 @@ export const AttendanceView: React.FC = () => {
                           return (
                             <div
                               key={member.id}
-                              className={`px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-colors ${
+                              className={`px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-colors last:rounded-b-2xl ${
+                                menuOpen ? 'relative z-20' : ''
+                              } ${
                                 isAbsent
                                   ? 'bg-red-950/20'
                                   : isPresent
@@ -1919,11 +1934,11 @@ export const AttendanceView: React.FC = () => {
                                 {menuOpen && (
                                   <>
                                     <div
-                                      className="fixed inset-0 z-10"
+                                      className="fixed inset-0 z-20"
                                       onClick={() => setOpenMenuMemberId(null)}
                                       aria-hidden="true"
                                     />
-                                    <div className="absolute right-0 top-11 z-20 w-48 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl p-1.5 space-y-0.5">
+                                    <div className="absolute right-0 top-11 z-30 w-48 bg-neutral-950 border border-neutral-800 rounded-xl shadow-2xl p-1.5 space-y-0.5">
                                       {(isPresent || isAbsent) && !isLockedByOther && (
                                         <button
                                           type="button"

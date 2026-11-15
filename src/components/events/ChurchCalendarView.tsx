@@ -72,7 +72,7 @@ interface ChurchCalendarViewProps {
 }
 
 export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMembers = [] }) => {
-  const { user, events, teamTasks, refreshEvents, updateTeamTask, notify } = useApp();
+  const { user, events, teamTasks, refreshEvents, updateTeamTask, notify, requestConfirm } = useApp();
 
   // Navigation state (Year & Month: 1-12)
   const today = new Date();
@@ -261,7 +261,13 @@ export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMemb
   };
 
   const handleDeleteEvent = async (eventId: string, eventName: string) => {
-    if (!confirm(`Deseja remover "${eventName}" do calendário?`)) return;
+    const confirmed = await requestConfirm({
+      title: 'Remover evento do calendário',
+      message: `Deseja remover "${eventName}" do calendário?`,
+      confirmLabel: 'Remover',
+      danger: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteEvent(eventId);
       await refreshEvents();
@@ -301,49 +307,28 @@ export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMemb
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
       {/* 1. Header & Download Bar */}
-      <div className="p-5 sm:p-6 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="p-4 sm:p-5 bg-neutral-900 border border-neutral-800 rounded-2xl flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <h2 className="text-xl sm:text-2xl font-bold text-neutral-100 tracking-tight">
-              Calendário da Igreja & Datas Festivas
-            </h2>
-            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              Visível a Todos os Usuários
-            </span>
-          </div>
-          <p className="text-xs sm:text-sm text-neutral-400 mt-1">
-            Feriados nacionais pré-configurados, cultos com horários específicos, anotações diárias e download completo em PDF ou Imagem.
+          <h2 className="text-lg font-bold text-neutral-100">
+            Calendário da Igreja
+          </h2>
+          <p className="text-xs text-neutral-400 mt-0.5 font-mono tabular-nums">
+            {monthHolidaysCount} feriados · {monthEventsCount} cultos · {monthTasksCount} escalas em {MONTH_NAMES[currentMonth - 1]}
           </p>
-
-          {/* Quick counts */}
-          <div className="flex items-center gap-4 mt-3 text-xs text-neutral-400 flex-wrap">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-400" />
-              <span>{monthHolidaysCount} feriados / festas em {MONTH_NAMES[currentMonth - 1]}</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-blue-400" />
-              <span>{monthEventsCount} cultos agendados</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span>{monthTasksCount} escalas técnicas</span>
-            </span>
-          </div>
         </div>
 
-        {/* Action Controls: Month Download Buttons */}
-        <div className="flex items-center gap-2 flex-wrap self-start lg:self-center">
+        {/* Action Controls */}
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => {
               exportMonthCalendarPDF(currentYear, currentMonth, events, teamTasks, allHolidaysForYear);
               notify(`Baixando PDF do Calendário de ${MONTH_NAMES[currentMonth - 1]} de ${currentYear}...`, 'success');
             }}
-            className="flex items-center gap-2 px-3.5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 border border-neutral-700 rounded-xl text-xs font-semibold shadow-xs transition-all active:scale-95 cursor-pointer"
-            title="Baixar Calendário do Mês Completo em PDF"
+            className="flex items-center gap-2 px-3.5 min-h-[38px] bg-neutral-800 hover:bg-neutral-700 text-neutral-100 border border-neutral-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+            title="Baixar Calendário do Mês em PDF"
           >
             <FileDown className="w-4 h-4 text-amber-400" />
-            <span>Baixar Mês (PDF)</span>
+            <span>PDF do Mês</span>
           </button>
 
           <button
@@ -351,11 +336,11 @@ export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMemb
               exportMonthCalendarImage(currentYear, currentMonth, events, teamTasks, allHolidaysForYear);
               notify(`Gerando Imagem (PNG) do Calendário de ${MONTH_NAMES[currentMonth - 1]}...`, 'success');
             }}
-            className="flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-neutral-950 font-extrabold rounded-xl text-xs shadow-md shadow-amber-500/20 transition-all active:scale-95 cursor-pointer border border-amber-300/40"
-            title="Baixar Calendário do Mês Completo em Imagem PNG (perfeito para grupos do WhatsApp)"
+            className="flex items-center gap-2 px-3.5 min-h-[38px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs transition-all cursor-pointer"
+            title="Baixar Calendário do Mês em Imagem PNG"
           >
-            <ImageIcon className="w-4 h-4 fill-neutral-950" />
-            <span>Baixar Mês (Imagem)</span>
+            <ImageIcon className="w-4 h-4" />
+            <span>Imagem PNG</span>
           </button>
         </div>
       </div>
@@ -462,7 +447,7 @@ export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMemb
                   {/* Top Bar inside cell: Day number + Today pill + quick add for admins */}
                   <div className="flex items-center justify-between gap-1 mb-0.5 sm:mb-1">
                     <span
-                      className={`inline-flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 rounded-full text-[11px] sm:text-xs font-bold font-mono-numbers ${
+                      className={`inline-flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 rounded-full text-[11px] sm:text-xs font-bold font-mono tabular-nums ${
                         isToday
                           ? 'bg-amber-400 text-neutral-950 font-black'
                           : holiday && cell.isCurrentMonth

@@ -59,6 +59,8 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
   const [pixCopied, setPixCopied] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [hasInteractedWithPayment, setHasInteractedWithPayment] = useState(false);
+  const [formFeedback, setFormFeedback] = useState<string | null>(null);
+  const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
 
   // Load Event Data
   useEffect(() => {
@@ -193,14 +195,15 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!event) return;
+    setFormFeedback(null);
 
     if (!fullName.trim() || !phone.trim()) {
-      alert('Por favor, preencha seu Nome Completo e Telefone.');
+      setFormFeedback('Por favor, preencha seu Nome Completo e Telefone.');
       return;
     }
 
     if (event.rulesAndNotes && !acceptedRules) {
-      alert('Por favor, marque a caixa confirmando que está ciente das regras do evento.');
+      setFormFeedback('Por favor, marque a caixa confirmando que está ciente das regras do evento.');
       return;
     }
 
@@ -235,7 +238,7 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
         setConfirmedRegistration(reg);
       }
     } catch {
-      alert('Erro ao confirmar inscrição. Tente novamente.');
+      setFormFeedback('Erro ao confirmar inscrição. Verifique sua conexão e tente novamente.');
     } finally {
       setIsSubmitting(false);
     }
@@ -793,19 +796,60 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
             {/* Cancel / Back button */}
             <div className="text-center pt-2">
               <button
-                onClick={() => {
-                  if (confirm('Deseja cancelar o processo e voltar ao formulário?')) {
-                    setPendingRegistration(null);
-                    sessionStorage.removeItem(`pending_reg_${eventId}`);
-                  }
-                }}
-                className="text-xs text-neutral-500 hover:text-neutral-300 underline"
+                type="button"
+                onClick={() => setIsCancelConfirmOpen(true)}
+                className="text-xs text-neutral-500 hover:text-neutral-300 underline cursor-pointer"
               >
                 Voltar e preencher novamente
               </button>
             </div>
           </div>
         </div>
+
+        {/* Non-blocking Cancel Registration Confirmation Modal */}
+        {isCancelConfirmOpen && (
+          <div
+            className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setIsCancelConfirmOpen(false)}
+          >
+            <div
+              className="w-full max-w-sm bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-4 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-neutral-100">Voltar ao formulário?</h3>
+                  <p className="text-xs text-neutral-400 mt-1 leading-relaxed">
+                    Deseja cancelar este aguardo de pagamento e voltar ao formulário para preencher novamente?
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCancelConfirmOpen(false)}
+                  className="px-3.5 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl cursor-pointer"
+                >
+                  Continuar aqui
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCancelConfirmOpen(false);
+                    setPendingRegistration(null);
+                    sessionStorage.removeItem(`pending_reg_${eventId}`);
+                  }}
+                  className="px-3.5 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl cursor-pointer"
+                >
+                  Voltar ao formulário
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1162,6 +1206,23 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
                   Declaro que li e estou ciente das regras, horários e orientações deste evento.
                 </span>
               </label>
+            )}
+
+            {/* Inline Form Validation Feedback */}
+            {formFeedback && (
+              <div className="p-3 bg-red-500/15 border border-red-500/30 rounded-xl flex items-start justify-between gap-2 text-xs text-red-300">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <span>{formFeedback}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormFeedback(null)}
+                  className="text-red-300 hover:text-white text-xs font-bold px-1 cursor-pointer"
+                >
+                  ×
+                </button>
+              </div>
             )}
 
             {/* Submit Button */}

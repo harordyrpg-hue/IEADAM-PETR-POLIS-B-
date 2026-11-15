@@ -79,31 +79,30 @@ export const HistoryView: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
         <div>
-          <h1 className="text-lg font-bold text-neutral-100 flex items-center gap-2">
-            <History className="w-5 h-5 text-amber-400" />
-            Histórico & Trilha de Auditoria
+          <h1 className="text-xl font-bold text-neutral-100">
+            Histórico e Auditoria
           </h1>
           <p className="text-xs text-neutral-400 mt-0.5">
-            Registro cronológico e imutável de todas as ações de upload, download, deleção e compartilhamento.
+            Registro de uploads, downloads, exclusões e compartilhamentos ({filtered.length}).
           </p>
         </div>
 
         {/* Filter & Search */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col xs:flex-row items-stretch xs:items-center gap-2 w-full sm:w-auto">
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Filtrar por nome ou arquivo..."
-            className="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-amber-500"
+            className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 min-h-[38px] text-xs text-neutral-200 focus:outline-none focus:border-amber-500 flex-1 sm:w-56"
           />
 
           <select
             value={filterAction}
             onChange={(e) => setFilterAction(e.target.value)}
-            className="bg-neutral-800 border border-neutral-700 rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-amber-500"
+            className="bg-neutral-900 border border-neutral-800 rounded-xl px-3 min-h-[38px] text-xs text-neutral-200 focus:outline-none focus:border-amber-500 cursor-pointer"
           >
             <option value="all">Todas as ações</option>
             <option value="upload">Uploads</option>
@@ -123,44 +122,74 @@ export const HistoryView: React.FC = () => {
           Nenhum registro encontrado para os filtros selecionados.
         </div>
       ) : (
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900 overflow-hidden overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-neutral-800 text-[11px] font-semibold text-neutral-400 uppercase tracking-wider bg-neutral-950/40">
-                <th className="px-4 py-3">Data e Horário</th>
-                <th className="px-4 py-3">Membro da Equipe</th>
-                <th className="px-4 py-3">Ação Executada</th>
-                <th className="px-4 py-3">Arquivo / Alvo</th>
-                <th className="px-4 py-3">Detalhes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((act) => (
-                <tr key={act.id} className="border-b border-neutral-800/60 hover:bg-neutral-800/40 transition-colors">
-                  <td className="px-4 py-3 text-neutral-400 font-mono-numbers whitespace-nowrap">
-                    {formatDateTime(act.createdAt)}
-                  </td>
-                  <td className="px-4 py-3 font-semibold text-neutral-200 whitespace-nowrap">
-                    {act.userName}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1 rounded bg-neutral-800 shrink-0">
-                        {getActionIcon(act.action)}
-                      </div>
-                      <span className="text-neutral-200">{act.actionLabel}</span>
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-900 overflow-hidden">
+          {/* Mobile Cards */}
+          <div className="md:hidden divide-y divide-neutral-800">
+            {filtered.map((act) => (
+              <div key={act.id} className="p-4 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="p-1.5 rounded-lg bg-neutral-800 shrink-0">
+                      {getActionIcon(act.action)}
                     </div>
-                  </td>
-                  <td className="px-4 py-3 font-medium text-neutral-300 truncate max-w-xs">
-                    {act.targetName}
-                  </td>
-                  <td className="px-4 py-3 text-neutral-400 text-[11px] truncate max-w-xs">
-                    {act.details || '—'}
-                  </td>
+                    <span className="text-xs font-semibold text-neutral-100 truncate">
+                      {act.actionLabel}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-neutral-400 font-mono tabular-nums shrink-0">
+                    {formatDateTime(act.createdAt)}
+                  </span>
+                </div>
+                <p className="text-xs text-neutral-300 font-medium truncate">
+                  {act.targetName}
+                </p>
+                <p className="text-[11px] text-neutral-400 truncate">
+                  {act.userName}{act.details ? ` · ${act.details}` : ''}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop Table */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-neutral-800 text-[11px] font-medium text-neutral-400 bg-neutral-950/50">
+                  <th className="px-4 py-3">Data e Horário</th>
+                  <th className="px-4 py-3">Membro</th>
+                  <th className="px-4 py-3">Ação</th>
+                  <th className="px-4 py-3">Alvo</th>
+                  <th className="px-4 py-3">Detalhes</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-neutral-800/70">
+                {filtered.map((act) => (
+                  <tr key={act.id} className="hover:bg-neutral-800/40 transition-colors">
+                    <td className="px-4 py-3 text-neutral-400 font-mono tabular-nums whitespace-nowrap">
+                      {formatDateTime(act.createdAt)}
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-neutral-200 whitespace-nowrap">
+                      {act.userName}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1 rounded bg-neutral-800 shrink-0">
+                          {getActionIcon(act.action)}
+                        </div>
+                        <span className="text-neutral-200">{act.actionLabel}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-medium text-neutral-300 truncate max-w-xs">
+                      {act.targetName}
+                    </td>
+                    <td className="px-4 py-3 text-neutral-400 text-[11px] truncate max-w-xs">
+                      {act.details || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

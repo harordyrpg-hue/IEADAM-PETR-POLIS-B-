@@ -34,7 +34,7 @@ export const PhotoLightbox: React.FC = () => {
     if (lightboxFile.thumbnailUrl && !lightboxFile.thumbnailUrl.startsWith('chunked://')) {
       setPhotoUrl(lightboxFile.thumbnailUrl);
     }
-    api.resolveMediaUrl(lightboxFile).then((url) => {
+    api.resolveMediaUrl(lightboxFile, true).then((url) => {
       if (isMounted && url) {
         setPhotoUrl(url);
       }

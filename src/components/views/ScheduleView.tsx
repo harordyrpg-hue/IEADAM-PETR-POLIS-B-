@@ -100,6 +100,7 @@ export const ScheduleView: React.FC = () => {
     updateTeamNote,
     deleteTeamNote,
     notify,
+    requestConfirm,
     isTransmitting,
     toggleTransmission,
   } = useApp();
@@ -263,85 +264,44 @@ export const ScheduleView: React.FC = () => {
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* 1. Page Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 sm:p-6 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-sm">
-        <div className="flex items-start sm:items-center gap-3.5">
-          <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl shrink-0">
-            <CalendarDays className="w-6 h-6" />
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 sm:p-5 bg-neutral-900 border border-neutral-800 rounded-2xl">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+            <CalendarDays className="w-5 h-5" />
           </div>
-          <div>
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-bold text-neutral-100 tracking-tight">
-                Central de Agenda & Escalas da Equipe
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Tempo Real
-              </span>
-            </div>
-            <p className="text-xs sm:text-sm text-neutral-400 mt-1">
-              Aba pessoal para cada usuário, tarefas privadas destinadas, escalas de cultos e exportação profissional em PDF.
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-xl font-bold text-neutral-100 tracking-tight truncate">
+              Agenda & Escalas
+            </h1>
+            <p className="text-xs text-neutral-400 mt-0.5 truncate">
+              Calendário de cultos, tarefas da equipe e anotações.
             </p>
           </div>
         </div>
 
         {/* Quick Actions */}
-        <div className="flex items-center gap-2 self-start lg:self-center flex-wrap">
-          {/* Montar Calendário Direct Button */}
-          <button
-            onClick={() => setActiveSubTab('calendar')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer ${
-              activeSubTab === 'calendar'
-                ? 'bg-amber-400 text-neutral-950 shadow-md font-extrabold'
-                : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700'
-            }`}
-          >
-            <CalendarDays className="w-4 h-4 text-amber-400" />
-            <span>📅 Montar Calendário</span>
-          </button>
-
-          {/* Quick Church Scale Generator (⚡ Escala Rápida do Culto) */}
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setIsFastScheduleModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-neutral-950 font-extrabold rounded-xl shadow-lg shadow-amber-500/25 transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer border border-amber-300/40"
-            title="Montar e disparar a escala de todos os postos de mídia do culto em 1 clique"
+            className="flex items-center gap-1.5 px-3.5 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl transition-colors active:scale-95 text-xs whitespace-nowrap shrink-0 cursor-pointer"
+            title="Montar escala completa do culto"
           >
-            <Zap className="w-4 h-4 fill-neutral-950" />
-            <span>⚡ Escala Rápida do Culto</span>
+            <Zap className="w-4 h-4" />
+            <span>Escala Rápida</span>
           </button>
 
-          {/* Transmissão para a Tela / Telão (PC) */}
           <button
             onClick={() => toggleTransmission()}
-            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer border ${
+            className={`flex items-center gap-1.5 px-3 min-h-[40px] rounded-xl text-xs font-semibold transition-colors active:scale-95 cursor-pointer border whitespace-nowrap shrink-0 ${
               isTransmitting
-                ? 'bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border-rose-500/50 shadow-md shadow-rose-950/40 animate-pulse'
-                : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700'
+                ? 'bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border-rose-500/50'
+                : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border-neutral-700'
             }`}
-            title={
-              isTransmitting
-                ? 'Parar de transmitir a tela'
-                : 'Transmitir tela do computador para o telão/projetor da igreja'
-            }
+            title={isTransmitting ? 'Parar transmissão' : 'Transmitir tela para o telão'}
           >
             <Tv className={`w-4 h-4 ${isTransmitting ? 'text-rose-400' : 'text-amber-400'}`} />
-            <span className="hidden sm:inline">{isTransmitting ? '⏹ Parar de transmitir' : '📺 Transmitir para a tela'}</span>
-            <span className="sm:hidden">{isTransmitting ? '⏹ Parar' : '📺 Telão'}</span>
+            <span>{isTransmitting ? 'Parar Telão' : 'Transmitir'}</span>
           </button>
-
-          {activeSubTab === 'my_schedule' && (
-            <button
-              onClick={() => {
-                if (user) {
-                  exportUserSchedulePDF(user, myTasks, myEvents);
-                  notify('Gerando PDF profissional da sua escala pessoal...', 'info');
-                }
-              }}
-              className="flex items-center gap-2 px-3.5 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 font-bold rounded-xl shadow-md transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer"
-            >
-              <FileDown className="w-4 h-4 text-amber-400" />
-              <span>Baixar Minha Escala (PDF)</span>
-            </button>
-          )}
 
           <button
             onClick={() => {
@@ -349,10 +309,10 @@ export const ScheduleView: React.FC = () => {
               setInitialEventForTask(null);
               setIsTaskModalOpen(true);
             }}
-            className="flex items-center gap-2 px-3.5 py-2.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 font-semibold rounded-xl transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer"
+            className="flex items-center gap-1.5 px-3 min-h-[40px] bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 font-semibold rounded-xl transition-colors active:scale-95 text-xs whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Plus className="w-4 h-4 text-amber-400" />
-            <span>Novo Afazer / Escala</span>
+            <span>Nova Tarefa</span>
           </button>
 
           <button
@@ -360,84 +320,76 @@ export const ScheduleView: React.FC = () => {
               setEditingNote(null);
               setIsNoteModalOpen(true);
             }}
-            className="flex items-center gap-2 px-3.5 py-2.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 font-medium rounded-xl transition-all active:scale-95 text-xs whitespace-nowrap cursor-pointer"
+            className="flex items-center gap-1.5 px-3 min-h-[40px] bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 font-semibold rounded-xl transition-colors active:scale-95 text-xs whitespace-nowrap shrink-0 cursor-pointer"
           >
             <StickyNote className="w-4 h-4 text-amber-400" />
-            <span>Nova Anotação</span>
+            <span>Nova Nota</span>
           </button>
         </div>
       </div>
 
-      {/* 2. Stats Summary Chips */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-3.5 bg-neutral-900 border border-neutral-800 rounded-xl flex items-center justify-between">
-          <div>
-            <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block">
-              Minhas Atribuições
+      {/* 2. Stats Hairline Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-neutral-800 border border-neutral-800 rounded-2xl overflow-hidden">
+        <div className="p-3.5 sm:p-4 bg-neutral-900 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <span className="text-xs text-neutral-400 block truncate">Minhas tarefas</span>
+            <span className="text-xl font-bold font-mono tabular-nums text-amber-400 mt-0.5 block">
+              {myTasks.length}
             </span>
-            <span className="text-xl font-bold font-mono-numbers text-amber-400">{myTasks.length}</span>
           </div>
-          <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
-            <UserCheck className="w-4 h-4" />
-          </div>
+          <UserCheck className="w-4 h-4 text-amber-400 shrink-0" />
         </div>
 
-        <div className="p-3.5 bg-neutral-900 border border-neutral-800 rounded-xl flex items-center justify-between">
-          <div>
-            <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block">
-              Meus Afazeres Pendentes
+        <div className="p-3.5 sm:p-4 bg-neutral-900 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <span className="text-xs text-neutral-400 block truncate">Pendentes</span>
+            <span className="text-xl font-bold font-mono tabular-nums text-neutral-100 mt-0.5 block">
+              {myPendingTasks}
             </span>
-            <span className="text-xl font-bold font-mono-numbers text-neutral-100">{myPendingTasks}</span>
           </div>
-          <div className="p-2 rounded-lg bg-neutral-800 text-neutral-400">
-            <Clock className="w-4 h-4" />
-          </div>
+          <Clock className="w-4 h-4 text-neutral-400 shrink-0" />
         </div>
 
-        <div className="p-3.5 bg-neutral-900 border border-neutral-800 rounded-xl flex items-center justify-between">
-          <div>
-            <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block">
-              Total Geral da Equipe
+        <div className="p-3.5 sm:p-4 bg-neutral-900 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <span className="text-xs text-neutral-400 block truncate">Total da equipe</span>
+            <span className="text-xl font-bold font-mono tabular-nums text-neutral-200 mt-0.5 block">
+              {totalTasks}
             </span>
-            <span className="text-xl font-bold font-mono-numbers text-neutral-200">{totalTasks}</span>
           </div>
-          <div className="p-2 rounded-lg bg-neutral-800 text-neutral-400">
-            <ListTodo className="w-4 h-4" />
-          </div>
+          <ListTodo className="w-4 h-4 text-neutral-400 shrink-0" />
         </div>
 
-        <div className="p-3.5 bg-neutral-900 border border-neutral-800 rounded-xl flex items-center justify-between">
-          <div>
-            <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block">
-              Cultos Agendados
+        <div className="p-3.5 sm:p-4 bg-neutral-900 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <span className="text-xs text-neutral-400 block truncate">Cultos</span>
+            <span className="text-xl font-bold font-mono tabular-nums text-sky-400 mt-0.5 block">
+              {events.length}
             </span>
-            <span className="text-xl font-bold font-mono-numbers text-sky-400">{events.length}</span>
           </div>
-          <div className="p-2 rounded-lg bg-sky-500/10 text-sky-400">
-            <Calendar className="w-4 h-4" />
-          </div>
+          <Calendar className="w-4 h-4 text-sky-400 shrink-0" />
         </div>
       </div>
 
       {/* 3. Sub-Navigation Tabs */}
-      <div className="flex items-center gap-1.5 p-1 bg-neutral-900 border border-neutral-800 rounded-xl w-full sm:w-fit overflow-x-auto no-scrollbar scroll-smooth">
+      <div className="flex items-center gap-1 p-1 bg-neutral-900 border border-neutral-800 rounded-xl w-full sm:w-fit overflow-x-auto no-scrollbar">
         <button
           onClick={() => setActiveSubTab('calendar')}
-          className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
             activeSubTab === 'calendar'
-              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
+              ? 'bg-amber-400 text-neutral-950 font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
           <CalendarDays className="w-4 h-4 shrink-0" />
-          <span>📅 Calendário & Feriados</span>
+          <span>Calendário</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('my_schedule')}
-          className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
             activeSubTab === 'my_schedule'
-              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
+              ? 'bg-amber-400 text-neutral-950 font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
@@ -447,9 +399,9 @@ export const ScheduleView: React.FC = () => {
 
         <button
           onClick={() => setActiveSubTab('tasks')}
-          className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
             activeSubTab === 'tasks'
-              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
+              ? 'bg-amber-400 text-neutral-950 font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
@@ -459,85 +411,70 @@ export const ScheduleView: React.FC = () => {
 
         <button
           onClick={() => setActiveSubTab('events')}
-          className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
             activeSubTab === 'events'
-              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
+              ? 'bg-amber-400 text-neutral-950 font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
           <Calendar className="w-4 h-4 shrink-0" />
-          <span>Cultos & Eventos ({events.length})</span>
+          <span>Cultos ({events.length})</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('notes')}
-          className={`flex items-center gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+          className={`flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
             activeSubTab === 'notes'
-              ? 'bg-amber-400 text-neutral-950 shadow-sm font-bold'
+              ? 'bg-amber-400 text-neutral-950 font-bold'
               : 'text-neutral-400 hover:text-neutral-200'
           }`}
         >
           <StickyNote className="w-4 h-4 shrink-0" />
-          <span>Anotações ({teamNotes.length})</span>
+          <span>Notas ({teamNotes.length})</span>
         </button>
       </div>
 
-      {/* ========================================================================= */}
-      {/* TAB: CALENDÁRIO DA IGREJA, DATAS FESTIVAS, HORÁRIOS & DOWNLOADS           */}
-      {/* ========================================================================= */}
+      {/* TAB: CALENDÁRIO DA IGREJA */}
       {activeSubTab === 'calendar' && (
         <ChurchCalendarView teamMembers={teamMembers} />
       )}
 
-      {/* ========================================================================= */}
-      {/* 4. TAB 1 CONTENT: MINHA ESCALA PESSOAL & AFAZERES DESTINADOS              */}
-      {/* ========================================================================= */}
+      {/* TAB: MINHA ESCALA PESSOAL */}
       {activeSubTab === 'my_schedule' && (
-        <div className="space-y-5 animate-in fade-in duration-200">
-          {/* Member Profile Overview Banner with PDF Action */}
-          <div className="p-5 bg-gradient-to-r from-neutral-900 via-neutral-900 to-amber-950/20 border border-neutral-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5">
-              <div className="relative">
-                {user?.avatar ? (
-                  <img
-                    src={user.avatar}
-                    alt={user.name}
-                    className="w-12 h-12 rounded-full object-cover border-2 border-amber-400"
-                  />
-                ) : (
-                  <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center font-bold text-base">
-                    {user?.name?.charAt(0) || 'U'}
-                  </div>
-                )}
-                <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-neutral-900" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold text-neutral-100">{user?.name}</h2>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                    {user?.roleLabel || 'Membro da Mídia'}
-                  </span>
+        <div className="space-y-4">
+          <div className="p-4 sm:p-5 bg-neutral-900 border border-neutral-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              {user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={user.name}
+                  className="w-11 h-11 rounded-full object-cover border border-amber-400/60 shrink-0"
+                />
+              ) : (
+                <div className="w-11 h-11 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold text-sm shrink-0">
+                  {user?.name?.charAt(0) || 'U'}
                 </div>
-                <p className="text-xs text-neutral-400 mt-0.5">
-                  {user?.email} · Suas escalas, tarefas privadas solicitadas e afazeres operacionais.
+              )}
+              <div className="min-w-0">
+                <h2 className="text-sm sm:text-base font-bold text-neutral-100 truncate">{user?.name}</h2>
+                <p className="text-xs text-neutral-400 truncate mt-0.5">
+                  {user?.roleLabel || 'Membro da Mídia'} · Suas tarefas e escalas
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 self-start md:self-center">
-              <button
-                onClick={() => {
-                  if (user) {
-                    exportUserSchedulePDF(user, myTasks, myEvents);
-                    notify('Baixando PDF profissional da sua escala...', 'success');
-                  }
-                }}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
-              >
-                <FileDown className="w-4 h-4" />
-                <span>Baixar PDF da Minha Escala</span>
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                if (user) {
+                  exportUserSchedulePDF(user, myTasks, myEvents);
+                  notify('Baixando PDF da sua escala...', 'success');
+                }
+              }}
+              className="flex items-center justify-center gap-1.5 px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs transition-colors active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <FileDown className="w-4 h-4" />
+              <span>Baixar Minha Escala (PDF)</span>
+            </button>
           </div>
 
           {/* Personal Filter Bar */}
@@ -877,7 +814,7 @@ export const ScheduleView: React.FC = () => {
                       </div>
 
                       {/* Due date */}
-                      <div className="flex items-center gap-1 text-[11px] font-mono-numbers shrink-0">
+                      <div className="flex items-center gap-1 text-[11px] font-mono tabular-nums shrink-0">
                         <Clock className="w-3 h-3 text-neutral-500" />
                         <span>{formatDate(task.dueDate)}</span>
                         {task.dueTime && <span className="text-neutral-500">às {task.dueTime}</span>}
@@ -916,7 +853,7 @@ export const ScheduleView: React.FC = () => {
                           {evt.category}
                         </span>
                         <h4 className="text-xs font-bold text-neutral-100 truncate mt-0.5">{evt.name}</h4>
-                        <span className="text-[11px] text-neutral-400 font-mono-numbers">
+                        <span className="text-[11px] text-neutral-400 font-mono tabular-nums">
                           {formatDate(evt.date)}
                         </span>
                       </div>
@@ -993,10 +930,10 @@ export const ScheduleView: React.FC = () => {
               <select
                 value={memberFilter}
                 onChange={(e) => setMemberFilter(e.target.value)}
-                className="px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-neutral-200 text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
+                className="px-3 min-h-[40px] bg-neutral-800 border border-neutral-700 rounded-lg text-neutral-200 text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
               >
                 <option value="all">Todos os Membros</option>
-                <option value="my_tasks">👤 Apenas Minhas Tarefas</option>
+                <option value="my_tasks">Minhas Tarefas</option>
                 {teamMembers.map((m) => (
                   <option key={m.uid} value={m.uid}>
                     {m.name}
@@ -1168,12 +1105,18 @@ export const ScheduleView: React.FC = () => {
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => {
-                              if (confirm(`Deseja remover "${task.title}"?`)) {
-                                deleteTeamTask(task.id);
+                            onClick={async () => {
+                              const confirmed = await requestConfirm({
+                                title: 'Excluir afazer',
+                                message: `Deseja remover "${task.title}"?`,
+                                confirmLabel: 'Excluir',
+                                danger: true,
+                              });
+                              if (confirmed) {
+                                await deleteTeamTask(task.id);
                               }
                             }}
-                            className="p-1 text-neutral-400 hover:text-red-400 rounded hover:bg-neutral-800"
+                            className="p-1 text-neutral-400 hover:text-red-400 rounded hover:bg-neutral-800 cursor-pointer"
                             title="Excluir afazer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1379,7 +1322,7 @@ export const ScheduleView: React.FC = () => {
                         </div>
 
                         {/* Due date */}
-                        <div className="flex items-center gap-1 text-[11px] font-mono-numbers shrink-0">
+                        <div className="flex items-center gap-1 text-[11px] font-mono tabular-nums shrink-0">
                           <Clock className="w-3 h-3 text-neutral-500" />
                           <span>{formatDate(task.dueDate)}</span>
                           {task.dueTime && <span className="text-neutral-500">às {task.dueTime}</span>}
@@ -1446,7 +1389,7 @@ export const ScheduleView: React.FC = () => {
                             </span>
                           </div>
                           <p className="text-xs text-neutral-400 mt-0.5">
-                            Data: <span className="text-neutral-200 font-mono-numbers">{formatDate(evt.date)}</span>
+                            Data: <span className="text-neutral-200 font-mono tabular-nums">{formatDate(evt.date)}</span>
                             {evt.responsibles?.length > 0 && ` · Responsáveis: ${evt.responsibles.join(', ')}`}
                           </p>
                         </div>
@@ -1646,12 +1589,18 @@ export const ScheduleView: React.FC = () => {
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => {
-                              if (confirm('Deseja excluir esta anotação?')) {
-                                deleteTeamNote(note.id);
+                            onClick={async () => {
+                              const confirmed = await requestConfirm({
+                                title: 'Excluir anotação',
+                                message: 'Deseja excluir esta anotação?',
+                                confirmLabel: 'Excluir',
+                                danger: true,
+                              });
+                              if (confirmed) {
+                                await deleteTeamNote(note.id);
                               }
                             }}
-                            className="p-1 text-neutral-400 hover:text-red-400 rounded hover:bg-neutral-800/60 transition-colors"
+                            className="p-1 text-neutral-400 hover:text-red-400 rounded hover:bg-neutral-800/60 transition-colors cursor-pointer"
                             title="Excluir"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1687,7 +1636,7 @@ export const ScheduleView: React.FC = () => {
                     {/* Note Footer */}
                     <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-[11px] text-neutral-400">
                       <span>Por {note.authorName}</span>
-                      <span className="font-mono-numbers">{formatDate(note.updatedAt || note.createdAt)}</span>
+                      <span className="font-mono tabular-nums">{formatDate(note.updatedAt || note.createdAt)}</span>
                     </div>
                   </div>
                 );
@@ -1736,7 +1685,7 @@ export const ScheduleView: React.FC = () => {
 
       {/* Floating Agile Batch Action Bar for Super Admins */}
       {selectedTaskIds.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-neutral-900 border border-amber-500/40 rounded-2xl shadow-2xl p-3 px-5 flex items-center gap-3 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-200 flex-wrap max-w-[95vw]">
+        <div className="fixed bottom-22 md:bottom-6 left-1/2 -translate-x-1/2 z-40 bg-neutral-900 border border-amber-500/40 rounded-2xl shadow-2xl p-3 px-5 flex items-center gap-3 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-200 flex-wrap max-w-[95vw]">
           <span className="font-bold text-xs text-amber-300 whitespace-nowrap">
             {selectedTaskIds.length} {selectedTaskIds.length === 1 ? 'tarefa selecionada' : 'tarefas selecionadas'}
           </span>
@@ -1805,7 +1754,13 @@ export const ScheduleView: React.FC = () => {
             {user?.role === 'super_admin' && (
               <button
                 onClick={async () => {
-                  if (confirm(`Deseja excluir as ${selectedTaskIds.length} tarefas selecionadas?`)) {
+                  const confirmed = await requestConfirm({
+                    title: 'Excluir tarefas em lote',
+                    message: `Deseja excluir as ${selectedTaskIds.length} tarefas selecionadas?`,
+                    confirmLabel: 'Excluir todas',
+                    danger: true,
+                  });
+                  if (confirmed) {
                     await batchDeleteTeamTasks(selectedTaskIds);
                     setSelectedTaskIds([]);
                   }

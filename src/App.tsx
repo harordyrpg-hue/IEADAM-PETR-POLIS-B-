@@ -42,10 +42,30 @@ import { AttendanceView } from './components/views/AttendanceView.js';
 import { PublicEventRegistrationPage } from './components/public/PublicEventRegistrationPage.js';
 import { PublicChurchPage } from './components/public/PublicChurchPage.js';
 import { LoginView } from './components/auth/LoginView.js';
-import { X, CheckCircle2, AlertCircle, Info } from 'lucide-react';
+import { X, CheckCircle2, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { activeTab, setActiveTab, toasts, dismissToast, user, authLoading } = useApp();
+  const {
+    activeTab,
+    setActiveTab,
+    toasts,
+    dismissToast,
+    confirmDialog,
+    resolveConfirm,
+    user,
+    authLoading,
+  } = useApp();
+
+  useEffect(() => {
+    if (!confirmDialog) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        resolveConfirm(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [confirmDialog, resolveConfirm]);
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
   const [sharedToken, setSharedToken] = useState<string | null>(null);
   const [publicEventId, setPublicEventId] = useState<string | null>(null);
@@ -282,8 +302,66 @@ const MainLayout: React.FC = () => {
       <ShareModal />
       <ScreenTransmissionWidget />
 
+      {/* Global Non-Blocking Confirmation Modal */}
+      {confirmDialog && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => resolveConfirm(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="global-confirm-title"
+        >
+          <div
+            className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl p-5 space-y-4 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                  confirmDialog.danger !== false
+                    ? 'bg-red-500/15 text-red-400 border border-red-500/30'
+                    : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                }`}
+              >
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 id="global-confirm-title" className="text-sm font-bold text-neutral-100">
+                  {confirmDialog.title}
+                </h3>
+                <p className="text-xs text-neutral-400 mt-1 leading-relaxed whitespace-pre-line">
+                  {confirmDialog.message}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => resolveConfirm(false)}
+                className="min-h-[40px] px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-xl border border-neutral-700 transition-colors cursor-pointer"
+              >
+                {confirmDialog.cancelLabel || 'Cancelar'}
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => resolveConfirm(true)}
+                className={`min-h-[40px] px-4 py-2 text-xs font-bold rounded-xl transition-colors cursor-pointer ${
+                  confirmDialog.danger !== false
+                    ? 'bg-red-600 hover:bg-red-500 text-white'
+                    : 'bg-amber-400 hover:bg-amber-300 text-neutral-950'
+                }`}
+              >
+                {confirmDialog.confirmLabel || 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast Notifications */}
-      <div className="fixed top-20 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none">
+      <div className="fixed top-20 right-4 z-[80] flex flex-col gap-2 max-w-sm pointer-events-none">
         {toasts.map((toast) => (
           <div
             key={toast.id}

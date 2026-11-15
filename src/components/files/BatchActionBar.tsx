@@ -89,7 +89,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({ onSuccess }) => 
 
   return (
     <>
-      <div className="fixed bottom-16 md:bottom-6 left-1/2 -translate-x-1/2 z-40 bg-neutral-900/95 dark:bg-neutral-950/95 border border-neutral-700/80 shadow-2xl rounded-2xl px-4 py-2.5 flex items-center gap-3 backdrop-blur-md text-neutral-100 text-xs animate-in slide-in-from-bottom-3 duration-200">
+      <div className="fixed bottom-22 md:bottom-6 left-1/2 -translate-x-1/2 z-40 bg-neutral-900/95 dark:bg-neutral-950/95 border border-neutral-700/80 shadow-2xl rounded-2xl px-4 py-2.5 flex items-center gap-3 backdrop-blur-md text-neutral-100 text-xs animate-in slide-in-from-bottom-3 duration-200 max-w-[95vw]">
         <div className="flex items-center gap-2 pr-3 border-r border-neutral-700/80">
           <span className="font-semibold text-amber-400 font-mono-numbers">{count}</span>
           <span className="text-neutral-300">selecionado{count > 1 ? 's' : ''}</span>

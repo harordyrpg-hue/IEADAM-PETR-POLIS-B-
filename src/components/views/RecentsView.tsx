@@ -30,13 +30,12 @@ export const RecentsView: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
-      <div className="pb-3 border-b border-neutral-800">
-        <h1 className="text-lg font-bold text-neutral-100 flex items-center gap-2">
-          <Clock className="w-5 h-5 text-amber-400" />
+      <div className="pb-4 border-b border-neutral-800">
+        <h1 className="text-xl font-bold text-neutral-100">
           Arquivos Recentes
         </h1>
         <p className="text-xs text-neutral-400 mt-0.5">
-          Linha do tempo cronológica com os últimos uploads e modificações de mídia.
+          Últimos uploads e modificações ({files.length} arquivos).
         </p>
       </div>
 
@@ -47,7 +46,7 @@ export const RecentsView: React.FC = () => {
           Nenhum arquivo recente encontrado.
         </div>
       ) : viewMode === 'grid' ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
           {files.map((file) => (
             <FileCard
               key={file.id}
@@ -59,32 +58,34 @@ export const RecentsView: React.FC = () => {
           ))}
         </div>
       ) : (
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900 overflow-hidden overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-neutral-800 text-[11px] font-semibold text-neutral-400 uppercase tracking-wider bg-neutral-950/40">
-                <th className="w-10 px-3 py-2.5 text-center"></th>
-                <th className="px-3 py-2.5">Nome</th>
-                <th className="px-3 py-2.5 hidden sm:table-cell">Categoria</th>
-                <th className="px-3 py-2.5 text-right">Tamanho</th>
-                <th className="px-3 py-2.5 hidden md:table-cell">Resolução</th>
-                <th className="px-3 py-2.5 hidden lg:table-cell">Responsável</th>
-                <th className="px-3 py-2.5 hidden md:table-cell">Data</th>
-                <th className="px-3 py-2.5 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {files.map((file) => (
-                <FileListRow
-                  key={file.id}
-                  file={file}
-                  isSelected={selectedFileIds.includes(file.id)}
-                  onSelect={toggleSelectFile}
-                  onRefresh={loadRecents}
-                />
-              ))}
-            </tbody>
-          </table>
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-900 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-neutral-800 text-[11px] font-medium text-neutral-400 bg-neutral-950/50">
+                  <th className="w-10 px-3 py-3 text-center"></th>
+                  <th className="px-3 py-3">Nome</th>
+                  <th className="px-3 py-3 hidden sm:table-cell">Categoria</th>
+                  <th className="px-3 py-3 text-right">Tamanho</th>
+                  <th className="px-3 py-3 hidden md:table-cell">Resolução</th>
+                  <th className="px-3 py-3 hidden lg:table-cell">Responsável</th>
+                  <th className="px-3 py-3 hidden md:table-cell">Data</th>
+                  <th className="px-3 py-3 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {files.map((file) => (
+                  <FileListRow
+                    key={file.id}
+                    file={file}
+                    isSelected={selectedFileIds.includes(file.id)}
+                    onSelect={toggleSelectFile}
+                    onRefresh={loadRecents}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

@@ -58,20 +58,19 @@ export const ArtsView: React.FC = () => {
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
         <div>
-          <h1 className="text-lg font-bold text-neutral-100 flex items-center gap-2">
-            <Palette className="w-5 h-5 text-purple-400" />
-            Artes Gráficas & Material de Divulgação
+          <h1 className="text-xl font-bold text-neutral-100">
+            Artes Gráficas
           </h1>
           <p className="text-xs text-neutral-400 mt-0.5">
-            Banners, posts para feed, stories (9:16), cartazes de eventos, convites e identidades visuais em alta resolução para impressão e mídias sociais.
+            Banners, posts, stories e artes de divulgação ({arts.length} arquivos).
           </p>
         </div>
 
         <button
           onClick={() => openUpload()}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs shadow-sm transition-all"
+          className="flex items-center justify-center gap-2 px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer"
         >
           <Upload className="w-4 h-4" />
           <span>Enviar artes</span>
@@ -96,7 +95,7 @@ export const ArtsView: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
           {arts.map((art) => (
             <div
               key={art.id}
@@ -119,7 +118,7 @@ export const ArtsView: React.FC = () => {
                 </span>
 
                 {art.resolution && (
-                  <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/75 text-[10px] text-neutral-200 font-mono-numbers">
+                  <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/75 text-[10px] text-neutral-200 font-mono tabular-nums">
                     {art.resolution}
                   </span>
                 )}
@@ -134,7 +133,7 @@ export const ArtsView: React.FC = () => {
                   {art.name}
                 </h3>
 
-                <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-mono-numbers mt-1 truncate">
+                <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-mono tabular-nums mt-1 truncate">
                   <span>{formatBytes(art.size)}</span>
                   <span aria-hidden="true">·</span>
                   <span>{formatDate(art.createdAt)}</span>

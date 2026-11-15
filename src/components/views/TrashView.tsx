@@ -31,6 +31,7 @@ export const TrashView: React.FC = () => {
     filesLoading,
     folders,
     refreshFolders,
+    requestConfirm,
   } = useApp();
 
   const [filterType, setFilterType] = useState<'all' | 'folders' | 'files'>('all');
@@ -120,7 +121,13 @@ export const TrashView: React.FC = () => {
   const handlePermanentDeleteFolder = async (folder: Folder) => {
     const folderFiles = filesByFolder.get(folder.id) || [];
     const confirmMsg = `Tem certeza? A pasta "${folder.name}" e todos os ${folderFiles.length} arquivos contidos nela serão EXCLUÍDOS DEFINITIVAMENTE do disco e não poderão ser recuperados.`;
-    if (!window.confirm(confirmMsg)) return;
+    const confirmed = await requestConfirm({
+      title: 'Excluir pasta definitivamente',
+      message: confirmMsg,
+      confirmLabel: 'Excluir definitivamente',
+      danger: true,
+    });
+    if (!confirmed) return;
 
     try {
       setActionInProgress(true);
@@ -152,7 +159,13 @@ export const TrashView: React.FC = () => {
 
   // Permanently delete a single file
   const handlePermanentDeleteFile = async (file: FileRecord) => {
-    if (!window.confirm(`Tem certeza? O arquivo "${file.name}" será excluído permanentemente do Cloud Storage e Firestore.`)) return;
+    const confirmed = await requestConfirm({
+      title: 'Excluir arquivo definitivamente',
+      message: `Tem certeza? O arquivo "${file.name}" será excluído permanentemente do Cloud Storage e Firestore.`,
+      confirmLabel: 'Excluir definitivamente',
+      danger: true,
+    });
+    if (!confirmed) return;
 
     try {
       setActionInProgress(true);
@@ -169,7 +182,13 @@ export const TrashView: React.FC = () => {
   // Restore everything (all folders & all files)
   const handleRestoreAll = async () => {
     if (totalItemCount === 0) return;
-    if (!window.confirm(`Restaurar todas as ${trashedFolders.length} pastas e todos os ${trashedFiles.length} arquivos da Lixeira de volta aos seus locais originais?`)) return;
+    const confirmed = await requestConfirm({
+      title: 'Restaurar tudo da Lixeira',
+      message: `Restaurar todas as ${trashedFolders.length} pastas e todos os ${trashedFiles.length} arquivos da Lixeira de volta aos seus locais originais?`,
+      confirmLabel: 'Restaurar tudo',
+      danger: false,
+    });
+    if (!confirmed) return;
 
     try {
       setActionInProgress(true);
@@ -194,7 +213,13 @@ export const TrashView: React.FC = () => {
   // Empty entire trash (permanent delete)
   const handleEmptyTrash = async () => {
     if (totalItemCount === 0) return;
-    if (!window.confirm(`ATENÇÃO: Você está prestes a EXCLUIR DEFINITIVAMENTE todas as ${trashedFolders.length} pastas e todos os ${trashedFiles.length} arquivos da lixeira.\n\nEsta operação é IRREVERSÍVEL. Deseja continuar?`)) return;
+    const confirmed = await requestConfirm({
+      title: 'Esvaziar Lixeira',
+      message: `ATENÇÃO: Você está prestes a EXCLUIR DEFINITIVAMENTE todas as ${trashedFolders.length} pastas e todos os ${trashedFiles.length} arquivos da lixeira.\n\nEsta operação é IRREVERSÍVEL. Deseja continuar?`,
+      confirmLabel: 'Esvaziar Lixeira',
+      danger: true,
+    });
+    if (!confirmed) return;
 
     try {
       setActionInProgress(true);
@@ -237,34 +262,24 @@ export const TrashView: React.FC = () => {
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* 1. Header & Summary Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 sm:p-6 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-sm">
-        <div className="flex items-start sm:items-center gap-3.5">
-          <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl shrink-0">
-            <Trash2 className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-bold text-neutral-100 tracking-tight">
-                Lixeira do Sistema
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-neutral-800 border border-neutral-700 text-neutral-300">
-                {trashedFolders.length} pastas · {trashedFiles.length} arquivos ({formatBytes(totalTrashBytes)})
-              </span>
-            </div>
-            <p className="text-xs sm:text-sm text-neutral-400 mt-1">
-              Pastas e arquivos excluídos permanecem salvos com segurança aqui. Você pode restaurá-los aos seus locais originais a qualquer momento ou excluí-los em definitivo.
-            </p>
-          </div>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-neutral-800">
+        <div>
+          <h1 className="text-xl font-bold text-neutral-100">
+            Lixeira
+          </h1>
+          <p className="text-xs text-neutral-400 mt-0.5 font-mono tabular-nums">
+            {trashedFolders.length} pastas · {trashedFiles.length} arquivos · {formatBytes(totalTrashBytes)}
+          </p>
         </div>
 
         {/* Global Action Buttons */}
         {totalItemCount > 0 && (
-          <div className="flex items-center gap-2 self-start md:self-center flex-wrap shrink-0">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleRestoreAll}
               disabled={actionInProgress}
-              className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 font-semibold rounded-xl text-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              title="Restaurar todas as pastas e arquivos de volta"
+              className="px-3.5 min-h-[38px] bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-400 border border-emerald-500/30 font-semibold rounded-xl text-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title="Restaurar todas as pastas e arquivos"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Restaurar Tudo</span>
@@ -273,8 +288,8 @@ export const TrashView: React.FC = () => {
             <button
               onClick={handleEmptyTrash}
               disabled={actionInProgress}
-              className="px-3 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 font-semibold rounded-xl text-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              title="Excluir permanentemente todos os itens da lixeira"
+              className="px-3.5 min-h-[38px] bg-red-600/15 hover:bg-red-600/25 text-red-400 border border-red-500/30 font-semibold rounded-xl text-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title="Excluir permanentemente todos os itens"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Esvaziar Lixeira</span>
@@ -286,12 +301,12 @@ export const TrashView: React.FC = () => {
       {/* 2. Filter Tabs & Search Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* Tabs */}
-        <div className="flex items-center gap-1 p-1 bg-neutral-900 border border-neutral-800 rounded-xl w-fit">
+        <div className="flex items-center gap-1 p-1 bg-neutral-900 border border-neutral-800 rounded-xl w-full sm:w-fit overflow-x-auto no-scrollbar">
           <button
             onClick={() => setFilterType('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+            className={`px-3 min-h-[34px] rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
               filterType === 'all'
-                ? 'bg-amber-400 text-neutral-950 shadow-xs'
+                ? 'bg-amber-400 text-neutral-950'
                 : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -299,9 +314,9 @@ export const TrashView: React.FC = () => {
           </button>
           <button
             onClick={() => setFilterType('folders')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 min-h-[34px] rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               filterType === 'folders'
-                ? 'bg-amber-400 text-neutral-950 shadow-xs'
+                ? 'bg-amber-400 text-neutral-950'
                 : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -310,9 +325,9 @@ export const TrashView: React.FC = () => {
           </button>
           <button
             onClick={() => setFilterType('files')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 min-h-[34px] rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
               filterType === 'files'
-                ? 'bg-amber-400 text-neutral-950 shadow-xs'
+                ? 'bg-amber-400 text-neutral-950'
                 : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -399,7 +414,7 @@ export const TrashView: React.FC = () => {
                             <h3 className="text-sm font-semibold text-neutral-100 truncate">
                               {folder.name}
                             </h3>
-                            <div className="flex items-center gap-2 mt-1 text-[11px] text-neutral-400 font-mono-numbers flex-wrap">
+                            <div className="flex items-center gap-2 mt-1 text-[11px] text-neutral-400 font-mono tabular-nums flex-wrap">
                               <span>{folderFiles.length} {folderFiles.length === 1 ? 'arquivo' : 'arquivos'}</span>
                               <span>·</span>
                               <span>{formatBytes(folderSize)}</span>
@@ -439,7 +454,7 @@ export const TrashView: React.FC = () => {
                                   {getFileIcon(file.type)}
                                   <span className="text-neutral-300 truncate">{file.name}</span>
                                 </div>
-                                <span className="text-neutral-400 font-mono-numbers text-[10px] shrink-0 ml-2">
+                                <span className="text-neutral-400 font-mono tabular-nums text-[10px] shrink-0 ml-2">
                                   {formatBytes(file.size)}
                                 </span>
                               </div>
@@ -481,102 +496,151 @@ export const TrashView: React.FC = () => {
           {(filterType === 'all' || filterType === 'files') && filteredFiles.length > 0 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+                <h2 className="text-xs font-semibold text-neutral-300 flex items-center gap-2">
                   <FileText className="w-4 h-4 text-amber-400" />
                   <span>Arquivos Excluídos ({filteredFiles.length})</span>
                 </h2>
-                <span className="text-xs text-neutral-400 font-mono-numbers">
+                <span className="text-xs text-neutral-400 font-mono tabular-nums">
                   Total: {formatBytes(totalTrashBytes)}
                 </span>
               </div>
 
-              <div className="rounded-xl border border-neutral-800 bg-neutral-900 overflow-hidden overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-neutral-800 text-[11px] font-semibold text-neutral-400 uppercase tracking-wider bg-neutral-950/60">
-                      <th className="px-4 py-3">Arquivo</th>
-                      <th className="px-4 py-3">Pasta de Origem</th>
-                      <th className="px-4 py-3">Tamanho</th>
-                      <th className="px-4 py-3">Enviado por</th>
-                      <th className="px-4 py-3">Excluído em</th>
-                      <th className="px-4 py-3 text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredFiles.map((file) => {
-                      const parentFolder = file.folderId
-                        ? folders.find((f) => f.id === file.folderId)
-                        : null;
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-900 overflow-hidden">
+                {/* Mobile Cards */}
+                <div className="md:hidden divide-y divide-neutral-800">
+                  {filteredFiles.map((file) => {
+                    const parentFolder = file.folderId
+                      ? folders.find((f) => f.id === file.folderId)
+                      : null;
 
-                      return (
-                        <tr
-                          key={file.id}
-                          className="border-b border-neutral-800/60 hover:bg-neutral-800/30 transition-colors"
-                        >
-                          <td className="px-4 py-3 font-medium text-neutral-200">
-                            <div className="flex items-center gap-2.5 min-w-0 max-w-xs sm:max-w-md">
-                              {getFileIcon(file.type)}
-                              <span className="truncate" title={file.name}>
+                    return (
+                      <div key={file.id} className="p-4 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            {getFileIcon(file.type)}
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-neutral-100 truncate">
                                 {file.name}
-                              </span>
+                              </p>
+                              <p className="text-[11px] text-neutral-400 font-mono tabular-nums mt-0.5">
+                                {formatBytes(file.size)} · {file.trashedAt ? formatDate(file.trashedAt) : 'Recentemente'}
+                              </p>
                             </div>
-                          </td>
+                          </div>
+                        </div>
 
-                          <td className="px-4 py-3 text-neutral-400">
-                            {parentFolder ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-neutral-800 text-neutral-300 text-[11px] border border-neutral-700/60">
-                                <FolderIcon className="w-3 h-3 text-amber-400" />
-                                <span className="truncate max-w-[120px]">{parentFolder.name}</span>
-                                {parentFolder.inTrash && (
-                                  <span className="text-[9px] text-red-400 bg-red-500/10 px-1 rounded">
-                                    na lixeira
-                                  </span>
-                                )}
-                              </span>
-                            ) : (
-                              <span className="text-neutral-400 text-[11px] italic">Raiz (Sem pasta)</span>
-                            )}
-                          </td>
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <span className="text-[11px] text-neutral-400 truncate">
+                            {parentFolder ? `Pasta: ${parentFolder.name}` : 'Raiz'}
+                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={() => handleRestoreFile(file)}
+                              disabled={actionInProgress}
+                              className="px-3 min-h-[34px] bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-400 rounded-lg flex items-center gap-1 text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Restaurar</span>
+                            </button>
+                            <button
+                              onClick={() => handlePermanentDeleteFile(file)}
+                              disabled={actionInProgress}
+                              className="p-2 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded-lg cursor-pointer disabled:opacity-50"
+                              title="Excluir definitivamente"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
 
-                          <td className="px-4 py-3 text-neutral-300 font-mono-numbers">
-                            {formatBytes(file.size)}
-                          </td>
+                {/* Desktop Table */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-neutral-800 text-[11px] font-medium text-neutral-400 bg-neutral-950/50">
+                        <th className="px-4 py-3">Arquivo</th>
+                        <th className="px-4 py-3">Origem</th>
+                        <th className="px-4 py-3">Tamanho</th>
+                        <th className="px-4 py-3">Enviado por</th>
+                        <th className="px-4 py-3">Excluído em</th>
+                        <th className="px-4 py-3 text-right">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-800/70">
+                      {filteredFiles.map((file) => {
+                        const parentFolder = file.folderId
+                          ? folders.find((f) => f.id === file.folderId)
+                          : null;
 
-                          <td className="px-4 py-3 text-neutral-400">
-                            {file.userName || file.ownerName || 'Membro'}
-                          </td>
+                        return (
+                          <tr
+                            key={file.id}
+                            className="hover:bg-neutral-800/30 transition-colors"
+                          >
+                            <td className="px-4 py-3 font-medium text-neutral-200">
+                              <div className="flex items-center gap-2.5 min-w-0 max-w-xs sm:max-w-md">
+                                {getFileIcon(file.type)}
+                                <span className="truncate" title={file.name}>
+                                  {file.name}
+                                </span>
+                              </div>
+                            </td>
 
-                          <td className="px-4 py-3 text-neutral-400 font-mono-numbers">
-                            {file.trashedAt ? formatDate(file.trashedAt) : 'Recentemente'}
-                          </td>
+                            <td className="px-4 py-3 text-neutral-400">
+                              {parentFolder ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-neutral-800 text-neutral-300 text-[11px] border border-neutral-700/60">
+                                  <FolderIcon className="w-3 h-3 text-amber-400" />
+                                  <span className="truncate max-w-[120px]">{parentFolder.name}</span>
+                                </span>
+                              ) : (
+                                <span className="text-neutral-400 text-[11px]">Raiz</span>
+                              )}
+                            </td>
 
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => handleRestoreFile(file)}
-                                disabled={actionInProgress}
-                                className="px-2.5 py-1 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-400 rounded-lg flex items-center gap-1 text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                                title="Restaurar arquivo para a pasta original"
-                              >
-                                <RotateCcw className="w-3 h-3" />
-                                <span>Restaurar</span>
-                              </button>
+                            <td className="px-4 py-3 text-neutral-300 font-mono tabular-nums">
+                              {formatBytes(file.size)}
+                            </td>
 
-                              <button
-                                onClick={() => handlePermanentDeleteFile(file)}
-                                disabled={actionInProgress}
-                                className="p-1.5 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                                title="Excluir definitivamente"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            <td className="px-4 py-3 text-neutral-400">
+                              {file.userName || file.ownerName || 'Membro'}
+                            </td>
+
+                            <td className="px-4 py-3 text-neutral-400 font-mono tabular-nums">
+                              {file.trashedAt ? formatDate(file.trashedAt) : 'Recentemente'}
+                            </td>
+
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleRestoreFile(file)}
+                                  disabled={actionInProgress}
+                                  className="px-2.5 py-1 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-400 rounded-lg flex items-center gap-1 text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                                  title="Restaurar arquivo para a pasta original"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  <span>Restaurar</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handlePermanentDeleteFile(file)}
+                                  disabled={actionInProgress}
+                                  className="p-1.5 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                                  title="Excluir definitivamente"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

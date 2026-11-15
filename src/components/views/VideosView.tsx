@@ -59,20 +59,19 @@ export const VideosView: React.FC = () => {
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
         <div>
-          <h1 className="text-lg font-bold text-neutral-100 flex items-center gap-2">
-            <Film className="w-5 h-5 text-blue-400" />
-            Central de Vídeos & Transmissões 4K
+          <h1 className="text-xl font-bold text-neutral-100">
+            Central de Vídeos
           </h1>
           <p className="text-xs text-neutral-400 mt-0.5">
-            Armazenamento de gravações originais em ProRes, 4K UHD e MP4 sem recompressão.
+            Gravações originais e transmissões ({videos.length} vídeos).
           </p>
         </div>
 
         <button
           onClick={() => openUpload()}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs shadow-sm transition-all"
+          className="flex items-center justify-center gap-2 px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer"
         >
           <Upload className="w-4 h-4" />
           <span>Enviar vídeos</span>
@@ -123,7 +122,7 @@ export const VideosView: React.FC = () => {
 
                 {/* Badges */}
                 <div className="absolute top-2 left-2 flex items-center gap-1.5">
-                  <span className="px-2 py-0.5 rounded bg-black/75 text-[10px] text-blue-300 font-mono-numbers font-medium">
+                  <span className="px-2 py-0.5 rounded bg-black/75 text-[10px] text-blue-300 font-mono tabular-nums font-medium">
                     {video.resolution || '4K UHD'}
                   </span>
                   <span className="px-2 py-0.5 rounded bg-black/75 text-[10px] text-neutral-200 font-mono uppercase">
@@ -132,7 +131,7 @@ export const VideosView: React.FC = () => {
                 </div>
 
                 {video.duration && (
-                  <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/85 text-[11px] text-neutral-100 font-mono-numbers font-medium">
+                  <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/85 text-[11px] text-neutral-100 font-mono tabular-nums font-medium">
                     {video.duration}
                   </span>
                 )}
@@ -148,21 +147,23 @@ export const VideosView: React.FC = () => {
                     {video.name}
                   </h3>
 
-                  {/* Clean Unboxed Metadata */}
-                  <div className="flex items-center gap-2 text-[11px] text-neutral-400 font-mono-numbers mt-1.5">
+                  <div className="flex items-center gap-2 text-[11px] text-neutral-400 font-mono tabular-nums mt-1.5 truncate">
                     <span>{formatBytes(video.size)}</span>
                     <span aria-hidden="true">·</span>
                     <span>{formatDate(video.createdAt)}</span>
                     <span aria-hidden="true">·</span>
-                    <span>{video.userName}</span>
+                    <span className="truncate">{video.userName}</span>
                   </div>
                 </div>
 
-                {/* Action Buttons: Assistir e Baixar Original */}
+                {/* Action Buttons */}
                 <div className="mt-4 pt-3 border-t border-neutral-800 flex items-center justify-between gap-2">
                   <button
-                    onClick={() => setVideoPlayerFile(video)}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setVideoPlayerFile(video);
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1.5 min-h-[36px] px-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium transition-colors cursor-pointer"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
                     <span>Assistir</span>
@@ -170,10 +171,10 @@ export const VideosView: React.FC = () => {
 
                   <button
                     onClick={(e) => handleDownload(e, video)}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold transition-all shadow-xs"
+                    className="flex-1 flex items-center justify-center gap-1.5 min-h-[36px] px-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold transition-all cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Baixar original</span>
+                    <span>Baixar</span>
                   </button>
 
                   <button

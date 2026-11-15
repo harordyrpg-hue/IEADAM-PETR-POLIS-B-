@@ -71,20 +71,19 @@ export const PhotosView: React.FC = () => {
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
         <div>
-          <h1 className="text-lg font-bold text-neutral-100 flex items-center gap-2">
-            <ImageIcon className="w-5 h-5 text-amber-400" />
+          <h1 className="text-xl font-bold text-neutral-100">
             Galeria de Fotos
           </h1>
           <p className="text-xs text-neutral-400 mt-0.5">
-            Preservação de qualidade fotográfica em alta resolução (6000×4000, RAW, JPG sem compressão).
+            Arquivos originais em alta resolução ({photos.length} fotos).
           </p>
         </div>
 
         <button
           onClick={() => openUpload()}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs shadow-sm transition-all"
+          className="flex items-center justify-center gap-2 px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer"
         >
           <Upload className="w-4 h-4" />
           <span>Enviar fotos</span>
@@ -130,10 +129,10 @@ export const PhotosView: React.FC = () => {
                 {/* Favorite Star */}
                 <button
                   onClick={(e) => handleToggleFavorite(e, photo)}
-                  className={`absolute top-2 right-2 p-1.5 rounded-md backdrop-blur-xs transition-opacity ${
+                  className={`absolute top-2 right-2 p-1.5 rounded-lg backdrop-blur-xs transition-opacity cursor-pointer touch-manipulation ${
                     photo.isFavorite
-                      ? 'bg-amber-500/20 text-amber-400 opacity-100'
-                      : 'bg-black/50 text-neutral-400 opacity-0 group-hover:opacity-100 hover:text-amber-400'
+                      ? 'bg-amber-500/25 text-amber-400 opacity-100'
+                      : 'bg-black/60 text-neutral-200 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-amber-400'
                   }`}
                   title={photo.isFavorite ? 'Remover dos favoritos' : 'Favoritar'}
                 >
@@ -141,15 +140,15 @@ export const PhotosView: React.FC = () => {
                 </button>
 
                 {/* Hover overlay with zoom hint */}
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <div className="hidden sm:flex absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity items-center justify-center pointer-events-none">
                   <div className="p-2 rounded-full bg-black/60 text-white">
                     <Maximize2 className="w-5 h-5" />
                   </div>
                 </div>
 
                 {/* Resolution Badge */}
-                <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/75 text-[10px] text-amber-300 font-mono-numbers">
-                  {photo.resolution || '6000×4000'}
+                <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/75 text-[10px] text-amber-300 font-mono tabular-nums">
+                  {photo.resolution || 'Hi-Res'}
                 </span>
 
                 {/* Format Badge */}
@@ -167,13 +166,10 @@ export const PhotosView: React.FC = () => {
                   {photo.name}
                 </h3>
 
-                {/* Zero-Pill Unboxed Metadata */}
-                <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-mono-numbers mt-1 truncate">
+                <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-mono tabular-nums mt-1 truncate">
                   <span>{formatBytes(photo.size)}</span>
                   <span aria-hidden="true">·</span>
                   <span>{formatDate(photo.createdAt)}</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="text-emerald-400">Original</span>
                 </div>
 
                 {/* Actions */}

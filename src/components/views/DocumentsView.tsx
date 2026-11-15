@@ -25,7 +25,9 @@ export const DocumentsView: React.FC = () => {
 
   const loading = filesLoading;
 
+  const [previewDoc, setPreviewDoc] = useState<FileRecord | null>(null);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const docs = useMemo(() => {
     let list = allFiles.filter((f) => !f.inTrash && f.type === 'document');
@@ -46,7 +48,7 @@ export const DocumentsView: React.FC = () => {
 
   const handleDownload = (e: React.MouseEvent, doc: FileRecord) => {
     e.stopPropagation();
-    api.triggerDownload(doc.downloadUrl, doc.name);
+    api.triggerDownload(doc, doc.name);
     notify(`Iniciando download do documento original: ${doc.name}`, 'info');
   };
 
@@ -55,27 +57,36 @@ export const DocumentsView: React.FC = () => {
     setShareTarget({ type: 'file', id: doc.id, name: doc.name });
   };
 
-  const handlePreviewPdf = (doc: FileRecord) => {
-    setPreviewPdfUrl(`/storage/originals/${doc.storageKey}`);
+  const handlePreviewPdf = async (doc: FileRecord) => {
+    setPreviewDoc(doc);
+    setPreviewPdfUrl(null);
+    setPreviewLoading(true);
+    try {
+      const resolved = await api.resolveMediaUrl(doc, true);
+      setPreviewPdfUrl(resolved);
+    } catch {
+      notify('Não foi possível abrir a pré-visualização do PDF. Use o botão Baixar.', 'error');
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
         <div>
-          <h1 className="text-lg font-bold text-neutral-100 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-red-400" />
-            Manuais, Escalas & Documentos da Mídia
+          <h1 className="text-xl font-bold text-neutral-100">
+            Documentos e Manuais
           </h1>
           <p className="text-xs text-neutral-400 mt-0.5">
-            Manuais de operação das câmeras, escalas semanais, roteiros de transmissão e apresentações em PDF/DOCX.
+            Manuais, roteiros, escalas e apresentações ({docs.length} arquivos).
           </p>
         </div>
 
         <button
           onClick={() => openUpload()}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs shadow-sm transition-all"
+          className="flex items-center justify-center gap-2 px-4 min-h-[40px] bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer"
         >
           <Upload className="w-4 h-4" />
           <span>Enviar documento</span>
@@ -100,12 +111,12 @@ export const DocumentsView: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="space-y-2.5">
+        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden divide-y divide-neutral-800">
           {docs.map((doc) => (
             <div
               key={doc.id}
               onClick={() => (doc.extension === 'pdf' ? handlePreviewPdf(doc) : setDetailFile(doc))}
-              className="group p-4 rounded-xl bg-neutral-900 border border-neutral-800 hover:border-neutral-700 hover:bg-neutral-800/60 cursor-pointer transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+              className="group p-4 hover:bg-neutral-800/40 cursor-pointer transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center shrink-0">
@@ -113,17 +124,17 @@ export const DocumentsView: React.FC = () => {
                 </div>
 
                 <div className="min-w-0">
-                  <span className="font-semibold text-neutral-200 text-xs truncate block group-hover:text-amber-300">
+                  <span className="font-semibold text-neutral-200 text-xs sm:text-sm truncate block group-hover:text-amber-300">
                     {doc.name}
                   </span>
-                  <div className="flex items-center gap-2 text-[11px] text-neutral-400 font-mono-numbers mt-0.5">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-neutral-400 font-mono tabular-nums mt-0.5">
                     <span className="uppercase text-red-400 font-medium">.{doc.extension}</span>
                     <span aria-hidden="true">·</span>
                     <span>{formatBytes(doc.size)}</span>
                     <span aria-hidden="true">·</span>
                     <span>{formatDate(doc.createdAt)}</span>
                     <span aria-hidden="true">·</span>
-                    <span>{doc.userName}</span>
+                    <span className="truncate">{doc.userName}</span>
                   </div>
                 </div>
               </div>
@@ -133,7 +144,7 @@ export const DocumentsView: React.FC = () => {
                 {doc.extension === 'pdf' && (
                   <button
                     onClick={() => handlePreviewPdf(doc)}
-                    className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors"
+                    className="px-3 min-h-[36px] bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <Eye className="w-3 h-3" />
                     <span>Visualizar</span>
@@ -142,7 +153,7 @@ export const DocumentsView: React.FC = () => {
 
                 <button
                   onClick={(e) => handleShare(e, doc)}
-                  className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+                  className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-xl transition-colors cursor-pointer"
                   title="Compartilhar"
                 >
                   <Share2 className="w-4 h-4" />
@@ -150,10 +161,10 @@ export const DocumentsView: React.FC = () => {
 
                 <button
                   onClick={(e) => handleDownload(e, doc)}
-                  className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors shadow-xs"
+                  className="px-3 min-h-[36px] bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Download className="w-3 h-3" />
-                  <span>Baixar Original</span>
+                  <span>Baixar</span>
                 </button>
               </div>
             </div>
@@ -162,20 +173,57 @@ export const DocumentsView: React.FC = () => {
       )}
 
       {/* PDF In-Platform Preview Modal */}
-      {previewPdfUrl && (
+      {previewDoc && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
           <div className="relative w-full max-w-4xl h-[85vh] bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-800">
-              <span className="text-xs font-semibold text-neutral-200">Visualizador de Documento PDF</span>
-              <button
-                onClick={() => setPreviewPdfUrl(null)}
-                className="px-3 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs"
-              >
-                Fechar
-              </button>
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-neutral-800">
+              <span className="text-xs font-semibold text-neutral-200 truncate">
+                {previewDoc.name}
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    api.triggerDownload(previewDoc, previewDoc.name);
+                    notify(`Baixando PDF original: ${previewDoc.name}`, 'info');
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Baixar PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewDoc(null);
+                    setPreviewPdfUrl(null);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
             </div>
-            <div className="flex-1 bg-neutral-950">
-              <iframe src={previewPdfUrl} className="w-full h-full border-none" title="PDF Preview" />
+            <div className="flex-1 bg-neutral-950 flex items-center justify-center">
+              {previewLoading ? (
+                <div className="text-xs text-neutral-400">Carregando documento PDF...</div>
+              ) : previewPdfUrl ? (
+                <iframe src={previewPdfUrl} className="w-full h-full border-none" title="PDF Preview" />
+              ) : (
+                <div className="p-6 text-center space-y-3">
+                  <p className="text-xs text-neutral-400">
+                    Pré-visualização indisponível neste navegador. Clique abaixo para baixar o arquivo original.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => api.triggerDownload(previewDoc, previewDoc.name)}
+                    className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Baixar PDF Original</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
