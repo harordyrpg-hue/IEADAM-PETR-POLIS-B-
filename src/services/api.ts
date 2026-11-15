@@ -25,6 +25,7 @@ import {
   serverTimestamp,
   writeBatch,
   onSnapshot,
+  runTransaction,
 } from 'firebase/firestore';
 import {
   ref,
@@ -4067,10 +4068,22 @@ export const api = {
 
         group.members.forEach((memberName, idx) => {
           const memberId = `mem_${group.id}_${idx + 1}`;
+          const memberCode = `PTB-MEM-${group.id.replace('dept_', '').toUpperCase()}-${String(idx + 1).padStart(2, '0')}`;
           const memberDoc: AttendanceMember = {
             id: memberId,
             departmentId: group.id,
             name: memberName,
+            memberCode,
+            roleTitle:
+              group.id === 'dept_pastores'
+                ? 'Corpo Pastoral'
+                : group.id === 'dept_diaconos'
+                ? 'Corpo Diaconal'
+                : group.id === 'dept_lideres'
+                ? 'Liderança'
+                : 'Ministério de Louvor',
+            congregation: 'IEADAM Petrópolis B',
+            area: 'Sede / Geral',
             createdByUid: effective.uid,
             createdByName: effective.displayName,
             createdAt: now,
@@ -4220,14 +4233,34 @@ export const api = {
     }
   },
 
-  async createAttendanceMember(departmentId: string, name: string): Promise<AttendanceMember> {
+  async createAttendanceMember(
+    departmentId: string,
+    name: string,
+    extra?: {
+      roleTitle?: string;
+      phone?: string;
+      email?: string;
+      congregation?: string;
+      area?: string;
+      notes?: string;
+    }
+  ): Promise<AttendanceMember> {
     const effective = api.getEffectiveUser();
     const now = new Date().toISOString();
-    const id = `mem_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const id = `mem_${Date.now()}_${rand.toLowerCase()}`;
+    const memberCode = `PTB-MEM-${Date.now().toString().slice(-5)}-${rand}`;
     const member: AttendanceMember = {
       id,
       departmentId,
       name: name.trim(),
+      memberCode,
+      roleTitle: extra?.roleTitle?.trim() || undefined,
+      phone: extra?.phone?.trim() || undefined,
+      email: extra?.email?.trim() || undefined,
+      congregation: extra?.congregation?.trim() || 'IEADAM Petrópolis B',
+      area: extra?.area?.trim() || undefined,
+      notes: extra?.notes?.trim() || undefined,
       createdByUid: effective.uid,
       createdByName: effective.displayName,
       createdAt: now,
@@ -4243,7 +4276,7 @@ export const api = {
         actionLabel: 'Adicionou Membro na Chamada',
         targetType: 'attendance',
         targetName: member.name,
-        details: `Departamento ID: ${departmentId}`,
+        details: `Código: ${memberCode}`,
       });
       return member;
     } catch (error) {
@@ -4253,7 +4286,16 @@ export const api = {
 
   async updateAttendanceMember(
     memberId: string,
-    updates: { name: string; departmentId: string }
+    updates: {
+      name: string;
+      departmentId: string;
+      roleTitle?: string;
+      phone?: string;
+      email?: string;
+      congregation?: string;
+      area?: string;
+      notes?: string;
+    }
   ): Promise<void> {
     const effective = api.getEffectiveUser();
     const now = new Date().toISOString();
@@ -4263,6 +4305,12 @@ export const api = {
         removeUndefinedValues({
           name: updates.name.trim(),
           departmentId: updates.departmentId,
+          roleTitle: updates.roleTitle?.trim() || '',
+          phone: updates.phone?.trim() || '',
+          email: updates.email?.trim() || '',
+          congregation: updates.congregation?.trim() || 'IEADAM Petrópolis B',
+          area: updates.area?.trim() || '',
+          notes: updates.notes?.trim() || '',
           updatedAt: now,
         })
       );
@@ -4298,24 +4346,285 @@ export const api = {
     }
   },
 
-  async saveAttendanceCall(call: AttendanceCall): Promise<AttendanceCall> {
+  async claimAttendanceCall(
+    callBase: AttendanceCall,
+    operator?: { uid: string; name: string; email?: string }
+  ): Promise<AttendanceCall> {
     const effective = api.getEffectiveUser();
+    const opUid = operator?.uid || effective.uid;
+    const opName = operator?.name || effective.displayName;
+    const opEmail = operator?.email || effective.email || '';
     const now = new Date().toISOString();
-    const payload: AttendanceCall = {
-      ...call,
-      updatedByUid: effective.uid,
-      updatedByName: effective.displayName,
-      updatedAt: now,
-      createdAt: call.createdAt || now,
-      createdByUid: call.createdByUid || effective.uid,
-      createdByName: call.createdByName || effective.displayName,
-    };
+    const callRef = doc(db, 'attendance_calls', callBase.id);
 
     try {
-      await setDoc(doc(db, 'attendance_calls', call.id), removeUndefinedValues(payload));
-      return payload;
+      const result = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(callRef);
+        const existing = snap.exists() ? (snap.data() as AttendanceCall) : null;
+
+        if (existing?.activeOperatorUid && existing.activeOperatorUid !== opUid) {
+          throw new Error(
+            `ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`
+          );
+        }
+
+        const nextPayload: AttendanceCall = {
+          ...(existing || callBase),
+          id: callBase.id,
+          activeOperatorUid: opUid,
+          activeOperatorName: opName,
+          activeOperatorEmail: opEmail,
+          activeOperatorStartedAt:
+            existing?.activeOperatorUid === opUid && existing.activeOperatorStartedAt
+              ? existing.activeOperatorStartedAt
+              : now,
+          callStatus: 'em_andamento',
+          updatedByUid: opUid,
+          updatedByName: opName,
+          updatedAt: now,
+          createdAt: existing?.createdAt || callBase.createdAt || now,
+          createdByUid: existing?.createdByUid || callBase.createdByUid || opUid,
+          createdByName: existing?.createdByName || callBase.createdByName || opName,
+        };
+
+        tx.set(callRef, removeUndefinedValues(nextPayload));
+        return nextPayload;
+      });
+      return result;
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('ATTENDANCE_LOCKED:')) {
+        throw error;
+      }
+      handleFirestoreError(error, OperationType.WRITE, `attendance_calls/${callBase.id}`);
+    }
+  },
+
+  async releaseAttendanceCall(
+    callId: string,
+    operator?: { uid: string; name: string },
+    markFinished = false
+  ): Promise<AttendanceCall | null> {
+    const effective = api.getEffectiveUser();
+    const opUid = operator?.uid || effective.uid;
+    const opName = operator?.name || effective.displayName;
+    const now = new Date().toISOString();
+    const callRef = doc(db, 'attendance_calls', callId);
+
+    try {
+      const result = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(callRef);
+        if (!snap.exists()) return null;
+        const existing = snap.data() as AttendanceCall;
+
+        if (existing.activeOperatorUid && existing.activeOperatorUid !== opUid) {
+          throw new Error(
+            `ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`
+          );
+        }
+
+        const nextPayload: AttendanceCall = {
+          ...existing,
+          id: callId,
+          activeOperatorUid: null,
+          activeOperatorName: null,
+          activeOperatorEmail: null,
+          activeOperatorStartedAt: null,
+          callStatus: markFinished ? 'finalizada' : 'aberta',
+          updatedByUid: opUid,
+          updatedByName: opName,
+          updatedAt: now,
+        };
+        tx.set(callRef, removeUndefinedValues(nextPayload));
+        return nextPayload;
+      });
+      return result;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('ATTENDANCE_LOCKED:')) {
+        throw error;
+      }
+      handleFirestoreError(error, OperationType.UPDATE, `attendance_calls/${callId}`);
+    }
+  },
+
+  async saveAttendanceCall(
+    call: AttendanceCall,
+    options?: { autoClaimIfFree?: boolean; operator?: { uid: string; name: string; email?: string } }
+  ): Promise<AttendanceCall> {
+    const effective = api.getEffectiveUser();
+    const opUid = options?.operator?.uid || effective.uid;
+    const opName = options?.operator?.name || effective.displayName;
+    const opEmail = options?.operator?.email || effective.email || '';
+    const now = new Date().toISOString();
+    const callRef = doc(db, 'attendance_calls', call.id);
+
+    try {
+      const result = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(callRef);
+        const existing = snap.exists() ? (snap.data() as AttendanceCall) : null;
+
+        if (existing?.activeOperatorUid && existing.activeOperatorUid !== opUid) {
+          throw new Error(
+            `ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`
+          );
+        }
+
+        const shouldClaim =
+          options?.autoClaimIfFree !== false &&
+          (!existing || !existing.activeOperatorUid || existing.activeOperatorUid === opUid);
+
+        const payload: AttendanceCall = {
+          ...call,
+          activeOperatorUid:
+            call.activeOperatorUid !== undefined
+              ? call.activeOperatorUid
+              : shouldClaim
+              ? opUid
+              : existing?.activeOperatorUid ?? null,
+          activeOperatorName:
+            call.activeOperatorName !== undefined
+              ? call.activeOperatorName
+              : shouldClaim
+              ? opName
+              : existing?.activeOperatorName ?? null,
+          activeOperatorEmail:
+            call.activeOperatorEmail !== undefined
+              ? call.activeOperatorEmail
+              : shouldClaim
+              ? opEmail
+              : existing?.activeOperatorEmail ?? null,
+          activeOperatorStartedAt:
+            call.activeOperatorStartedAt !== undefined
+              ? call.activeOperatorStartedAt
+              : shouldClaim
+              ? existing?.activeOperatorStartedAt || now
+              : existing?.activeOperatorStartedAt ?? null,
+          callStatus:
+            call.callStatus ||
+            (shouldClaim ? 'em_andamento' : existing?.callStatus || 'aberta'),
+          updatedByUid: opUid,
+          updatedByName: opName,
+          updatedAt: now,
+          createdAt: existing?.createdAt || call.createdAt || now,
+          createdByUid: existing?.createdByUid || call.createdByUid || opUid,
+          createdByName: existing?.createdByName || call.createdByName || opName,
+        };
+
+        tx.set(callRef, removeUndefinedValues(payload));
+        return payload;
+      });
+      return result;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('ATTENDANCE_LOCKED:')) {
+        throw error;
+      }
       handleFirestoreError(error, OperationType.WRITE, `attendance_calls/${call.id}`);
+    }
+  },
+
+  async markMemberPresentByQr(
+    callBase: AttendanceCall,
+    member: AttendanceMember,
+    department: AttendanceDepartment | undefined,
+    operator?: { uid: string; name: string; email?: string }
+  ): Promise<{
+    outcome: 'checked_in_now' | 'already_present';
+    call: AttendanceCall;
+    entry: AttendanceEntry;
+  }> {
+    const effective = api.getEffectiveUser();
+    const opUid = operator?.uid || effective.uid;
+    const opName = operator?.name || effective.displayName;
+    const opEmail = operator?.email || effective.email || '';
+    const now = new Date().toISOString();
+    const callRef = doc(db, 'attendance_calls', callBase.id);
+
+    try {
+      const txResult = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(callRef);
+        const existing = snap.exists() ? (snap.data() as AttendanceCall) : null;
+
+        if (existing?.activeOperatorUid && existing.activeOperatorUid !== opUid) {
+          throw new Error(
+            `ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`
+          );
+        }
+
+        const baseRecords = existing?.records || callBase.records || {};
+        const existingEntry = baseRecords[member.id];
+        if (existingEntry?.status === 'presente') {
+          return {
+            outcome: 'already_present' as const,
+            call: existing || callBase,
+            entry: existingEntry,
+          };
+        }
+
+        const entry: AttendanceEntry = {
+          memberId: member.id,
+          memberName: member.name,
+          departmentId: member.departmentId,
+          departmentName: department?.name || existingEntry?.departmentName || 'Geral',
+          status: 'presente',
+          markedByUid: opUid,
+          markedByName: opName,
+          markedAt: now,
+        };
+
+        const baseIncluded = existing?.includedMemberIds || callBase.includedMemberIds || [];
+        const nextIncluded = baseIncluded.includes(member.id)
+          ? baseIncluded
+          : [...baseIncluded, member.id];
+
+        const nextCall: AttendanceCall = {
+          ...(existing || callBase),
+          id: callBase.id,
+          includedMemberIds: nextIncluded,
+          records: {
+            ...baseRecords,
+            [member.id]: entry,
+          },
+          activeOperatorUid: opUid,
+          activeOperatorName: opName,
+          activeOperatorEmail: opEmail,
+          activeOperatorStartedAt:
+            existing?.activeOperatorUid === opUid && existing.activeOperatorStartedAt
+              ? existing.activeOperatorStartedAt
+              : now,
+          callStatus: 'em_andamento',
+          updatedByUid: opUid,
+          updatedByName: opName,
+          updatedAt: now,
+          createdAt: existing?.createdAt || callBase.createdAt || now,
+          createdByUid: existing?.createdByUid || callBase.createdByUid || opUid,
+          createdByName: existing?.createdByName || callBase.createdByName || opName,
+        };
+
+        tx.set(callRef, removeUndefinedValues(nextCall));
+        return {
+          outcome: 'checked_in_now' as const,
+          call: nextCall,
+          entry,
+        };
+      });
+
+      if (txResult.outcome === 'checked_in_now') {
+        await api.addActivity({
+          userId: opUid,
+          userName: opName,
+          action: 'attendance_qr_checkin',
+          actionLabel: 'Presença de Membro via QR Code',
+          targetType: 'attendance',
+          targetName: member.name,
+          details: `Chamada: ${callBase.title} (${callBase.date})`,
+        });
+      }
+
+      return txResult;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('ATTENDANCE_LOCKED:')) {
+        throw error;
+      }
+      handleFirestoreError(error, OperationType.WRITE, `attendance_calls/${callBase.id}`);
     }
   },
 

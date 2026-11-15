@@ -644,6 +644,13 @@ export interface AttendanceMember {
   id: string;
   departmentId: string;
   name: string;
+  memberCode?: string;
+  roleTitle?: string;
+  phone?: string;
+  email?: string;
+  congregation?: string;
+  area?: string;
+  notes?: string;
   createdByUid: string;
   createdByName: string;
   createdAt: string;
@@ -671,6 +678,11 @@ export interface AttendanceCall {
   title: string;
   includedMemberIds: string[];
   records: Record<string, AttendanceEntry>;
+  activeOperatorUid?: string | null;
+  activeOperatorName?: string | null;
+  activeOperatorEmail?: string | null;
+  activeOperatorStartedAt?: string | null;
+  callStatus?: 'aberta' | 'em_andamento' | 'finalizada';
   createdByUid: string;
   createdByName: string;
   updatedByUid: string;
