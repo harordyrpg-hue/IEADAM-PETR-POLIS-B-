@@ -368,10 +368,15 @@ class LocalStore {
   private data: DbCollections;
   private lock: Promise<void> = Promise.resolve();
   private sseClients: Set<Response> = new Set();
+  private versions: Record<string, number> = {};
+  private globalVersion = 1;
 
   constructor() {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    for (const col of ALLOWED_COLLECTIONS) {
+      this.versions[col] = 1;
     }
     this.data = this.loadFromDisk();
   }
@@ -451,6 +456,10 @@ class LocalStore {
     return this.data;
   }
 
+  getVersions(): Record<string, number> {
+    return { ...this.versions };
+  }
+
   registerSseClient(res: Response) {
     this.sseClients.add(res);
     res.on('close', () => {
@@ -460,9 +469,19 @@ class LocalStore {
 
   broadcastChange(collections: string | string[]) {
     const list = Array.isArray(collections) ? collections : [collections];
-    const unique = Array.from(new Set(list));
+    const unique = Array.from(new Set(list)).filter((c) => ALLOWED_COLLECTIONS.has(c));
     if (unique.length === 0) return;
-    const payload = `data: ${JSON.stringify({ collections: unique, ts: Date.now() })}\n\n`;
+
+    this.globalVersion += 1;
+    for (const col of unique) {
+      this.versions[col] = this.globalVersion;
+    }
+
+    const payload = `data: ${JSON.stringify({
+      collections: unique,
+      versions: this.getVersions(),
+      ts: Date.now(),
+    })}\n\n`;
     for (const client of this.sseClients) {
       try {
         client.write(payload);
@@ -473,6 +492,7 @@ class LocalStore {
   }
 
   async seedAttendanceRoster(forceRestore = false) {
+    let changed = false;
     await this.withLock((db) => {
       if (!forceRestore && db.settings.attendance_roster_seeded?.seeded) {
         return;
@@ -482,6 +502,7 @@ class LocalStore {
           seeded: true,
           updatedAt: new Date().toISOString(),
         };
+        changed = true;
         return;
       }
       const { departments, members } = buildInitialRoster(new Date().toISOString());
@@ -495,8 +516,11 @@ class LocalStore {
         seeded: true,
         updatedAt: new Date().toISOString(),
       };
+      changed = true;
     });
-    this.broadcastChange(['attendance_departments', 'attendance_members', 'settings']);
+    if (changed) {
+      this.broadcastChange(['attendance_departments', 'attendance_members', 'settings']);
+    }
   }
 }
 

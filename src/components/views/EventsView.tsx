@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Calendar,
   CalendarPlus,
@@ -17,7 +17,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
-import { ChurchEvent, FileRecord } from '../../types.js';
+import { ChurchEvent } from '../../types.js';
 import { formatBytes, formatDate } from '../../utils/formatters.js';
 import { api } from '../../services/api.js';
 import { EventModal } from '../events/EventModal.js';
@@ -26,7 +26,9 @@ import { FileCard } from '../files/FileCard.js';
 export const EventsView: React.FC = () => {
   const {
     events,
+    allFiles,
     refreshEvents,
+    refreshStats,
     openUpload,
     selectedFileIds,
     toggleSelectFile,
@@ -36,36 +38,22 @@ export const EventsView: React.FC = () => {
     requestConfirm,
   } = useApp();
 
-  const [selectedEventDetails, setSelectedEventDetails] = useState<{
-    event: ChurchEvent;
-    files: FileRecord[];
-  } | null>(null);
-
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<ChurchEvent | null>(null);
   const [eventMediaFilter, setEventMediaFilter] = useState<string>('all');
-  const [loading, setLoading] = useState(false);
 
-  // Load event details if activeEventId is set
-  const loadEventFiles = async (evtId: string) => {
-    try {
-      setLoading(true);
-      const data = await api.getEvent(evtId);
-      setSelectedEventDetails(data);
-    } catch {
-      notify('Erro ao carregar arquivos do evento', 'error');
-    } finally {
-      setLoading(false);
-    }
+  const selectedEventDetails = useMemo(() => {
+    if (!activeEventId) return null;
+    const evt = events.find((e) => e.id === activeEventId);
+    if (!evt) return null;
+    const files = allFiles.filter((f) => !f.inTrash && f.eventId === activeEventId);
+    return { event: evt, files };
+  }, [activeEventId, events, allFiles]);
+
+  const loadEventFiles = (_evtId?: string) => {
+    refreshEvents();
+    refreshStats();
   };
-
-  useEffect(() => {
-    if (activeEventId) {
-      loadEventFiles(activeEventId);
-    } else {
-      setSelectedEventDetails(null);
-    }
-  }, [activeEventId]);
 
   const handleDownloadFullEventZip = async (evtId: string, eventName: string) => {
     notify(`Compactando todos os arquivos de "${eventName}" em ZIP organizado...`, 'info');

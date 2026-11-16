@@ -17,31 +17,51 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
+const CHUNKS_DIR = path.join(UPLOADS_DIR, '.chunks');
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
+if (!fs.existsSync(CHUNKS_DIR)) {
+  fs.mkdirSync(CHUNKS_DIR, { recursive: true });
+}
 
-// Serve uploaded media files directly (return 404 instead of SPA fallback when missing)
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function sanitizeStoredFilename(rawName: string): { originalName: string; uniqueName: string } {
+  const decoded = safeDecodeURIComponent(rawName || `file_${Date.now()}`);
+  const cleanName = decoded.replace(/[^a-zA-Z0-9.\-_]/g, '_') || `file_${Date.now()}`;
+  const uniqueName = `${Date.now()}_${Math.random().toString(36).substring(2, 6)}_${cleanName}`;
+  return { originalName: decoded, uniqueName };
+}
+
+// Serve uploaded media files directly (block internal .chunks folder; return 404 instead of SPA fallback when missing)
 app.use(
   '/uploads',
+  (req, res, next) => {
+    if (req.path.startsWith('/.chunks')) {
+      return res.status(404).json({ error: 'Arquivo não encontrado.' });
+    }
+    next();
+  },
   express.static(UPLOADS_DIR),
   (_req, res) => {
     res.status(404).json({ error: 'Arquivo não encontrado.' });
   }
 );
 
-// Dedicated binary upload endpoint (registered before express.json so JSON files also upload as raw Buffer)
-app.post('/api/upload', express.raw({ type: '*/*', limit: '250mb' }), (req, res) => {
+// Dedicated single-shot binary upload endpoint (registered before express.json so JSON files also upload as raw Buffer)
+app.post('/api/upload', express.raw({ type: '*/*', limit: '30mb' }), (req, res) => {
   const rawFileName = (req.headers['x-filename'] as string) || `file_${Date.now()}`;
-  const decodedFileName = decodeURIComponent(rawFileName);
-  const cleanName = decodedFileName.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-  const uniqueName = `${Date.now()}_${cleanName}`;
+  const { originalName, uniqueName } = sanitizeStoredFilename(rawFileName);
   const filePath = path.join(UPLOADS_DIR, uniqueName);
 
-  const buffer = req.body as Buffer;
-  if (!buffer || buffer.length === 0) {
-    return res.status(400).json({ error: 'Nenhum dado recebido para upload.' });
-  }
+  const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '');
 
   fs.writeFile(filePath, buffer, (err) => {
     if (err) {
@@ -53,23 +73,126 @@ app.post('/api/upload', express.raw({ type: '*/*', limit: '250mb' }), (req, res)
     res.json({
       success: true,
       filename: uniqueName,
-      originalName: decodedFileName,
+      originalName,
       downloadUrl,
       size: buffer.length,
     });
   });
 });
 
+// Chunked binary upload endpoint (must be before express.json so every raw slice stays a Buffer)
+app.post('/api/upload/chunk', express.raw({ type: '*/*', limit: '16mb' }), async (req, res) => {
+  const uploadId = String(req.headers['x-upload-id'] || '').replace(/[^a-zA-Z0-9_\-]/g, '');
+  const chunkIndex = Number(req.headers['x-chunk-index']);
+
+  if (!uploadId || !Number.isInteger(chunkIndex) || chunkIndex < 0) {
+    return res.status(400).json({ error: 'Metadados de parte inválidos no upload.' });
+  }
+
+  const chunkDir = path.join(CHUNKS_DIR, uploadId);
+  if (!fs.existsSync(chunkDir)) {
+    return res.status(404).json({ error: 'Sessão de upload não encontrada ou expirada.' });
+  }
+
+  const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '');
+  const chunkPath = path.join(chunkDir, `part_${String(chunkIndex).padStart(6, '0')}`);
+
+  try {
+    await fs.promises.writeFile(chunkPath, buffer);
+    return res.json({ success: true, chunkIndex, size: buffer.length });
+  } catch (err) {
+    console.error('[Upload Chunk API] Error writing chunk:', err);
+    return res.status(500).json({ error: 'Falha ao gravar parte do arquivo no servidor.' });
+  }
+});
+
 app.use(express.json({ limit: '50mb' }));
 
-// Real-time Server-Sent Events stream
+// Initialize a chunked upload session (bypasses Cloud Run 32 MiB single-request body limit)
+app.post('/api/upload/init', async (req, res) => {
+  const rawFilename = String(req.body?.filename || `file_${Date.now()}`);
+  const decodedFilename = safeDecodeURIComponent(rawFilename);
+  const uploadId = `up_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const chunkDir = path.join(CHUNKS_DIR, uploadId);
+
+  try {
+    await fs.promises.mkdir(chunkDir, { recursive: true });
+    return res.json({ uploadId, filename: decodedFilename });
+  } catch (err) {
+    console.error('[Upload Init API] Error creating chunk dir:', err);
+    return res.status(500).json({ error: 'Falha ao iniciar sessão de upload no servidor.' });
+  }
+});
+
+// Assemble all uploaded chunks into a final file in UPLOADS_DIR
+app.post('/api/upload/complete', async (req, res) => {
+  const uploadId = String(req.body?.uploadId || '').replace(/[^a-zA-Z0-9_\-]/g, '');
+  const rawFilename = String(req.body?.filename || `file_${Date.now()}`);
+  const totalChunks = Number(req.body?.totalChunks || 0);
+
+  if (!uploadId || !Number.isInteger(totalChunks) || totalChunks <= 0) {
+    return res.status(400).json({ error: 'Dados inválidos para finalizar o upload.' });
+  }
+
+  const chunkDir = path.join(CHUNKS_DIR, uploadId);
+  if (!fs.existsSync(chunkDir)) {
+    return res.status(404).json({ error: 'Sessão de upload não encontrada.' });
+  }
+
+  const { originalName, uniqueName } = sanitizeStoredFilename(rawFilename);
+  const finalPath = path.join(UPLOADS_DIR, uniqueName);
+
+  try {
+    let totalSize = 0;
+    const writeHandle = await fs.promises.open(finalPath, 'w');
+    try {
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkPath = path.join(chunkDir, `part_${String(i).padStart(6, '0')}`);
+        if (!fs.existsSync(chunkPath)) {
+          throw new Error(`Parte ${i + 1} de ${totalChunks} não encontrada.`);
+        }
+        const chunkBuf = await fs.promises.readFile(chunkPath);
+        await writeHandle.write(chunkBuf);
+        totalSize += chunkBuf.length;
+      }
+    } finally {
+      await writeHandle.close();
+    }
+
+    await fs.promises.rm(chunkDir, { recursive: true, force: true }).catch(() => {});
+
+    return res.json({
+      success: true,
+      filename: uniqueName,
+      originalName,
+      downloadUrl: `/uploads/${uniqueName}`,
+      size: totalSize,
+    });
+  } catch (err: any) {
+    await fs.promises.unlink(finalPath).catch(() => {});
+    await fs.promises.rm(chunkDir, { recursive: true, force: true }).catch(() => {});
+    console.error('[Upload Complete API] Error assembling chunks:', err);
+    return res.status(500).json({ error: err?.message || 'Falha ao montar arquivo completo no servidor.' });
+  }
+});
+
+// Lightweight version check endpoint for instant multi-user diff synchronization
+app.get('/api/realtime/versions', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.json({ versions: localStore.getVersions(), ts: Date.now() });
+});
+
+// Real-time Server-Sent Events stream with proxy unbuffering headers
 app.get('/api/realtime', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
-  res.write(`data: ${JSON.stringify({ connected: true, ts: Date.now() })}\n\n`);
+  res.write(
+    `data: ${JSON.stringify({ connected: true, versions: localStore.getVersions(), ts: Date.now() })}\n\n`
+  );
   localStore.registerSseClient(res);
 
   const heartbeat = setInterval(() => {
@@ -78,7 +201,7 @@ app.get('/api/realtime', (req, res) => {
     } catch {
       clearInterval(heartbeat);
     }
-  }, 25000);
+  }, 10000);
 
   req.on('close', () => {
     clearInterval(heartbeat);

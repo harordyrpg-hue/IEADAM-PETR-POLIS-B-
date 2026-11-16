@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Share2,
@@ -21,6 +21,11 @@ export const ShareModal: React.FC = () => {
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    setGeneratedLink(null);
+    setCopied(false);
+  }, [shareTarget?.id, shareTarget?.type]);
 
   if (!shareTarget) return null;
 

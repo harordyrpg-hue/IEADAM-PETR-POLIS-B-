@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   User,
   FileRecord,
@@ -138,7 +138,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isRealtimeActive, setIsRealtimeActive] = useState<boolean>(true);
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [events, setEvents] = useState<ChurchEvent[]>([]);
+  const [rawEvents, setRawEvents] = useState<ChurchEvent[]>([]);
   const [teamTasks, setTeamTasks] = useState<TeamTask[]>([]);
   const [teamNotes, setTeamNotes] = useState<TeamNote[]>([]);
   const [financialTransactions, setFinancialTransactions] = useState<FinancialTransaction[]>([]);
@@ -253,11 +253,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshEvents = useCallback(async () => {
     try {
       const data = await api.getEvents();
-      setEvents(data);
+      setRawEvents(data);
     } catch (err) {
       console.warn('Events refresh deferred:', err);
     }
   }, []);
+
+  const events = useMemo(() => {
+    const activeFiles = allFiles.filter((f) => !f.inTrash);
+    return rawEvents.map((evt) => {
+      const eventFiles = activeFiles.filter((f) => f.eventId === evt.id);
+      return {
+        ...evt,
+        stats: {
+          totalFiles: eventFiles.length,
+          photos: eventFiles.filter((f) => f.type === 'photo').length,
+          videos: eventFiles.filter((f) => f.type === 'video').length,
+          arts: eventFiles.filter((f) => f.type === 'art').length,
+          audios: eventFiles.filter((f) => f.type === 'audio').length,
+          docs: eventFiles.filter((f) => f.type === 'document').length,
+          totalBytes: eventFiles.reduce((acc, f) => acc + (f.size || 0), 0),
+        },
+      };
+    });
+  }, [rawEvents, allFiles]);
 
   // Restore and keep local server session synchronized
   useEffect(() => {
@@ -312,6 +331,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setFilesLoading(false);
       setIsRealtimeActive(true);
     });
+    const loadingSafety = setTimeout(() => {
+      setFilesLoading(false);
+    }, 3500);
 
     // 2. Real-time Folders sync
     const unsubFolders = api.subscribeAllFolders((foldersList) => {
@@ -320,7 +342,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // 3. Real-time Events sync
     const unsubEvents = api.subscribeAllEvents((eventsList) => {
-      setEvents(eventsList);
+      setRawEvents(eventsList);
     });
 
     // 4. Real-time Team Tasks & Scales sync
@@ -351,6 +373,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     return () => {
+      clearTimeout(loadingSafety);
       unsubFiles();
       unsubFolders();
       unsubEvents();

@@ -190,43 +190,251 @@ type ListenerFn = () => void;
 const collectionSubscribers = new Map<string, Set<ListenerFn>>();
 let eventSource: EventSource | null = null;
 let fallbackInterval: ReturnType<typeof setInterval> | null = null;
+let syncChannel: BroadcastChannel | null = null;
+let syncListenersBound = false;
+let versionCheckInFlight = false;
+let versionsInitialized = false;
+let lastKnownVersions: Record<string, number> = {};
 
-function notifyLocalSubscribers(collections: string[]) {
-  for (const col of collections) {
+function notifyLocalSubscribers(collections: string[], broadcastToTabs = true) {
+  const unique = Array.from(new Set(collections));
+  if (unique.length === 0) return;
+
+  for (const col of unique) {
     const subs = collectionSubscribers.get(col);
     if (subs) {
       subs.forEach((fn) => fn());
     }
   }
+
+  if (broadcastToTabs && syncChannel) {
+    try {
+      syncChannel.postMessage({ collections: unique, ts: Date.now() });
+    } catch {}
+  }
+}
+
+function applyServerVersions(
+  serverVersions: Record<string, number> | undefined,
+  explicitCollections?: string[]
+) {
+  const changed = new Set<string>(explicitCollections || []);
+
+  if (serverVersions && typeof serverVersions === 'object') {
+    if (!versionsInitialized) {
+      lastKnownVersions = { ...serverVersions };
+      versionsInitialized = true;
+    } else {
+      for (const [col, ver] of Object.entries(serverVersions)) {
+        if (typeof ver === 'number' && ver !== lastKnownVersions[col]) {
+          changed.add(col);
+          lastKnownVersions[col] = ver;
+        }
+      }
+    }
+  }
+
+  if (changed.size > 0) {
+    notifyLocalSubscribers(Array.from(changed), false);
+  }
+}
+
+async function checkVersionsFromServer() {
+  if (typeof window === 'undefined' || versionCheckInFlight) return;
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  versionCheckInFlight = true;
+  try {
+    const res = await apiFetch<{ versions: Record<string, number> }>('/api/realtime/versions', {
+      cache: 'no-store',
+    });
+    applyServerVersions(res?.versions);
+  } catch {
+    // Ignore transient network hiccups; next tick retries automatically
+  } finally {
+    versionCheckInFlight = false;
+  }
 }
 
 function ensureRealtimeConnection() {
   if (typeof window === 'undefined') return;
-  if (!eventSource) {
+
+  if (!syncChannel && typeof BroadcastChannel !== 'undefined') {
     try {
-      eventSource = new EventSource('/api/realtime');
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (Array.isArray(data?.collections)) {
-            notifyLocalSubscribers(data.collections);
-          }
-        } catch {}
-      };
-      eventSource.onerror = () => {
-        // EventSource automatically reconnects; fallback poll also keeps clients synced
+      syncChannel = new BroadcastChannel('ptb_midia_sync');
+      syncChannel.onmessage = (msg) => {
+        if (Array.isArray(msg?.data?.collections)) {
+          notifyLocalSubscribers(msg.data.collections, false);
+        }
       };
     } catch {}
   }
 
+  if (!eventSource) {
+    try {
+      eventSource = new EventSource('/api/realtime');
+      eventSource.onopen = () => {
+        void checkVersionsFromServer();
+      };
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          applyServerVersions(
+            data?.versions,
+            Array.isArray(data?.collections) ? data.collections : undefined
+          );
+        } catch {}
+      };
+      eventSource.onerror = () => {
+        // EventSource automatically reconnects; version check & focus listeners handle recovery
+      };
+    } catch {}
+  }
+
+  if (!syncListenersBound) {
+    syncListenersBound = true;
+    window.addEventListener('focus', () => {
+      void checkVersionsFromServer();
+    });
+    window.addEventListener('online', () => {
+      void checkVersionsFromServer();
+    });
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          void checkVersionsFromServer();
+        }
+      });
+    }
+  }
+
   if (!fallbackInterval) {
     fallbackInterval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      for (const subs of collectionSubscribers.values()) {
-        subs.forEach((fn) => fn());
-      }
-    }, 15000);
+      void checkVersionsFromServer();
+    }, 2000);
   }
+}
+
+const CHUNK_SIZE_BYTES = 4 * 1024 * 1024; // 4 MB chunks keep requests well below Cloud Run's 32 MiB cap
+
+function parseXhrError(xhr: XMLHttpRequest): string {
+  try {
+    const parsed = JSON.parse(xhr.responseText);
+    if (parsed?.error) return String(parsed.error);
+  } catch {}
+  return `Servidor respondeu com status ${xhr.status}`;
+}
+
+async function uploadSingleRequest(
+  blob: Blob,
+  filename: string,
+  mimeType: string,
+  onProgress?: (percent: number, speedText?: string) => void
+): Promise<{ downloadUrl: string; filename: string; size?: number }> {
+  const startTime = Date.now();
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload', true);
+    xhr.setRequestHeader('x-filename', encodeURIComponent(filename));
+    xhr.setRequestHeader('Content-Type', mimeType || 'application/octet-stream');
+    xhr.timeout = 180000;
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        const percent = Math.min(99, Math.round((e.loaded / Math.max(1, e.total)) * 100));
+        const elapsed = Math.max(0.1, (Date.now() - startTime) / 1000);
+        const speedMb = e.loaded / (1024 * 1024) / elapsed;
+        onProgress(percent, `${speedMb.toFixed(1)} MB/s`);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (pErr) {
+          reject(pErr);
+        }
+      } else {
+        reject(new Error(parseXhrError(xhr)));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Erro de conexão ao enviar arquivo.'));
+    xhr.ontimeout = () => reject(new Error('Tempo limite de upload excedido.'));
+    xhr.send(blob);
+  });
+}
+
+async function uploadBinaryToServer(
+  file: Blob,
+  filename: string,
+  mimeType: string,
+  onProgress?: (percent: number, speedText?: string) => void
+): Promise<{ downloadUrl: string; filename: string; size?: number }> {
+  if (file.size <= CHUNK_SIZE_BYTES) {
+    return uploadSingleRequest(file, filename, mimeType, onProgress);
+  }
+
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE_BYTES);
+  const initRes = await apiFetch<{ uploadId: string }>('/api/upload/init', {
+    method: 'POST',
+    body: JSON.stringify({
+      filename,
+      totalSize: file.size,
+      totalChunks,
+      mimeType: mimeType || 'application/octet-stream',
+    }),
+  });
+
+  const startTime = Date.now();
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+    const start = chunkIndex * CHUNK_SIZE_BYTES;
+    const end = Math.min(file.size, start + CHUNK_SIZE_BYTES);
+    const slice = file.slice(start, end);
+
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload/chunk', true);
+      xhr.setRequestHeader('x-upload-id', initRes.uploadId);
+      xhr.setRequestHeader('x-chunk-index', String(chunkIndex));
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.timeout = 180000;
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          const totalLoaded = start + e.loaded;
+          const percent = Math.min(98, Math.round((totalLoaded / file.size) * 100));
+          const elapsed = Math.max(0.1, (Date.now() - startTime) / 1000);
+          const speedMb = totalLoaded / (1024 * 1024) / elapsed;
+          onProgress(percent, `${speedMb.toFixed(1)} MB/s`);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          reject(new Error(parseXhrError(xhr)));
+        }
+      };
+      xhr.onerror = () => reject(new Error('Erro de conexão durante envio em partes.'));
+      xhr.ontimeout = () => reject(new Error('Tempo limite excedido ao enviar parte do arquivo.'));
+      xhr.send(slice);
+    });
+  }
+
+  if (onProgress) onProgress(99, 'Finalizando...');
+  return await apiFetch<{ downloadUrl: string; filename: string; size?: number }>(
+    '/api/upload/complete',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        uploadId: initRes.uploadId,
+        filename,
+        totalChunks,
+      }),
+    }
+  );
 }
 
 function subscribeCollection<T>(
@@ -521,25 +729,11 @@ export const api = {
 
   async uploadAvatar(file: File): Promise<string> {
     try {
-      const res = await new Promise<{ downloadUrl: string }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/upload', true);
-        xhr.setRequestHeader('x-filename', encodeURIComponent(`avatar_${Date.now()}_${file.name}`));
-        xhr.setRequestHeader('Content-Type', file.type || 'image/jpeg');
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch (err) {
-              reject(err);
-            }
-          } else {
-            reject(new Error(`Status ${xhr.status}`));
-          }
-        };
-        xhr.onerror = () => reject(new Error('Falha de rede no upload da foto'));
-        xhr.send(file);
-      });
+      const res = await uploadBinaryToServer(
+        file,
+        `avatar_${Date.now()}_${file.name}`,
+        file.type || 'image/jpeg'
+      );
       if (res?.downloadUrl) return res.downloadUrl;
     } catch (err) {
       console.warn('Upload de avatar via API falhou, usando canvas fallback:', err);
@@ -603,41 +797,12 @@ export const api = {
       console.warn('Thumbnail generation note:', thumbErr);
     }
 
-    const startTime = Date.now();
-    const uploadResult = await new Promise<{ downloadUrl: string; filename: string }>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/upload', true);
-      xhr.setRequestHeader('x-filename', encodeURIComponent(file.name));
-      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-      xhr.timeout = 120000;
-
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable && onProgress) {
-          const percent = Math.min(99, Math.round((e.loaded / e.total) * 100));
-          const elapsed = Math.max(0.1, (Date.now() - startTime) / 1000);
-          const speedMb = (e.loaded / (1024 * 1024)) / elapsed;
-          onProgress(percent, `${speedMb.toFixed(1)} MB/s`);
-        }
-      };
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const res = JSON.parse(xhr.responseText);
-            resolve(res);
-          } catch (pErr) {
-            reject(pErr);
-          }
-        } else {
-          reject(new Error(`Servidor respondeu com status ${xhr.status}`));
-        }
-      };
-
-      xhr.onerror = () => reject(new Error('Erro de conexão ao enviar arquivo.'));
-      xhr.ontimeout = () => reject(new Error('Tempo limite de upload excedido.'));
-
-      xhr.send(file);
-    });
+    const uploadResult = await uploadBinaryToServer(
+      file,
+      file.name,
+      file.type || 'application/octet-stream',
+      onProgress
+    );
 
     const downloadUrl = uploadResult.downloadUrl;
     const storagePath = `/uploads/${uploadResult.filename}`;
@@ -2255,25 +2420,11 @@ export const api = {
     const docType: 'image' | 'pdf' | 'document' = isImage ? 'image' : (isPdf ? 'pdf' : 'document');
 
     try {
-      const res = await new Promise<{ downloadUrl: string }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/upload', true);
-        xhr.setRequestHeader('x-filename', encodeURIComponent(`recibo_${Date.now()}_${file.name}`));
-        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch (err) {
-              reject(err);
-            }
-          } else {
-            reject(new Error(`Status ${xhr.status}`));
-          }
-        };
-        xhr.onerror = () => reject(new Error('Network error'));
-        xhr.send(file);
-      });
+      const res = await uploadBinaryToServer(
+        file,
+        `recibo_${Date.now()}_${file.name}`,
+        file.type || 'application/octet-stream'
+      );
 
       if (res?.downloadUrl) {
         return {
@@ -2755,25 +2906,11 @@ export const api = {
 
   async uploadChurchImage(file: File, prefix = 'church'): Promise<string> {
     try {
-      const res = await new Promise<{ downloadUrl: string }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/upload', true);
-        xhr.setRequestHeader('x-filename', encodeURIComponent(`${prefix}_${Date.now()}_${file.name}`));
-        xhr.setRequestHeader('Content-Type', file.type || 'image/jpeg');
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch (err) {
-              reject(err);
-            }
-          } else {
-            reject(new Error(`Status ${xhr.status}`));
-          }
-        };
-        xhr.onerror = () => reject(new Error('Network error'));
-        xhr.send(file);
-      });
+      const res = await uploadBinaryToServer(
+        file,
+        `${prefix}_${Date.now()}_${file.name}`,
+        file.type || 'image/jpeg'
+      );
       if (res?.downloadUrl) return res.downloadUrl;
     } catch (err) {
       console.warn('Image upload via /api/upload fallback to canvas/FileReader:', err);

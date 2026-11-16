@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Calendar, User, Tag, Image as ImageIcon } from 'lucide-react';
 import { ChurchEvent } from '../../types.js';
 import { api } from '../../services/api.js';
@@ -41,6 +41,18 @@ export const EventModal: React.FC<EventModalProps> = ({
   const [category, setCategory] = useState(event ? event.category : 'Culto de Domingo');
   const [responsibles, setResponsibles] = useState(event ? event.responsibles.join(', ') : '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setName(event ? event.name : '');
+      setDescription(event ? event.description : '');
+      setDate(event ? event.date : new Date().toISOString().split('T')[0]);
+      setTime(event?.time || '19:30');
+      setLocation(event?.location || 'Templo Central');
+      setCategory(event ? event.category : 'Culto de Domingo');
+      setResponsibles(event ? (event.responsibles || []).join(', ') : '');
+    }
+  }, [event, isOpen]);
 
   if (!isOpen) return null;
 
