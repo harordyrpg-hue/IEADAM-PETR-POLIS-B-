@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { User as FirebaseUser } from 'firebase/auth';
 import {
   User,
   FileRecord,
@@ -15,7 +14,6 @@ import {
   FinancialPaymentMethod,
 } from '../types.js';
 import { api } from '../services/api.js';
-import { auth } from '../services/firebase.js';
 
 interface Toast {
   id: string;
@@ -37,13 +35,11 @@ interface ConfirmDialogState extends ConfirmOptions {
 
 interface AppContextType {
   user: User | null;
-  firebaseUser: FirebaseUser | null;
   authLoading: boolean;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
   registerWithEmail: (name: string, email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
+  resetPassword: (email: string, newPassword?: string) => Promise<void>;
   updateUserProfile: (updates: { name?: string; avatar?: string }) => Promise<void>;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
@@ -132,7 +128,6 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -264,9 +259,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  // Listen to Firebase Authentication state changes & restore session
+  // Restore and keep local server session synchronized
   useEffect(() => {
-    // 1. Check local session immediately to avoid flash of login screen
     const storedUser = api.getCurrentSessionUser();
     if (storedUser) {
       setUser(storedUser);
@@ -276,24 +270,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       refreshEvents();
     }
 
-    // 2. Check for redirect authentication result (mobile devices)
-    api.checkRedirectAuth().then((redirectProfile) => {
-      if (redirectProfile) {
-        setUser(redirectProfile);
-        notify(`Bem-vindo, ${redirectProfile.name}!`, 'success');
-        refreshStats();
-        refreshFolders();
-        refreshEvents();
-      }
-    }).catch((err) => {
-      console.warn('Redirect auth check note:', err);
-    });
-
-    const unsubscribe = api.onAuthStateChanged(async (fbUser) => {
-      setFirebaseUser(fbUser);
-      if (fbUser) {
+    const unsubscribe = api.onAuthStateChanged(async (sessionUser) => {
+      if (sessionUser) {
         try {
-          const profile = await api.getUserProfile(fbUser.uid, fbUser.email || '');
+          const profile = await api.getUserProfile(sessionUser.uid, sessionUser.email || '');
           if (profile.status === 'blocked') {
             await api.logout();
             notify('Sua conta foi suspensa temporariamente pelo Administrador.', 'error');
@@ -306,17 +286,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             await Promise.all([refreshStats(), refreshFolders(), refreshEvents()]);
           }
         } catch (err) {
-          console.error('Failed to load user profile from Firestore:', err);
+          console.warn('Falha ao atualizar perfil no servidor:', err);
           const fallback = api.getCurrentSessionUser();
-          if (fallback) setUser(fallback);
+          setUser(fallback || sessionUser);
         }
       } else {
-        const localSession = api.getCurrentSessionUser();
-        if (localSession) {
-          setUser(localSession);
-        } else {
-          setUser(null);
-        }
+        setUser(null);
       }
       setAuthLoading(false);
     });
@@ -453,14 +428,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     notify(`Bem-vindo, ${profile.name}!`, 'success');
   };
 
-  const loginWithGoogle = async () => {
-    const profile = await api.loginWithGoogle();
-    if (profile) {
-      setUser(profile);
-      notify(`Bem-vindo, ${profile.name}!`, 'success');
-    }
-  };
-
   const registerWithEmail = async (name: string, email: string, pass: string) => {
     const profile = await api.registerWithEmail(name, email, pass);
     setUser(profile);
@@ -470,13 +437,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const logout = async () => {
     await api.logout();
     setUser(null);
-    setFirebaseUser(null);
     notify('Sessão encerrada com sucesso.', 'info');
   };
 
-  const resetPassword = async (email: string) => {
-    await api.resetPassword(email);
-    notify('E-mail de recuperação enviado! Verifique sua caixa de entrada.', 'success');
+  const resetPassword = async (email: string, newPassword?: string) => {
+    await api.resetPassword(email, newPassword);
+    notify(
+      newPassword
+        ? 'Senha atualizada com sucesso! Faça login normalmente.'
+        : 'Acesso redefinido! Você já pode entrar definindo uma nova senha.',
+      'success'
+    );
   };
 
   const openUpload = (folderId: string | null = null, eventId: string | null = null) => {
@@ -781,10 +752,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <AppContext.Provider
       value={{
         user,
-        firebaseUser,
         authLoading,
         loginWithEmail,
-        loginWithGoogle,
         registerWithEmail,
         logout,
         resetPassword,

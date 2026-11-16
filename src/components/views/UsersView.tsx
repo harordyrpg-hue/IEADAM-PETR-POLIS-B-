@@ -62,7 +62,7 @@ export const UsersView: React.FC = () => {
         initialPassword: newUserPassword,
         role: newUserRole,
       });
-      notify('Novo membro criado com sucesso no Firebase Authentication!', 'success');
+      notify('Novo membro criado com sucesso!', 'success');
       setNewUserName('');
       setNewUserEmail('');
       setNewUserPassword('');
@@ -76,7 +76,7 @@ export const UsersView: React.FC = () => {
   const handleUpdateRole = async (userId: string, role: UserRole) => {
     try {
       await api.updateUserRole(userId, role);
-      notify('Permissão do usuário atualizada com sucesso no Firestore', 'success');
+      notify('Permissão do usuário atualizada com sucesso!', 'success');
       setEditingUserId(null);
       loadUsers();
     } catch {
@@ -461,7 +461,7 @@ export const UsersView: React.FC = () => {
           <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-2xl text-neutral-100 text-xs">
             <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
               <UserPlus className="w-4 h-4 text-amber-400" />
-              Novo Membro da Equipe de Mídia (Firebase Auth)
+              Novo Membro da Equipe de Mídia
             </h3>
 
             <form onSubmit={handleCreateUser} className="space-y-3">
@@ -529,7 +529,7 @@ export const UsersView: React.FC = () => {
                   type="submit"
                   className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-semibold rounded-lg shadow-sm"
                 >
-                  Criar Membro no Firebase
+                  Criar Membro
                 </button>
               </div>
             </form>

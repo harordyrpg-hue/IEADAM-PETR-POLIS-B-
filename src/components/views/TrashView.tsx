@@ -161,7 +161,7 @@ export const TrashView: React.FC = () => {
   const handlePermanentDeleteFile = async (file: FileRecord) => {
     const confirmed = await requestConfirm({
       title: 'Excluir arquivo definitivamente',
-      message: `Tem certeza? O arquivo "${file.name}" será excluído permanentemente do Cloud Storage e Firestore.`,
+      message: `Tem certeza? O arquivo "${file.name}" será excluído permanentemente do servidor.`,
       confirmLabel: 'Excluir definitivamente',
       danger: true,
     });

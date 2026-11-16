@@ -1,49 +1,4 @@
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut,
-  sendPasswordResetEmail,
-  onAuthStateChanged,
-  GoogleAuthProvider,
-  signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
-  User as FirebaseUser,
-} from 'firebase/auth';
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-  limit,
-  serverTimestamp,
-  writeBatch,
-  onSnapshot,
-  runTransaction,
-} from 'firebase/firestore';
-import {
-  ref,
-  uploadBytesResumable,
-  getDownloadURL,
-  deleteObject,
-} from 'firebase/storage';
-import { initializeApp, deleteApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
 import JSZip from 'jszip';
-import {
-  auth,
-  db,
-  storage,
-  firebaseConfig,
-  handleFirestoreError,
-  OperationType,
-} from './firebase.js';
 import {
   User,
   UserRole,
@@ -63,13 +18,10 @@ import {
   ChurchDownload,
   TeamTask,
   TeamNote,
-  TeamTaskCategory,
-  TeamTaskPriority,
-  TeamTaskStatus,
   FinancialTransaction,
   FinancialBill,
-  FinancialReceipt,
   FinancialPaymentMethod,
+  FinancialReceipt,
   PublicRegistrationEvent,
   EventRegistration,
   EventCashboxMovement,
@@ -79,11 +31,13 @@ import {
   AttendanceMember,
   AttendanceEntry,
   AttendanceCall,
+  TeamTaskStatus,
 } from '../types.js';
 import { createFileThumbnail } from '../utils/thumbnail.js';
 
-
-// Helper to determine media category from extension and MIME type
+// ==========================================
+// UTILITY HELPERS
+// ==========================================
 export function detectMediaCategory(fileName: string, mimeType: string): MediaCategory {
   const ext = fileName.split('.').pop()?.toLowerCase() || '';
 
@@ -115,7 +69,6 @@ export function detectMediaCategory(fileName: string, mimeType: string): MediaCa
   return 'other';
 }
 
-// Helper to get image resolution in browser
 export async function getImageResolution(file: File): Promise<string | null> {
   if (!file.type.startsWith('image/')) return null;
   return new Promise((resolve) => {
@@ -133,7 +86,6 @@ export async function getImageResolution(file: File): Promise<string | null> {
   });
 }
 
-// Helper to safely strip undefined values so Firestore setDoc/updateDoc never fails
 export function removeUndefinedValues<T>(obj: T): T {
   if (obj === null || typeof obj !== 'object') return obj;
   if (Array.isArray(obj)) {
@@ -148,6 +100,201 @@ export function removeUndefinedValues<T>(obj: T): T {
   return clean as T;
 }
 
+// ==========================================
+// HTTP CLIENT & REAL-TIME SSE HUB
+// ==========================================
+async function apiFetch<T = any>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options?.headers || {}),
+    },
+    ...options,
+  });
+
+  const text = await res.text();
+  let parsed: any = {};
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = { error: text };
+  }
+
+  if (!res.ok) {
+    throw new Error(parsed?.error || `Erro HTTP ${res.status}`);
+  }
+  return parsed as T;
+}
+
+async function listCol<T>(col: string): Promise<T[]> {
+  const res = await apiFetch<{ items: T[] }>(`/api/db/${col}`);
+  return Array.isArray(res.items) ? res.items : [];
+}
+
+async function getDocById<T>(col: string, id: string): Promise<T | null> {
+  try {
+    const res = await apiFetch<{ item: T }>(`/api/db/${col}/${encodeURIComponent(id)}`);
+    return res.item || null;
+  } catch (err: any) {
+    if (err?.message?.includes('404') || err?.message?.includes('não encontrado')) {
+      return null;
+    }
+    return null;
+  }
+}
+
+async function setDocById<T>(col: string, id: string, data: T, merge = false): Promise<T> {
+  const res = await apiFetch<{ item: T }>(
+    `/api/db/${col}/${encodeURIComponent(id)}${merge ? '?merge=true' : ''}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(removeUndefinedValues(data)),
+    }
+  );
+  notifyLocalSubscribers([col]);
+  return res.item;
+}
+
+async function updateDocById(col: string, id: string, updates: Record<string, any>): Promise<void> {
+  await apiFetch(`/api/db/${col}/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(removeUndefinedValues(updates)),
+  });
+  notifyLocalSubscribers([col]);
+}
+
+async function deleteDocById(col: string, id: string): Promise<void> {
+  await apiFetch(`/api/db/${col}/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  notifyLocalSubscribers([col]);
+}
+
+async function batchWrite(
+  ops: { type: 'set' | 'update' | 'delete'; col: string; id: string; data?: any; merge?: boolean }[]
+): Promise<void> {
+  if (ops.length === 0) return;
+  await apiFetch('/api/db/batch', {
+    method: 'POST',
+    body: JSON.stringify({
+      ops: ops.map((o) => ({
+        ...o,
+        data: o.data ? removeUndefinedValues(o.data) : undefined,
+      })),
+    }),
+  });
+  notifyLocalSubscribers(Array.from(new Set(ops.map((o) => o.col))));
+}
+
+type ListenerFn = () => void;
+const collectionSubscribers = new Map<string, Set<ListenerFn>>();
+let eventSource: EventSource | null = null;
+let fallbackInterval: ReturnType<typeof setInterval> | null = null;
+
+function notifyLocalSubscribers(collections: string[]) {
+  for (const col of collections) {
+    const subs = collectionSubscribers.get(col);
+    if (subs) {
+      subs.forEach((fn) => fn());
+    }
+  }
+}
+
+function ensureRealtimeConnection() {
+  if (typeof window === 'undefined') return;
+  if (!eventSource) {
+    try {
+      eventSource = new EventSource('/api/realtime');
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (Array.isArray(data?.collections)) {
+            notifyLocalSubscribers(data.collections);
+          }
+        } catch {}
+      };
+      eventSource.onerror = () => {
+        // EventSource automatically reconnects; fallback poll also keeps clients synced
+      };
+    } catch {}
+  }
+
+  if (!fallbackInterval) {
+    fallbackInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      for (const subs of collectionSubscribers.values()) {
+        subs.forEach((fn) => fn());
+      }
+    }, 15000);
+  }
+}
+
+function subscribeCollection<T>(
+  col: string,
+  transform: (items: T[]) => void
+): () => void {
+  ensureRealtimeConnection();
+
+  let cancelled = false;
+  let inFlight = false;
+  let queued = false;
+
+  const fetchAndEmit = async () => {
+    if (cancelled) return;
+    if (inFlight) {
+      queued = true;
+      return;
+    }
+    inFlight = true;
+    try {
+      const items = await listCol<T>(col);
+      if (!cancelled) {
+        transform(items);
+      }
+    } catch (err) {
+      console.warn(`Realtime sync (${col}):`, err);
+    } finally {
+      inFlight = false;
+      if (queued && !cancelled) {
+        queued = false;
+        void fetchAndEmit();
+      }
+    }
+  };
+
+  if (!collectionSubscribers.has(col)) {
+    collectionSubscribers.set(col, new Set());
+  }
+  collectionSubscribers.get(col)!.add(fetchAndEmit);
+
+  // Initial load
+  void fetchAndEmit();
+
+  return () => {
+    cancelled = true;
+    const set = collectionSubscribers.get(col);
+    if (set) {
+      set.delete(fetchAndEmit);
+      if (set.size === 0) {
+        collectionSubscribers.delete(col);
+      }
+    }
+  };
+}
+
+// Local auth listeners
+const authListeners = new Set<(user: User | null) => void>();
+function emitAuthChange(user: User | null) {
+  authListeners.forEach((cb) => {
+    try {
+      cb(user);
+    } catch {}
+  });
+}
+
+// ==========================================
+// MAIN API OBJECT
+// ==========================================
 export const api = {
   // ==========================================
   // 1. AUTHENTICATION & PROFILE
@@ -161,13 +308,6 @@ export const api = {
   },
 
   getEffectiveUser(): { uid: string; displayName: string; email: string; user?: User } {
-    if (auth.currentUser) {
-      return {
-        uid: auth.currentUser.uid,
-        displayName: auth.currentUser.displayName || auth.currentUser.email || 'Usuário',
-        email: auth.currentUser.email || '',
-      };
-    }
     const session = api.getCurrentSessionUser();
     if (session) {
       return {
@@ -178,97 +318,17 @@ export const api = {
       };
     }
     return {
-      uid: 'unauthenticated',
-      displayName: 'Não Autenticado',
+      uid: 'system_guest',
+      displayName: 'Equipe PT-B',
       email: '',
     };
   },
 
   async loginWithGoogle(): Promise<User | null> {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-
-    // On mobile devices, browsers frequently block popups by default.
-    // We try popup first, and if blocked or restricted, seamlessly fall back to redirect.
-    const isMobile =
-      typeof window !== 'undefined' &&
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-    if (isMobile) {
-      try {
-        await signInWithRedirect(auth, provider);
-        return null;
-      } catch (redirectErr) {
-        console.warn('Redirect auth initiation note:', redirectErr);
-      }
-    }
-
-    try {
-      const cred = await signInWithPopup(auth, provider);
-      if (!cred.user || !cred.user.uid) {
-        throw new Error('Falha ao obter credenciais da conta Google.');
-      }
-      const email = cred.user.email || '';
-      const profile = await api.getUserProfile(cred.user.uid, email);
-      if (profile.status === 'blocked') {
-        await signOut(auth);
-        throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
-      }
-      try {
-        localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-      } catch {}
-      return profile;
-    } catch (err: any) {
-      console.warn('Google sign-in note:', err?.code || err?.message);
-
-      // If popup was blocked or unsupported on this device, fall back to redirect automatically
-      if (
-        err?.code === 'auth/popup-blocked' ||
-        err?.code === 'auth/operation-not-supported-in-this-environment'
-      ) {
-        try {
-          await signInWithRedirect(auth, provider);
-          return null;
-        } catch (rErr) {
-          throw new Error('A janela do Google foi bloqueada pelo navegador. Permita pop-ups ou tente novamente.');
-        }
-      }
-
-      if (err?.code === 'auth/popup-closed-by-user') {
-        throw new Error('O login com o Google foi cancelado.');
-      }
-      if (err?.code === 'auth/cancelled-popup-request') {
-        throw new Error('Operação de login cancelada.');
-      }
-      if (err?.code === 'auth/unauthorized-domain') {
-        const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'este domínio';
-        throw new Error(`O domínio "${currentHost}" precisa ser autorizado no Console do Firebase (Authentication > Configurações > Domínios autorizados).`);
-      }
-      if (err?.message && err.message.includes('suspensa')) {
-        throw err;
-      }
-      throw new Error(err?.message || 'Falha ao autenticar com o Google.');
-    }
+    throw new Error('Login com Google desativado. Utilize seu e-mail e senha de acesso.');
   },
 
   async checkRedirectAuth(): Promise<User | null> {
-    try {
-      const cred = await getRedirectResult(auth);
-      if (cred && cred.user) {
-        const email = cred.user.email || '';
-        const profile = await api.getUserProfile(cred.user.uid, email);
-        if (profile.status === 'blocked') {
-          await signOut(auth);
-          throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
-        }
-        try {
-          localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-        } catch {}
-        return profile;
-      }
-    } catch (err: any) {
-      console.warn('getRedirectResult note:', err?.code || err?.message);
-    }
     return null;
   },
 
@@ -280,405 +340,93 @@ export const api = {
       throw new Error('Informe e-mail e senha.');
     }
 
-    // Direct verified admin credentials for Emilly Campos
-    if (cleanEmail === 'emillycampos308@gmail.com') {
-      if (cleanPass === 'ptbmidia2026') {
-        try {
-          const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
-          const profile = await api.getUserProfile(cred.user.uid, cleanEmail);
-          try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-          } catch {}
-          return profile;
-        } catch {
-          const uid = 'Oq5l7PmQ4OMggXqy0Ue7eFfwp8f2';
-          const profile = await api.getUserProfile(uid, cleanEmail);
-          try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-          } catch {}
-          return profile;
-        }
-      } else {
-        throw new Error('E-mail ou senha incorretos.');
-      }
-    }
+    const res = await apiFetch<{ user: User }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: cleanEmail, password: cleanPass }),
+    });
 
-    // Direct verified administrator credentials for Isabele Menezes
-    if (cleanEmail === 'menezesisabele505@gmail.com') {
-      if (cleanPass === 'Isa180811') {
-        try {
-          const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
-          const profile = await api.getUserProfile(cred.user.uid, cleanEmail);
-          try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-          } catch {}
-          return profile;
-        } catch {
-          const uid = 'EilJCOYZrkU0wYPTVrYPCY547kW2';
-          const profile = await api.getUserProfile(uid, cleanEmail);
-          try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-          } catch {}
-          return profile;
-        }
-      } else {
-        throw new Error('E-mail ou senha incorretos.');
-      }
-    }
-
-    // Direct verified team credentials for Franciele Pinheiro
-    if (cleanEmail === 'francielearaujopinheiro862@gmail.com') {
-      if (cleanPass === 'Midiaptbfran') {
-        try {
-          const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
-          const profile = await api.getUserProfile(cred.user.uid, cleanEmail);
-          try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-          } catch {}
-          return profile;
-        } catch {
-          const uid = 'kh5UT2UEGDP8rYyiBjyx9gApFr32';
-          const profile = await api.getUserProfile(uid, cleanEmail);
-          try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-          } catch {}
-          return profile;
-        }
-      } else {
-        throw new Error('E-mail ou senha incorretos.');
-      }
-    }
-
+    const profile = res.user;
     try {
-      const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
-      const profile = await api.getUserProfile(cred.user.uid, cred.user.email || cleanEmail);
-      if (profile.status === 'blocked') {
-        await signOut(auth);
-        throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
-      }
-      try {
-        localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-      } catch {}
-      return profile;
-    } catch (err: any) {
-      if (err.message && err.message.includes('suspensa')) {
-        throw err;
-      }
-
-      // If initial Super Admin account is logging in for the very first time and not yet registered in Auth:
-      // If initial Super Admin account is logging in and not yet registered in Auth, or email auth is disabled in console:
-      if (
-        (cleanEmail === 'pedro.martinss225@gmail.com' || cleanEmail === 'emillycampos308@gmail.com') &&
-        (err?.code === 'auth/user-not-found' ||
-          err?.code === 'auth/invalid-credential' ||
-          err?.code === 'auth/operation-not-allowed')
-      ) {
-        try {
-          const cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
-          const profile = await api.getUserProfile(cred.user.uid, cleanEmail);
-          try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-          } catch {}
-          return profile;
-        } catch {
-          const uid = cleanEmail === 'emillycampos308@gmail.com' ? 'Oq5l7PmQ4OMggXqy0Ue7eFfwp8f2' : 'admin_pedro_henrique';
-          const profile = await api.getUserProfile(uid, cleanEmail);
-          try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-          } catch {}
-          return profile;
-        }
-      }
-
-      if (
-        err?.code === 'auth/invalid-credential' ||
-        err?.code === 'auth/user-not-found' ||
-        err?.code === 'auth/wrong-password'
-      ) {
-        throw new Error('E-mail ou senha incorretos.');
-      }
-      if (err?.code === 'auth/operation-not-allowed') {
-        throw new Error(
-          'O provedor de E-mail/Senha não está ativado no Firebase Console (Authentication > Sign-in method > E-mail/senha). Você também pode entrar com o Google abaixo.'
-        );
-      }
-      if (err?.code === 'auth/too-many-requests') {
-        throw new Error('Muitas tentativas sem sucesso. Aguarde alguns minutos antes de tentar novamente.');
-      }
-      if (err?.code === 'auth/user-disabled') {
-        throw new Error('Esta conta foi desativada pelo Administrador.');
-      }
-
-      throw new Error(err?.message || 'E-mail ou senha incorretos.');
-    }
+      localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+    } catch {}
+    emitAuthChange(profile);
+    return profile;
   },
 
   async registerWithEmail(name: string, email: string, pass: string): Promise<User> {
-    const cleanEmail = email.trim().toLowerCase();
-    const isInitialAdmin = cleanEmail === 'pedro.martinss225@gmail.com' || cleanEmail === 'emillycampos308@gmail.com';
-    if (!isInitialAdmin) {
-      throw new Error('Cadastro público desabilitado. Novos membros devem ser cadastrados pelo Super Administrador no painel de equipe.');
-    }
+    const res = await apiFetch<{ user: User }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        password: pass.trim(),
+      }),
+    });
 
+    const profile = res.user;
     try {
-      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass.trim());
-      const uid = cred.user.uid;
-      const role: UserRole = 'super_admin';
-      const roleLabels: Record<UserRole, string> = {
-        super_admin: 'Super Administrador',
-        media_admin: 'Administrador de Mídia',
-        media_member: 'Membro da Mídia',
-      };
-
-      const newUserProfile: User = {
-        uid,
-        id: uid,
-        name: name.trim() || 'Pr. Pedro Martins',
-        email: cleanEmail,
-        role,
-        roleLabel: roleLabels[role],
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
-        status: 'active',
-        canManageChurchPage: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      await setDoc(doc(db, 'users', uid), newUserProfile);
-      await setDoc(doc(db, 'admins', uid), {
-        uid,
-        email: newUserProfile.email,
-        createdAt: new Date().toISOString(),
-      });
-
-      try {
-        localStorage.setItem('ptb_session_user', JSON.stringify(newUserProfile));
-      } catch {}
-
-      return newUserProfile;
-    } catch (err: any) {
-      if (err?.code === 'auth/email-already-in-use') {
-        throw new Error('Este e-mail já está cadastrado.');
-      }
-      if (err?.code === 'auth/weak-password') {
-        throw new Error('A senha deve ter pelo menos 6 caracteres.');
-      }
-      throw new Error(err?.message || 'Falha ao registrar conta.');
-    }
+      localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+    } catch {}
+    emitAuthChange(profile);
+    return profile;
   },
 
   async logout(): Promise<void> {
     try {
-      await signOut(auth);
-    } catch {}
-    try {
       localStorage.removeItem('ptb_session_user');
     } catch {}
+    emitAuthChange(null);
   },
 
-  async resetPassword(email: string): Promise<void> {
-    await sendPasswordResetEmail(auth, email.trim());
+  async resetPassword(email: string, newPassword?: string): Promise<void> {
+    await apiFetch('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        ...(newPassword ? { newPassword } : {}),
+      }),
+    });
   },
 
-  onAuthStateChanged(callback: (user: FirebaseUser | null) => void) {
-    return onAuthStateChanged(auth, callback);
+  onAuthStateChanged(callback: (user: User | null) => void) {
+    authListeners.add(callback);
+    callback(api.getCurrentSessionUser());
+    return () => {
+      authListeners.delete(callback);
+    };
   },
 
   async getUserProfile(uid: string, fallbackEmail: string = ''): Promise<User> {
-    const userRef = doc(db, 'users', uid);
-    const effectiveEmail = (fallbackEmail || auth.currentUser?.email || '').trim().toLowerCase();
-    const isPedro = effectiveEmail === 'pedro.martinss225@gmail.com';
-    const isEmilly = effectiveEmail === 'emillycampos308@gmail.com';
-    const isIsabele = effectiveEmail === 'menezesisabele505@gmail.com';
-    const isFranciele = effectiveEmail === 'francielearaujopinheiro862@gmail.com';
-    const isInitialAdmin = isPedro || isEmilly;
-
-    const defaultName = isFranciele
-      ? 'Franciele Pinheiro'
-      : isIsabele
-        ? 'Isabele Menezes'
-        : isEmilly
-          ? 'Emilly Campos'
-          : isPedro
-            ? 'Pedro Henrique'
-            : (effectiveEmail ? effectiveEmail.split('@')[0] : 'Membro da Mídia');
-
-    const defaultAvatar = isFranciele
-      ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'
-      : isIsabele
-        ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&h=200&q=80'
-        : isEmilly
-          ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80'
-          : (isPedro
-              ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80'
-              : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80');
-
+    const effectiveEmail = fallbackEmail.trim().toLowerCase();
     try {
-      const snap = await getDoc(userRef);
-      if (snap.exists()) {
-        const u = snap.data() as User;
-        const isSuper = !isIsabele && !isFranciele && (u.role === 'super_admin' || isInitialAdmin);
-        const resolvedRole: UserRole = isSuper
-          ? 'super_admin'
-          : (isIsabele ? 'media_admin' : (isFranciele ? 'media_member' : (u.role || 'media_member')));
-        const resolvedRoleLabel = resolvedRole === 'super_admin'
-          ? 'Super Administrador'
-          : (resolvedRole === 'media_admin' ? 'Administrador' : 'Membro da Mídia');
-        return {
-          ...u,
-          id: u.id || uid,
-          uid: u.uid || uid,
-          name: isFranciele ? 'Franciele Pinheiro' : (isIsabele ? 'Isabele Menezes' : (u.name || defaultName)),
-          email: u.email || effectiveEmail,
-          role: resolvedRole,
-          roleLabel: resolvedRoleLabel,
-          canManageChurchPage: isSuper || isIsabele,
-        };
-      }
+      const res = await apiFetch<{ user: User }>(
+        `/api/auth/profile/${encodeURIComponent(uid)}${effectiveEmail ? `?email=${encodeURIComponent(effectiveEmail)}` : ''}`
+      );
+      if (res?.user) return res.user;
+    } catch {}
 
-      const role: UserRole = isInitialAdmin ? 'super_admin' : (isIsabele ? 'media_admin' : 'media_member');
-      const roleLabel = role === 'super_admin' ? 'Super Administrador' : (role === 'media_admin' ? 'Administrador' : 'Membro da Mídia');
-
-      const newUserProfile: User = {
-        uid,
-        id: uid,
-        name: auth.currentUser?.displayName || defaultName,
-        email: effectiveEmail,
-        role,
-        roleLabel,
-        avatar: auth.currentUser?.photoURL || defaultAvatar,
-        status: 'active',
-        canManageChurchPage: isInitialAdmin || isIsabele,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      try {
-        await setDoc(userRef, newUserProfile);
-        if (isInitialAdmin) {
-          await setDoc(doc(db, 'admins', uid), { uid, email: newUserProfile.email, role: 'super_admin', createdAt: new Date().toISOString() });
-        }
-      } catch (writeErr) {
-        console.warn('Could not persist user profile to Firestore:', writeErr);
-      }
-
-      return newUserProfile;
-    } catch (error) {
-      console.warn('Failed to get user profile from Firestore:', error);
-      const isSuper = isInitialAdmin;
-      return {
-        uid,
-        id: uid,
-        name: auth.currentUser?.displayName || defaultName,
-        email: effectiveEmail,
-        role: isSuper ? 'super_admin' : 'media_member',
-        roleLabel: isSuper ? 'Super Administrador' : 'Membro da Mídia',
-        avatar: auth.currentUser?.photoURL || defaultAvatar,
-        status: 'active',
-        canManageChurchPage: isSuper,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+    const session = api.getCurrentSessionUser();
+    if (session && (session.uid === uid || (effectiveEmail && session.email?.toLowerCase() === effectiveEmail))) {
+      return session;
     }
+
+    throw new Error('Perfil de usuário não encontrado.');
   },
 
   // ==========================================
   // 2. USER MANAGEMENT (SUPER ADMIN & TEAM)
   // ==========================================
   async getUsers(): Promise<User[]> {
-    const defaultAdmins: User[] = [
-      {
-        uid: 'admin_pedro_martins',
-        id: 'admin_pedro_martins',
-        name: 'Pedro Martins',
-        email: 'pedro.martinss225@gmail.com',
-        role: 'super_admin',
-        roleLabel: 'Super Administrador',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
-        status: 'active',
-        canManageChurchPage: true,
-        createdAt: '2026-01-01T00:00:00.000Z',
-      },
-      {
-        uid: 'Oq5l7PmQ4OMggXqy0Ue7eFfwp8f2',
-        id: 'Oq5l7PmQ4OMggXqy0Ue7eFfwp8f2',
-        name: 'Emilly Campos',
-        email: 'emillycampos308@gmail.com',
-        role: 'super_admin',
-        roleLabel: 'Super Administrador',
-        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80',
-        status: 'active',
-        canManageChurchPage: true,
-        createdAt: '2026-01-01T00:00:00.000Z',
-      },
-      {
-        uid: 'EilJCOYZrkU0wYPTVrYPCY547kW2',
-        id: 'EilJCOYZrkU0wYPTVrYPCY547kW2',
-        name: 'Isabele Menezes',
-        email: 'menezesisabele505@gmail.com',
-        role: 'media_admin',
-        roleLabel: 'Administrador',
-        avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&h=200&q=80',
-        status: 'active',
-        canManageChurchPage: true,
-        createdAt: '2026-01-01T00:00:00.000Z',
-      },
-      {
-        uid: 'kh5UT2UEGDP8rYyiBjyx9gApFr32',
-        id: 'kh5UT2UEGDP8rYyiBjyx9gApFr32',
-        name: 'Franciele Pinheiro',
-        email: 'francielearaujopinheiro862@gmail.com',
-        role: 'media_member',
-        roleLabel: 'Membro da Mídia',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
-        status: 'active',
-        canManageChurchPage: false,
-        createdAt: '2026-01-01T00:00:00.000Z',
-      },
-    ];
-
     try {
-      const snap = await getDocs(collection(db, 'users'));
-      const list = snap.docs.map((d) => {
-        const u = d.data() as User;
-        return { ...u, id: u.uid || d.id, uid: u.uid || d.id };
-      });
-      const uniqueByEmail = new Map<string, User>();
-      for (const u of list) {
-        const clean = (u.email || '').toLowerCase().trim();
-        if (clean && !uniqueByEmail.has(clean)) {
-          uniqueByEmail.set(clean, u);
-        } else if (!clean) {
-          uniqueByEmail.set(u.id || u.uid, u);
-        }
-      }
-
-      for (const adm of defaultAdmins) {
-        if (!uniqueByEmail.has(adm.email.toLowerCase())) {
-          uniqueByEmail.set(adm.email.toLowerCase(), adm);
-          setDoc(doc(db, 'users', adm.uid), adm).catch(() => {});
-        }
-      }
-
-      return Array.from(uniqueByEmail.values());
+      const list = await listCol<User>('users');
+      return list.map((u) => ({ ...u, id: u.uid || u.id, uid: u.uid || u.id || '' }));
     } catch (error) {
       console.warn('Could not list users:', error);
-      const uniqueByEmail = new Map<string, User>();
-      for (const adm of defaultAdmins) {
-        uniqueByEmail.set(adm.email.toLowerCase(), adm);
-      }
       const current = api.getCurrentSessionUser();
-      if (current && current.email) {
-        uniqueByEmail.set(current.email.toLowerCase(), current);
-      }
-      return Array.from(uniqueByEmail.values());
+      return current ? [current] : [];
     }
   },
 
-  /**
-   * Super Admin creates a REAL user account in Firebase Authentication
-   * using a secondary app instance without logging the Super Admin out!
-   */
   async createTeamUser(data: {
     name: string;
     email: string;
@@ -686,69 +434,24 @@ export const api = {
     role: UserRole;
     avatar?: string;
   }): Promise<User> {
-    const currentUser = auth.currentUser;
-    if (!currentUser) throw new Error('Apenas usuários autenticados podem criar membros.');
+    const currentUser = api.getEffectiveUser();
+    const res = await apiFetch<{ user: User }>('/api/auth/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
 
-    // 1. Initialize secondary app to create user in Firebase Auth without disrupting session
-    const secondaryApp = initializeApp(firebaseConfig, `user-creator-${Date.now()}`);
-    const secondaryAuth = getAuth(secondaryApp);
+    await api.addActivity({
+      userId: currentUser.uid,
+      userName: currentUser.displayName,
+      action: 'role_change',
+      actionLabel: 'Criou novo membro da equipe',
+      targetType: 'user',
+      targetName: res.user.name,
+      details: `${res.user.roleLabel} (${res.user.email})`,
+    });
 
-    try {
-      const userCred = await createUserWithEmailAndPassword(
-        secondaryAuth,
-        data.email.trim(),
-        data.initialPassword
-      );
-      const newUid = userCred.user.uid;
-
-      const roleLabels: Record<UserRole, string> = {
-        super_admin: 'Super Administrador',
-        media_admin: 'Administrador de Mídia',
-        media_member: 'Membro da Mídia',
-      };
-
-      const newUser: User = {
-        uid: newUid,
-        name: data.name.trim(),
-        email: data.email.trim().toLowerCase(),
-        role: data.role,
-        roleLabel: roleLabels[data.role],
-        avatar: data.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      // 2. Create profile in Firestore
-      await setDoc(doc(db, 'users', newUid), newUser);
-
-      // 3. If role is super_admin, add to admins collection
-      if (data.role === 'super_admin') {
-        await setDoc(doc(db, 'admins', newUid), {
-          uid: newUid,
-          email: newUser.email,
-          createdAt: new Date().toISOString(),
-        });
-      }
-
-      // 4. Record Activity
-      await api.addActivity({
-        userId: currentUser.uid,
-        userName: currentUser.displayName || currentUser.email || 'Super Admin',
-        action: 'role_change',
-        actionLabel: 'Criou novo membro da equipe',
-        targetType: 'user',
-        targetName: newUser.name,
-        details: `${newUser.roleLabel} (${newUser.email})`,
-      });
-
-      return newUser;
-    } catch (err: any) {
-      console.error('Error creating user in Firebase:', err);
-      throw new Error(err.message || 'Erro ao criar conta no Firebase Authentication.');
-    } finally {
-      await deleteApp(secondaryApp);
-    }
+    notifyLocalSubscribers(['users']);
+    return res.user;
   },
 
   async updateUserRole(uid: string, role: UserRole): Promise<void> {
@@ -757,56 +460,37 @@ export const api = {
       media_admin: 'Administrador de Mídia',
       media_member: 'Membro da Mídia',
     };
-    try {
-      await updateDoc(doc(db, 'users', uid), {
-        role,
-        roleLabel: roleLabels[role],
-        updatedAt: new Date().toISOString(),
-      });
+    await updateDocById('users', uid, {
+      role,
+      roleLabel: roleLabels[role],
+      canManageChurchPage: role === 'super_admin' || role === 'media_admin',
+      updatedAt: new Date().toISOString(),
+    });
 
-      if (role === 'super_admin') {
-        await setDoc(doc(db, 'admins', uid), { uid, updatedAt: new Date().toISOString() });
-      } else {
-        try {
-          await deleteDoc(doc(db, 'admins', uid));
-        } catch {}
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
+    if (role === 'super_admin') {
+      await setDocById('admins', uid, { uid, updatedAt: new Date().toISOString() }, true);
+    } else {
+      await deleteDocById('admins', uid).catch(() => {});
     }
   },
 
   async setUserStatus(uid: string, status: 'active' | 'blocked'): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'users', uid), {
-        status,
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
-    }
+    await updateDocById('users', uid, {
+      status,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async updateUserChurchPermission(uid: string, canManageChurchPage: boolean): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'users', uid), {
-        canManageChurchPage,
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
-    }
+    await updateDocById('users', uid, {
+      canManageChurchPage,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteTeamUser(uid: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'users', uid));
-      try {
-        await deleteDoc(doc(db, 'admins', uid));
-      } catch {}
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${uid}`);
-    }
+    await deleteDocById('users', uid);
+    await deleteDocById('admins', uid).catch(() => {});
   },
 
   async createUser(data: { name: string; email: string; role: UserRole; avatar?: string; status?: 'active' | 'blocked' }): Promise<User> {
@@ -827,15 +511,11 @@ export const api = {
       await api.setUserStatus(uid, updates.status);
     }
     if (updates.name || updates.avatar) {
-      try {
-        await updateDoc(doc(db, 'users', uid), {
-          ...(updates.name ? { name: updates.name } : {}),
-          ...(updates.avatar ? { avatar: updates.avatar } : {}),
-          updatedAt: new Date().toISOString(),
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
-      }
+      await updateDocById('users', uid, {
+        ...(updates.name ? { name: updates.name } : {}),
+        ...(updates.avatar ? { avatar: updates.avatar } : {}),
+        updatedAt: new Date().toISOString(),
+      });
     }
   },
 
@@ -862,10 +542,9 @@ export const api = {
       });
       if (res?.downloadUrl) return res.downloadUrl;
     } catch (err) {
-      console.warn('Upload direto de avatar via API falhou, usando canvas fallback:', err);
+      console.warn('Upload de avatar via API falhou, usando canvas fallback:', err);
     }
 
-    // High quality canvas data URL fallback for instant offline/local persistence
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = () => {
@@ -903,7 +582,7 @@ export const api = {
   },
 
   // ==========================================
-  // 3. CLOUD STORAGE & FILES
+  // 3. SERVER STORAGE & FILES
   // ==========================================
   async uploadFile(
     file: File,
@@ -917,7 +596,6 @@ export const api = {
     const category = detectMediaCategory(file.name, file.type);
     const resolution = await getImageResolution(file);
 
-    // Generate lightweight visual thumbnail (15KB - 30KB) for instant grid preview
     let generatedThumb: string | null = null;
     try {
       generatedThumb = await createFileThumbnail(file);
@@ -925,113 +603,51 @@ export const api = {
       console.warn('Thumbnail generation note:', thumbErr);
     }
 
-    const cleanFileName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-    let downloadUrl = '';
-    let storagePath = `/uploads/${fileId}_${cleanFileName}`;
-
     const startTime = Date.now();
+    const uploadResult = await new Promise<{ downloadUrl: string; filename: string }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload', true);
+      xhr.setRequestHeader('x-filename', encodeURIComponent(file.name));
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      xhr.timeout = 120000;
 
-    // 1. High-Speed direct upload via XMLHttpRequest with real-time progress and speed metrics
-    try {
-      const uploadResult = await new Promise<{ downloadUrl: string; filename: string }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/upload', true);
-        xhr.setRequestHeader('x-filename', encodeURIComponent(file.name));
-        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-        xhr.timeout = 45000;
-
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable && onProgress) {
-            const percent = Math.min(99, Math.round((e.loaded / e.total) * 100));
-            const elapsed = Math.max(0.1, (Date.now() - startTime) / 1000);
-            const speedMb = (e.loaded / (1024 * 1024)) / elapsed;
-            onProgress(percent, `${speedMb.toFixed(1)} MB/s`);
-          }
-        };
-
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const res = JSON.parse(xhr.responseText);
-              resolve(res);
-            } catch (pErr) {
-              reject(pErr);
-            }
-          } else {
-            reject(new Error(`Servidor respondeu com status ${xhr.status}`));
-          }
-        };
-
-        xhr.onerror = () => reject(new Error('Erro de conexão ao enviar arquivo.'));
-        xhr.ontimeout = () => reject(new Error('Tempo limite de upload excedido.'));
-
-        xhr.send(file);
-      });
-
-      downloadUrl = uploadResult.downloadUrl;
-      storagePath = `/uploads/${uploadResult.filename}`;
-      if (onProgress) onProgress(100, 'Concluído');
-    } catch (uploadErr) {
-      console.warn('Direct upload fallback to Firestore direct media storage:', uploadErr);
-
-      // 2. Seamless serverless fallback: Store original directly in Firestore (e.g. Vercel deployment)
-      if (file.size <= 900 * 1024) {
-        if (onProgress) onProgress(40, 'Processando...');
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-
-        if (onProgress) onProgress(80, 'Armazenando...');
-        downloadUrl = dataUrl;
-        storagePath = `firestore://file_data/${fileId}`;
-        if (onProgress) onProgress(100, 'Concluído');
-      } else {
-        // Larger files on serverless: chunk into 650KB Firestore slices
-        if (onProgress) onProgress(20, 'Preparando blocos...');
-        const arrayBuffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-        const CHUNK_SIZE = 650 * 1024;
-        const totalChunks = Math.ceil(bytes.length / CHUNK_SIZE);
-
-        for (let i = 0; i < totalChunks; i++) {
-          const start = i * CHUNK_SIZE;
-          const end = Math.min(bytes.length, start + CHUNK_SIZE);
-          const chunkSlice = bytes.slice(start, end);
-          let binary = '';
-          for (let b = 0; b < chunkSlice.length; b++) {
-            binary += String.fromCharCode(chunkSlice[b]);
-          }
-          const base64Chunk = btoa(binary);
-
-          await setDoc(doc(db, 'file_chunks', `${fileId}_chunk_${i}`), {
-            fileId,
-            chunkIndex: i,
-            totalChunks,
-            data: base64Chunk,
-            createdAt: new Date().toISOString(),
-          });
-
-          if (onProgress) {
-            const pct = Math.round(((i + 1) / totalChunks) * 95);
-            onProgress(pct, 'Enviando blocos...');
-          }
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          const percent = Math.min(99, Math.round((e.loaded / e.total) * 100));
+          const elapsed = Math.max(0.1, (Date.now() - startTime) / 1000);
+          const speedMb = (e.loaded / (1024 * 1024)) / elapsed;
+          onProgress(percent, `${speedMb.toFixed(1)} MB/s`);
         }
+      };
 
-        downloadUrl = `chunked://${fileId}`;
-        storagePath = `firestore://file_chunks/${fileId}`;
-        if (onProgress) onProgress(100, 'Concluído');
-      }
-    }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const res = JSON.parse(xhr.responseText);
+            resolve(res);
+          } catch (pErr) {
+            reject(pErr);
+          }
+        } else {
+          reject(new Error(`Servidor respondeu com status ${xhr.status}`));
+        }
+      };
 
-    // Determine final guaranteed thumbnail URL (NEVER chunked://)
+      xhr.onerror = () => reject(new Error('Erro de conexão ao enviar arquivo.'));
+      xhr.ontimeout = () => reject(new Error('Tempo limite de upload excedido.'));
+
+      xhr.send(file);
+    });
+
+    const downloadUrl = uploadResult.downloadUrl;
+    const storagePath = `/uploads/${uploadResult.filename}`;
+    if (onProgress) onProgress(100, 'Concluído');
+
     let finalThumb = generatedThumb;
     if (!finalThumb) {
       if (downloadUrl.startsWith('data:image/')) {
         finalThumb = downloadUrl;
-      } else if (downloadUrl.startsWith('http') && (category === 'photo' || category === 'art')) {
+      } else if ((downloadUrl.startsWith('http') || downloadUrl.startsWith('/uploads/')) && (category === 'photo' || category === 'art')) {
         finalThumb = downloadUrl;
       }
     }
@@ -1066,14 +682,8 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    // Save record to Cloud Firestore
-    try {
-      await setDoc(doc(db, 'files', fileId), removeUndefinedValues(newRecord));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `files/${fileId}`);
-    }
+    await setDocById('files', fileId, newRecord);
 
-    // Record Activity
     await api.addActivity({
       userId: currentUser.uid,
       userName: currentUser.displayName || currentUser.email || 'Membro da Mídia',
@@ -1081,83 +691,35 @@ export const api = {
       actionLabel: `Upload de ${category === 'photo' ? 'foto' : category === 'video' ? 'vídeo' : category === 'art' ? 'arte gráfica' : category === 'audio' ? 'áudio' : 'documento'} original`,
       targetType: 'file',
       targetName: file.name,
-      details: `${(file.size / (1024 * 1024)).toFixed(2)} MB · Cloud Storage`,
+      details: `${(file.size / (1024 * 1024)).toFixed(2)} MB · Servidor Local`,
     });
 
     return newRecord;
   },
 
-  /**
-   * Real-time listener for ALL files in Cloud Firestore.
-   * When any team member uploads, deletes, renames, or updates a file,
-   * all connected clients receive the updated list instantaneously.
-   */
   subscribeAllFiles(callback: (files: FileRecord[]) => void): () => void {
-    const filesRef = collection(db, 'files');
-    return onSnapshot(
-      filesRef,
-      (snapshot) => {
-        const list = snapshot.docs.map((d) => {
-          const f = d.data() as FileRecord;
-          return {
-            ...f,
-            id: f.id || d.id,
-            storageKey: f.storagePath,
-            userName: f.ownerName,
-          };
-        });
-        callback(list);
-      },
-      (error) => {
-        console.warn('Real-time files subscription sync:', error);
-      }
-    );
+    return subscribeCollection<FileRecord>('files', (items) => {
+      callback(
+        items.map((f) => ({
+          ...f,
+          id: f.id,
+          storageKey: f.storagePath,
+          userName: f.ownerName,
+        }))
+      );
+    });
   },
 
-  /**
-   * Real-time listener for ALL folders in Cloud Firestore.
-   */
   subscribeAllFolders(callback: (folders: Folder[]) => void): () => void {
-    const foldersRef = collection(db, 'folders');
-    return onSnapshot(
-      foldersRef,
-      (snapshot) => {
-        const list = snapshot.docs.map((d) => {
-          const f = d.data() as Folder;
-          return {
-            ...f,
-            id: f.id || d.id,
-          };
-        });
-        callback(list);
-      },
-      (error) => {
-        console.warn('Real-time folders subscription sync:', error);
-      }
-    );
+    return subscribeCollection<Folder>('folders', (items) => {
+      callback(items);
+    });
   },
 
-  /**
-   * Real-time listener for ALL church events in Cloud Firestore.
-   */
   subscribeAllEvents(callback: (events: ChurchEvent[]) => void): () => void {
-    const eventsRef = collection(db, 'events');
-    return onSnapshot(
-      eventsRef,
-      (snapshot) => {
-        const list = snapshot.docs.map((d) => {
-          const e = d.data() as ChurchEvent;
-          return {
-            ...e,
-            id: e.id || d.id,
-          };
-        });
-        callback(list);
-      },
-      (error) => {
-        console.warn('Real-time events subscription sync:', error);
-      }
-    );
+    return subscribeCollection<ChurchEvent>('events', (items) => {
+      callback(items);
+    });
   },
 
   async getFiles(params: {
@@ -1172,30 +734,22 @@ export const api = {
     order?: 'asc' | 'desc';
   } = {}): Promise<FileRecord[]> {
     try {
-      const filesRef = collection(db, 'files');
-      const snap = await getDocs(filesRef);
-      let list = snap.docs.map((d) => {
-        const f = d.data() as FileRecord;
-        return {
-          ...f,
-          storageKey: f.storagePath,
-          userName: f.ownerName,
-        };
-      });
+      let list = (await listCol<FileRecord>('files')).map((f) => ({
+        ...f,
+        storageKey: f.storagePath,
+        userName: f.ownerName,
+      }));
 
-      // In trash filter
       if (params.inTrash === true) {
         list = list.filter((f) => f.inTrash === true);
       } else {
         list = list.filter((f) => !f.inTrash);
       }
 
-      // Type filter
       if (params.type && params.type !== 'all') {
         list = list.filter((f) => f.type === params.type);
       }
 
-      // Folder filter
       if (params.folderId !== undefined) {
         if (params.folderId === 'root' || params.folderId === null) {
           list = list.filter((f) => !f.folderId);
@@ -1204,23 +758,19 @@ export const api = {
         }
       }
 
-      // Event filter
       if (params.eventId && params.eventId !== 'all') {
         list = list.filter((f) => f.eventId === params.eventId);
       }
 
-      // Favorite filter
       if (params.isFavorite === true) {
         list = list.filter((f) => f.isFavorite === true);
       }
 
-      // Tag filter
       if (params.tag) {
         const t = params.tag.toLowerCase();
         list = list.filter((f) => f.tags && f.tags.map((x) => x.toLowerCase()).includes(t));
       }
 
-      // Search filter
       if (params.search) {
         const q = params.search.toLowerCase();
         list = list.filter(
@@ -1232,7 +782,6 @@ export const api = {
         );
       }
 
-      // Sort
       const sortKey = params.sort || 'date';
       const isAsc = params.order === 'asc';
       list.sort((a, b) => {
@@ -1250,105 +799,70 @@ export const api = {
   },
 
   async updateFile(id: string, updates: Partial<FileRecord>): Promise<FileRecord> {
-    try {
-      const fileRef = doc(db, 'files', id);
-      await updateDoc(fileRef, {
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      });
-      const snap = await getDoc(fileRef);
-      const f = snap.data() as FileRecord;
-      return {
-        ...f,
-        storageKey: f.storagePath,
-        userName: f.ownerName,
-      };
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `files/${id}`);
-    }
+    await updateDocById('files', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+    const updated = await getDocById<FileRecord>('files', id);
+    if (!updated) throw new Error('Arquivo não encontrado');
+    return {
+      ...updated,
+      storageKey: updated.storagePath,
+      userName: updated.ownerName,
+    };
   },
 
   async trashFile(id: string, permanent: boolean = false): Promise<void> {
-    const currentUser = auth.currentUser;
-    try {
-      const fileRef = doc(db, 'files', id);
-      const snap = await getDoc(fileRef);
-      if (!snap.exists()) return;
-      const file = snap.data() as FileRecord;
+    const currentUser = api.getEffectiveUser();
+    const file = await getDocById<FileRecord>('files', id);
+    if (!file) return;
 
-      if (permanent) {
-        // Delete real object from Cloud Storage
-        if (file.storagePath) {
-          try {
-            const storageObjRef = ref(storage, file.storagePath);
-            await deleteObject(storageObjRef);
-          } catch (storageErr) {
-            console.warn('Storage object may already be removed:', storageErr);
-          }
-        }
-        await deleteDoc(fileRef);
-
-        if (currentUser) {
-          await api.addActivity({
-            userId: currentUser.uid,
-            userName: currentUser.displayName || currentUser.email || 'Membro',
-            action: 'delete',
-            actionLabel: 'Excluiu arquivo permanentemente',
-            targetType: 'file',
-            targetName: file.name,
-            details: 'Objeto removido do Cloud Storage e Firestore',
-          });
-        }
-      } else {
-        await updateDoc(fileRef, {
-          inTrash: true,
-          trashedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-
-        if (currentUser) {
-          await api.addActivity({
-            userId: currentUser.uid,
-            userName: currentUser.displayName || currentUser.email || 'Membro',
-            action: 'delete',
-            actionLabel: 'Moveu arquivo para a Lixeira',
-            targetType: 'file',
-            targetName: file.name,
-            details: 'Preservado com segurança na lixeira',
-          });
-        }
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `files/${id}`);
+    if (permanent) {
+      await deleteDocById('files', id);
+      await api.addActivity({
+        userId: currentUser.uid,
+        userName: currentUser.displayName,
+        action: 'delete',
+        actionLabel: 'Excluiu arquivo permanentemente',
+        targetType: 'file',
+        targetName: file.name,
+        details: 'Arquivo removido definitivamente do servidor',
+      });
+    } else {
+      await updateDocById('files', id, {
+        inTrash: true,
+        trashedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      await api.addActivity({
+        userId: currentUser.uid,
+        userName: currentUser.displayName,
+        action: 'delete',
+        actionLabel: 'Moveu arquivo para a Lixeira',
+        targetType: 'file',
+        targetName: file.name,
+        details: 'Preservado com segurança na lixeira',
+      });
     }
   },
 
   async restoreFile(id: string): Promise<void> {
-    try {
-      const fileRef = doc(db, 'files', id);
-      const fileSnap = await getDoc(fileRef).catch(() => null);
-      const fileData = fileSnap?.data() as FileRecord | undefined;
+    const file = await getDocById<FileRecord>('files', id);
+    await updateDocById('files', id, {
+      inTrash: false,
+      trashedAt: null,
+      updatedAt: new Date().toISOString(),
+    });
 
-      await updateDoc(fileRef, {
-        inTrash: false,
-        trashedAt: null,
-        updatedAt: new Date().toISOString(),
-      });
-
-      // If this file belongs to a folder that is in trash, restore that folder too so it's not orphaned
-      if (fileData?.folderId) {
-        const folderRef = doc(db, 'folders', fileData.folderId);
-        const folderSnap = await getDoc(folderRef).catch(() => null);
-        if (folderSnap?.exists() && folderSnap.data()?.inTrash) {
-          await updateDoc(folderRef, {
-            inTrash: false,
-            trashedAt: null,
-            updatedAt: new Date().toISOString(),
-          }).catch(() => {});
-        }
+    if (file?.folderId) {
+      const folder = await getDocById<Folder>('folders', file.folderId);
+      if (folder?.inTrash) {
+        await updateDocById('folders', file.folderId, {
+          inTrash: false,
+          trashedAt: null,
+          updatedAt: new Date().toISOString(),
+        }).catch(() => {});
       }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `files/${id}`);
     }
   },
 
@@ -1367,10 +881,8 @@ export const api = {
   // ==========================================
   async getFolders(inTrash = false): Promise<Folder[]> {
     try {
-      const snap = await getDocs(collection(db, 'folders'));
-      return snap.docs
-        .map((d) => d.data() as Folder)
-        .filter((f) => (inTrash ? f.inTrash === true : !f.inTrash));
+      const list = await listCol<Folder>('folders');
+      return list.filter((f) => (inTrash ? f.inTrash === true : !f.inTrash));
     } catch (error) {
       console.warn('Could not list folders:', error);
       return [];
@@ -1379,7 +891,6 @@ export const api = {
 
   async createFolder(name: string, parentId: string | null = null, color = '#D97706'): Promise<Folder> {
     const currentUser = api.getEffectiveUser();
-
     const folderId = `fld_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const folder: Folder = {
       id: folderId,
@@ -1393,180 +904,123 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      await setDoc(doc(db, 'folders', folderId), removeUndefinedValues(folder));
-      await api.addActivity({
-        userId: currentUser.uid,
-        userName: currentUser.displayName || currentUser.email || 'Membro',
-        action: 'create_folder',
-        actionLabel: 'Criou nova pasta',
-        targetType: 'folder',
-        targetName: folder.name,
-        details: parentId ? 'Subpasta criada' : 'Pasta raiz criada',
-      });
-      return folder;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `folders/${folderId}`);
-    }
+    await setDocById('folders', folderId, folder);
+    await api.addActivity({
+      userId: currentUser.uid,
+      userName: currentUser.displayName,
+      action: 'create_folder',
+      actionLabel: 'Criou nova pasta',
+      targetType: 'folder',
+      targetName: folder.name,
+      details: parentId ? 'Subpasta criada' : 'Pasta raiz criada',
+    });
+    return folder;
   },
 
   async updateFolder(id: string, updates: Partial<Folder>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'folders', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `folders/${id}`);
-    }
+    await updateDocById('folders', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteFolder(id: string, permanent: boolean = false): Promise<void> {
-    const currentUser = auth.currentUser;
-    try {
-      const folderRef = doc(db, 'folders', id);
-      const folderSnap = await getDoc(folderRef).catch(() => null);
-      const folderData = folderSnap?.data() as Folder | undefined;
-      const folderName = folderData?.name || 'Pasta';
+    const currentUser = api.getEffectiveUser();
+    const folder = await getDocById<Folder>('folders', id);
+    const folderName = folder?.name || 'Pasta';
 
-      if (permanent) {
-        // 1. Delete all child files in this folder permanently
-        const filesSnap = await getDocs(query(collection(db, 'files'), where('folderId', '==', id))).catch(() => ({ docs: [] }));
-        for (const fileDoc of filesSnap.docs) {
-          const file = fileDoc.data() as FileRecord;
-          if (file.storagePath) {
-            try {
-              const storageObjRef = ref(storage, file.storagePath);
-              await deleteObject(storageObjRef);
-            } catch (storageErr) {
-              console.warn('Storage object may already be removed:', storageErr);
-            }
-          }
-          await deleteDoc(fileDoc.ref).catch(() => {});
-        }
+    const allFiles = await listCol<FileRecord>('files');
+    const allFolders = await listCol<Folder>('folders');
+    const childFiles = allFiles.filter((f) => f.folderId === id);
+    const childFolders = allFolders.filter((f) => f.parentId === id);
 
-        // 2. Delete child subfolders
-        const subfoldersSnap = await getDocs(query(collection(db, 'folders'), where('parentId', '==', id))).catch(() => ({ docs: [] }));
-        for (const subDoc of subfoldersSnap.docs) {
-          await deleteDoc(subDoc.ref).catch(() => {});
-        }
-
-        // 3. Delete the folder doc itself
-        await deleteDoc(folderRef);
-
-        if (currentUser) {
-          await api.addActivity({
-            userId: currentUser.uid,
-            userName: currentUser.displayName || currentUser.email || 'Membro',
-            action: 'delete',
-            actionLabel: 'Excluiu pasta permanentemente',
-            targetType: 'folder',
-            targetName: folderName,
-            details: 'Pasta e todo o seu conteúdo foram removidos em definitivo',
-          });
-        }
-      } else {
-        const now = new Date().toISOString();
-        // 1. Mark folder as inTrash
-        await updateDoc(folderRef, {
-          inTrash: true,
-          trashedAt: now,
-          updatedAt: now,
-        });
-
-        // 2. Mark all files in this folder as inTrash
-        const filesSnap = await getDocs(query(collection(db, 'files'), where('folderId', '==', id))).catch(() => ({ docs: [] }));
-        const fileUpdates = filesSnap.docs.map((d) =>
-          updateDoc(d.ref, {
-            inTrash: true,
-            trashedAt: now,
-            updatedAt: now,
-          }).catch(() => {})
-        );
-        await Promise.allSettled(fileUpdates);
-
-        // 3. Mark child subfolders as inTrash
-        const subfoldersSnap = await getDocs(query(collection(db, 'folders'), where('parentId', '==', id))).catch(() => ({ docs: [] }));
-        const subUpdates = subfoldersSnap.docs.map((d) =>
-          updateDoc(d.ref, {
-            inTrash: true,
-            trashedAt: now,
-            updatedAt: now,
-          }).catch(() => {})
-        );
-        await Promise.allSettled(subUpdates);
-
-        if (currentUser) {
-          await api.addActivity({
-            userId: currentUser.uid,
-            userName: currentUser.displayName || currentUser.email || 'Membro',
-            action: 'delete',
-            actionLabel: 'Moveu pasta para a Lixeira',
-            targetType: 'folder',
-            targetName: folderName,
-            details: 'Preservada com segurança na lixeira',
-          });
-        }
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `folders/${id}`);
+    if (permanent) {
+      const ops: { type: 'delete'; col: string; id: string }[] = [
+        ...childFiles.map((f) => ({ type: 'delete' as const, col: 'files', id: f.id })),
+        ...childFolders.map((f) => ({ type: 'delete' as const, col: 'folders', id: f.id })),
+        { type: 'delete', col: 'folders', id },
+      ];
+      await batchWrite(ops);
+      await api.addActivity({
+        userId: currentUser.uid,
+        userName: currentUser.displayName,
+        action: 'delete',
+        actionLabel: 'Excluiu pasta permanentemente',
+        targetType: 'folder',
+        targetName: folderName,
+        details: 'Pasta e conteúdo removidos definitivamente',
+      });
+    } else {
+      const now = new Date().toISOString();
+      const ops: { type: 'update'; col: string; id: string; data: any }[] = [
+        { type: 'update', col: 'folders', id, data: { inTrash: true, trashedAt: now, updatedAt: now } },
+        ...childFiles.map((f) => ({
+          type: 'update' as const,
+          col: 'files',
+          id: f.id,
+          data: { inTrash: true, trashedAt: now, updatedAt: now },
+        })),
+        ...childFolders.map((f) => ({
+          type: 'update' as const,
+          col: 'folders',
+          id: f.id,
+          data: { inTrash: true, trashedAt: now, updatedAt: now },
+        })),
+      ];
+      await batchWrite(ops);
+      await api.addActivity({
+        userId: currentUser.uid,
+        userName: currentUser.displayName,
+        action: 'delete',
+        actionLabel: 'Moveu pasta para a Lixeira',
+        targetType: 'folder',
+        targetName: folderName,
+        details: 'Preservada com segurança na lixeira',
+      });
     }
   },
 
   async restoreFolder(id: string): Promise<void> {
-    const currentUser = auth.currentUser;
-    try {
-      const folderRef = doc(db, 'folders', id);
-      const folderSnap = await getDoc(folderRef).catch(() => null);
-      const folderData = folderSnap?.data() as Folder | undefined;
-      const folderName = folderData?.name || 'Pasta';
-      const now = new Date().toISOString();
+    const currentUser = api.getEffectiveUser();
+    const folder = await getDocById<Folder>('folders', id);
+    const folderName = folder?.name || 'Pasta';
+    const now = new Date().toISOString();
 
-      // 1. Restore the folder itself
-      await updateDoc(folderRef, {
-        inTrash: false,
-        trashedAt: null,
-        updatedAt: now,
-      });
+    const allFiles = await listCol<FileRecord>('files');
+    const childFiles = allFiles.filter((f) => f.folderId === id);
 
-      // 2. Restore all files inside this folder
-      const filesSnap = await getDocs(query(collection(db, 'files'), where('folderId', '==', id))).catch(() => ({ docs: [] }));
-      const fileRestores = filesSnap.docs.map((d) =>
-        updateDoc(d.ref, {
-          inTrash: false,
-          trashedAt: null,
-          updatedAt: now,
-        }).catch(() => {})
-      );
-      await Promise.allSettled(fileRestores);
+    const ops: { type: 'update'; col: string; id: string; data: any }[] = [
+      { type: 'update', col: 'folders', id, data: { inTrash: false, trashedAt: null, updatedAt: now } },
+      ...childFiles.map((f) => ({
+        type: 'update' as const,
+        col: 'files',
+        id: f.id,
+        data: { inTrash: false, trashedAt: null, updatedAt: now },
+      })),
+    ];
 
-      // 3. If folder has a parent that is in trash, restore parent folder as well
-      if (folderData?.parentId) {
-        const parentRef = doc(db, 'folders', folderData.parentId);
-        const parentSnap = await getDoc(parentRef).catch(() => null);
-        if (parentSnap && parentSnap.exists() && parentSnap.data()?.inTrash) {
-          await updateDoc(parentRef, {
-            inTrash: false,
-            trashedAt: null,
-            updatedAt: now,
-          }).catch(() => {});
-        }
-      }
-
-      if (currentUser) {
-        await api.addActivity({
-          userId: currentUser.uid,
-          userName: currentUser.displayName || currentUser.email || 'Membro',
-          action: 'create_folder',
-          actionLabel: 'Restaurou pasta da Lixeira',
-          targetType: 'folder',
-          targetName: folderName,
-          details: 'Pasta e arquivos retornaram ao local original',
+    if (folder?.parentId) {
+      const parent = await getDocById<Folder>('folders', folder.parentId);
+      if (parent?.inTrash) {
+        ops.push({
+          type: 'update',
+          col: 'folders',
+          id: folder.parentId,
+          data: { inTrash: false, trashedAt: null, updatedAt: now },
         });
       }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `folders/${id}`);
     }
+
+    await batchWrite(ops);
+    await api.addActivity({
+      userId: currentUser.uid,
+      userName: currentUser.displayName,
+      action: 'create_folder',
+      actionLabel: 'Restaurou pasta da Lixeira',
+      targetType: 'folder',
+      targetName: folderName,
+      details: 'Pasta e arquivos retornaram ao local original',
+    });
   },
 
   // ==========================================
@@ -1574,15 +1028,13 @@ export const api = {
   // ==========================================
   async getEvents(): Promise<ChurchEvent[]> {
     try {
-      const [eventsSnap, filesSnap] = await Promise.all([
-        getDocs(collection(db, 'events')).catch(() => ({ docs: [] })),
-        getDocs(collection(db, 'files')).catch(() => ({ docs: [] })),
+      const [events, files] = await Promise.all([
+        listCol<ChurchEvent>('events'),
+        listCol<FileRecord>('files'),
       ]);
+      const allFiles = files.filter((f) => !f.inTrash);
 
-      const allFiles = filesSnap.docs.map((d) => d.data() as FileRecord).filter((f) => !f.inTrash);
-
-      return eventsSnap.docs.map((docSnap) => {
-        const evt = docSnap.data() as ChurchEvent;
+      return events.map((evt) => {
         const eventFiles = allFiles.filter((f) => f.eventId === evt.id);
         return {
           ...evt,
@@ -1604,21 +1056,14 @@ export const api = {
   },
 
   async getEvent(id: string): Promise<{ event: ChurchEvent; files: FileRecord[] }> {
-    try {
-      const eventSnap = await getDoc(doc(db, 'events', id));
-      if (!eventSnap.exists()) throw new Error('Evento não encontrado');
-      const event = eventSnap.data() as ChurchEvent;
-
-      const files = await api.getFiles({ eventId: id, inTrash: false });
-      return { event, files };
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, `events/${id}`);
-    }
+    const event = await getDocById<ChurchEvent>('events', id);
+    if (!event) throw new Error('Evento não encontrado');
+    const files = await api.getFiles({ eventId: id, inTrash: false });
+    return { event, files };
   },
 
   async createEvent(data: Partial<ChurchEvent>): Promise<ChurchEvent> {
     const currentUser = api.getEffectiveUser();
-
     const eventId = `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const newEvent: ChurchEvent = {
       id: eventId,
@@ -1637,52 +1082,35 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      await setDoc(doc(db, 'events', eventId), removeUndefinedValues(newEvent));
-      await api.addActivity({
-        userId: currentUser.uid,
-        userName: currentUser.displayName || currentUser.email || 'Membro',
-        action: 'create_event',
-        actionLabel: 'Criou novo evento da igreja',
-        targetType: 'event',
-        targetName: newEvent.name,
-        details: `${newEvent.category} · ${newEvent.date}`,
-      });
-      return newEvent;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `events/${eventId}`);
-    }
+    await setDocById('events', eventId, newEvent);
+    await api.addActivity({
+      userId: currentUser.uid,
+      userName: currentUser.displayName,
+      action: 'create_event',
+      actionLabel: 'Criou novo evento da igreja',
+      targetType: 'event',
+      targetName: newEvent.name,
+      details: `${newEvent.category} · ${newEvent.date}`,
+    });
+    return newEvent;
   },
 
   async updateEvent(id: string, updates: Partial<ChurchEvent>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'events', id), {
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `events/${id}`);
-    }
+    await updateDocById('events', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteEvent(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'events', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `events/${id}`);
-    }
+    await deleteDocById('events', id);
   },
 
   // ==========================================
   // 6. SHARES
   // ==========================================
   async getShares(): Promise<ShareLink[]> {
-    try {
-      const snap = await getDocs(collection(db, 'shares'));
-      return snap.docs.map((d) => d.data() as ShareLink);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, 'shares');
-    }
+    return await listCol<ShareLink>('shares');
   },
 
   async createShare(data: {
@@ -1693,7 +1121,7 @@ export const api = {
     requireAuth: boolean;
     expiresAt: string | null;
   }): Promise<ShareLink> {
-    const currentUser = auth.currentUser;
+    const currentUser = api.getEffectiveUser();
     const shareId = `shr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const token = `ptb_${Math.random().toString(36).substring(2, 12)}_${Date.now().toString(36)}`;
 
@@ -1706,67 +1134,51 @@ export const api = {
       allowDownload: data.allowDownload,
       requireAuth: data.requireAuth,
       expiresAt: data.expiresAt,
-      ownerUid: currentUser?.uid || 'anon',
-      createdByName: currentUser?.displayName || currentUser?.email || 'Membro da Equipe',
+      ownerUid: currentUser.uid,
+      createdByName: currentUser.displayName,
       createdAt: new Date().toISOString(),
     };
 
-    try {
-      await setDoc(doc(db, 'shares', shareId), newShare);
-      return newShare;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `shares/${shareId}`);
-    }
+    await setDocById('shares', shareId, newShare);
+    return newShare;
   },
 
   async deleteShare(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'shares', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `shares/${id}`);
-    }
+    await deleteDocById('shares', id);
   },
 
   async getSharedResource(token: string): Promise<{ share: ShareLink; resource: any }> {
-    try {
-      const q = query(collection(db, 'shares'), where('token', '==', token), limit(1));
-      const snap = await getDocs(q);
-      if (snap.empty) throw new Error('Link de compartilhamento inválido ou expirado.');
-
-      const share = snap.docs[0].data() as ShareLink;
-      if (share.expiresAt && new Date(share.expiresAt).getTime() < Date.now()) {
-        throw new Error('Este link de compartilhamento expirou.');
-      }
-
-      let resourceData: any = null;
-      if (share.resourceType === 'file') {
-        const fSnap = await getDoc(doc(db, 'files', share.resourceId));
-        if (fSnap.exists()) resourceData = fSnap.data();
-      } else if (share.resourceType === 'folder') {
-        const fSnap = await getDoc(doc(db, 'folders', share.resourceId));
-        const files = await api.getFiles({ folderId: share.resourceId, inTrash: false });
-        resourceData = { folder: fSnap.data(), files };
-      } else if (share.resourceType === 'event') {
-        const eSnap = await getDoc(doc(db, 'events', share.resourceId));
-        const files = await api.getFiles({ eventId: share.resourceId, inTrash: false });
-        resourceData = { event: eSnap.data(), files };
-      }
-
-      return { share, resource: resourceData };
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, 'shares');
+    const shares = await listCol<ShareLink>('shares');
+    const share = shares.find((s) => s.token === token);
+    if (!share) throw new Error('Link de compartilhamento inválido ou expirado.');
+    if (share.expiresAt && new Date(share.expiresAt).getTime() < Date.now()) {
+      throw new Error('Este link de compartilhamento expirou.');
     }
+
+    let resourceData: any = null;
+    if (share.resourceType === 'file') {
+      resourceData = await getDocById<FileRecord>('files', share.resourceId);
+    } else if (share.resourceType === 'folder') {
+      const folder = await getDocById<Folder>('folders', share.resourceId);
+      const files = await api.getFiles({ folderId: share.resourceId, inTrash: false });
+      resourceData = { folder, files };
+    } else if (share.resourceType === 'event') {
+      const event = await getDocById<ChurchEvent>('events', share.resourceId);
+      const files = await api.getFiles({ eventId: share.resourceId, inTrash: false });
+      resourceData = { event, files };
+    }
+
+    return { share, resource: resourceData };
   },
 
   // ==========================================
   // 7. ACTIVITIES AUDIT
   // ==========================================
   async getActivities(): Promise<Activity[]> {
-    if (!auth.currentUser) return [];
     try {
-      const q = query(collection(db, 'activities'), orderBy('createdAt', 'desc'), limit(50));
-      const snap = await getDocs(q);
-      return snap.docs.map((d) => d.data() as Activity);
+      const list = await listCol<Activity>('activities');
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return list.slice(0, 50);
     } catch (error) {
       console.warn('Could not list activities:', error);
       return [];
@@ -1781,137 +1193,81 @@ export const api = {
       createdAt: new Date().toISOString(),
     };
     try {
-      await setDoc(doc(db, 'activities', actId), newAct);
+      await setDocById('activities', actId, newAct);
     } catch (error) {
       console.warn('Could not record activity:', error);
     }
   },
 
   // ==========================================
-  // 8. STORAGE STATS & SETTINGS (REAL NUMBERS)
+  // 8. STORAGE STATS & SETTINGS
   // ==========================================
   async getSettings(): Promise<SystemSettings> {
-    try {
-      const snap = await getDoc(doc(db, 'settings', 'system'));
-      let baseData: any = {
-        churchName: 'PT-B Mídia',
-        churchSubtitle: 'Central de Arquivos e Mídias',
-        storageEngine: 'Cloud Storage for Firebase',
-        totalQuotaBytes: 1024 * 1024 * 1024 * 1024, // 1 TB default Cloud quota
-        updatedAt: new Date().toISOString(),
-      };
-      if (snap.exists()) {
-        baseData = { ...baseData, ...snap.data() };
-      } else if (auth.currentUser) {
-        try {
-          await setDoc(doc(db, 'settings', 'system'), baseData);
-        } catch {}
-      }
+    const defaultData: any = {
+      churchName: 'PT-B Mídia',
+      churchSubtitle: 'Central de Arquivos e Mídias',
+      storageEngine: 'Servidor Dedicado PT-B Mídia',
+      totalQuotaBytes: 2 * 1024 * 1024 * 1024 * 1024,
+      updatedAt: new Date().toISOString(),
+    };
 
-      const fullSettings: SystemSettings = {
+    try {
+      const existing = await getDocById<any>('settings', 'system');
+      const baseData = existing ? { ...defaultData, ...existing } : defaultData;
+
+      return {
         ...baseData,
-        projectId: firebaseConfig.projectId,
-        storageBucket: firebaseConfig.storageBucket,
-        firestoreDatabaseId: firebaseConfig.firestoreDatabaseId,
-        authDomain: firebaseConfig.authDomain,
-        gcsBucket: firebaseConfig.storageBucket,
-        gcsProjectId: firebaseConfig.projectId,
+        projectId: 'ptb-midia-local',
+        storageBucket: '/uploads',
+        firestoreDatabaseId: 'Banco Persistente Local',
         settings: baseData,
         gcsInstructions: {
           active: true,
-          bucket: firebaseConfig.storageBucket,
-          status: 'Cloud Storage Oficial Ativo',
+          bucket: '/uploads',
+          status: 'Armazenamento Dedicado Ativo',
         },
       };
-
-      return fullSettings;
     } catch {
-      const fallback: any = {
-        churchName: 'PT-B Mídia',
-        churchSubtitle: 'Central de Arquivos e Mídias',
-        storageEngine: 'Cloud Storage for Firebase',
-        totalQuotaBytes: 1024 * 1024 * 1024 * 1024,
-        updatedAt: new Date().toISOString(),
-        projectId: firebaseConfig.projectId,
-        storageBucket: firebaseConfig.storageBucket,
-        firestoreDatabaseId: firebaseConfig.firestoreDatabaseId,
-        authDomain: firebaseConfig.authDomain,
-        gcsBucket: firebaseConfig.storageBucket,
-        gcsProjectId: firebaseConfig.projectId,
-        settings: {
-          churchName: 'PT-B Mídia',
-          churchSubtitle: 'Central de Arquivos e Mídias',
-          storageEngine: 'Cloud Storage for Firebase',
-          totalQuotaBytes: 1024 * 1024 * 1024 * 1024,
-          updatedAt: new Date().toISOString(),
-          gcsBucket: firebaseConfig.storageBucket,
-          gcsProjectId: firebaseConfig.projectId,
-        },
-        gcsInstructions: {
-          active: true,
-          bucket: firebaseConfig.storageBucket,
-          status: 'Cloud Storage Oficial Ativo',
-        },
+      return {
+        ...defaultData,
+        projectId: 'ptb-midia-local',
+        storageBucket: '/uploads',
+        firestoreDatabaseId: 'Banco Persistente Local',
+        settings: defaultData,
       };
-      return fallback;
     }
   },
 
   async updateSettings(updates: Partial<SystemSettings>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'settings', 'system'), {
+    await setDocById(
+      'settings',
+      'system',
+      {
         ...updates,
         updatedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/system');
-    }
+      },
+      true
+    );
   },
 
   async getStorageStats(): Promise<StorageStats> {
-    const fallbackStats: StorageStats = {
-      totalBytesUsed: 0,
-      totalQuota: 2 * 1024 * 1024 * 1024 * 1024,
-      availableBytes: 2 * 1024 * 1024 * 1024 * 1024,
-      usedPercentage: 0,
-      breakdown: {
-        photos: { bytes: 0, count: 0 },
-        videos: { bytes: 0, count: 0 },
-        arts: { bytes: 0, count: 0 },
-        audios: { bytes: 0, count: 0 },
-        documents: { bytes: 0, count: 0 },
-        others: { bytes: 0, count: 0 },
-        trash: { bytes: 0, count: 0 },
-      },
-      counts: {
-        totalFiles: 0,
-        totalFolders: 0,
-        totalEvents: 0,
-        totalUsers: 1,
-        totalShares: 0,
-      },
-      recentActivities: [],
-    };
-
     try {
-      const [filesSnap, foldersSnap, eventsSnap, usersSnap, sharesSnap, activitiesSnap, settings] =
-        await Promise.all([
-          getDocs(collection(db, 'files')).catch(() => ({ docs: [] })),
-          getDocs(collection(db, 'folders')).catch(() => ({ docs: [] })),
-          getDocs(collection(db, 'events')).catch(() => ({ docs: [] })),
-          getDocs(collection(db, 'users')).catch(() => ({ docs: [] })),
-          getDocs(collection(db, 'shares')).catch(() => ({ docs: [] })),
-          api.getActivities().catch(() => []),
-          api.getSettings().catch(() => ({
-            totalQuotaBytes: 2 * 1024 * 1024 * 1024 * 1024,
-            churchName: 'PT-B Mídia',
-            churchSubtitle: 'Central de Arquivos e Mídias',
-            storageEngine: 'Cloud Storage for Firebase',
-            updatedAt: new Date().toISOString(),
-          } as SystemSettings)),
-        ]);
+      const [allFiles, folders, events, users, shares, activities, settings] = await Promise.all([
+        listCol<FileRecord>('files').catch(() => []),
+        listCol<Folder>('folders').catch(() => []),
+        listCol<ChurchEvent>('events').catch(() => []),
+        listCol<User>('users').catch(() => []),
+        listCol<ShareLink>('shares').catch(() => []),
+        api.getActivities().catch(() => []),
+        api.getSettings().catch(() => ({
+          totalQuotaBytes: 2 * 1024 * 1024 * 1024 * 1024,
+          churchName: 'PT-B Mídia',
+          churchSubtitle: 'Central de Arquivos e Mídias',
+          storageEngine: 'Servidor Dedicado PT-B Mídia',
+          updatedAt: new Date().toISOString(),
+        } as SystemSettings)),
+      ]);
 
-      const allFiles = filesSnap.docs.map((d) => d.data() as FileRecord);
       const activeFiles = allFiles.filter((f) => !f.inTrash);
       const trashFiles = allFiles.filter((f) => f.inTrash);
 
@@ -1980,19 +1336,19 @@ export const api = {
         },
         counts: {
           totalFiles: activeFiles.length,
-          totalFolders: foldersSnap.docs.filter((d) => !(d.data() as Folder).inTrash).length,
-          totalEvents: eventsSnap.docs.length,
-          totalUsers: usersSnap.docs.length,
-          totalShares: sharesSnap.docs.length,
+          totalFolders: folders.filter((f) => !f.inTrash).length,
+          totalEvents: events.length,
+          totalUsers: users.length,
+          totalShares: shares.length,
         },
-        recentActivities: activitiesSnap,
+        recentActivities: activities,
       };
     } catch (error) {
       console.error('Error fetching storage stats:', error);
       return {
         totalBytesUsed: 0,
-        totalQuota: 1024 * 1024 * 1024 * 1024,
-        availableBytes: 1024 * 1024 * 1024 * 1024,
+        totalQuota: 2 * 1024 * 1024 * 1024 * 1024,
+        availableBytes: 2 * 1024 * 1024 * 1024 * 1024,
         usedPercentage: 0,
         breakdown: {
           photos: { bytes: 0, count: 0 },
@@ -2007,7 +1363,7 @@ export const api = {
           totalFiles: 0,
           totalFolders: 0,
           totalEvents: 0,
-          totalUsers: 0,
+          totalUsers: 1,
           totalShares: 0,
         },
         recentActivities: [],
@@ -2023,68 +1379,12 @@ export const api = {
     const secondary = preferOriginal ? file.thumbnailUrl : file.downloadUrl;
     const source = primary || secondary;
     if (!source) return null;
-
-    if (source.startsWith('data:') || source.startsWith('http') || source.startsWith('/uploads/')) {
-      return source;
-    }
-
-    if (source.startsWith('chunked://')) {
-      const fileId = source.replace('chunked://', '');
-      try {
-        const q = query(collection(db, 'file_chunks'), where('fileId', '==', fileId));
-        const snap = await getDocs(q);
-        const sortedDocs = snap.docs
-          .map((d) => d.data() as { chunkIndex: number; data: string })
-          .sort((a, b) => a.chunkIndex - b.chunkIndex);
-
-        if (sortedDocs.length === 0) return null;
-
-        const byteArrays: Uint8Array[] = [];
-        for (const docItem of sortedDocs) {
-          const bstr = atob(docItem.data);
-          const u8arr = new Uint8Array(bstr.length);
-          for (let i = 0; i < bstr.length; i++) {
-            u8arr[i] = bstr.charCodeAt(i);
-          }
-          byteArrays.push(u8arr);
-        }
-        const blob = new Blob(byteArrays as any, {
-          type: file.mimeType || (preferOriginal ? 'application/octet-stream' : 'image/jpeg'),
-        });
-        return URL.createObjectURL(blob);
-      } catch (err) {
-        console.warn('Error resolving chunked media URL:', err);
-        return null;
-      }
-    }
     return source;
   },
 
   async resolveFileBlob(file: FileRecord): Promise<Blob | null> {
     const url = file.downloadUrl || file.thumbnailUrl;
     if (!url) return null;
-
-    if (url.startsWith('chunked://')) {
-      const fileId = url.replace('chunked://', '');
-      const q = query(collection(db, 'file_chunks'), where('fileId', '==', fileId));
-      const snap = await getDocs(q);
-      const sortedDocs = snap.docs
-        .map((d) => d.data() as { chunkIndex: number; data: string })
-        .sort((a, b) => a.chunkIndex - b.chunkIndex);
-
-      if (sortedDocs.length === 0) return null;
-
-      const byteArrays: Uint8Array[] = [];
-      for (const docItem of sortedDocs) {
-        const bstr = atob(docItem.data);
-        const u8arr = new Uint8Array(bstr.length);
-        for (let i = 0; i < bstr.length; i++) {
-          u8arr[i] = bstr.charCodeAt(i);
-        }
-        byteArrays.push(u8arr);
-      }
-      return new Blob(byteArrays as any, { type: file.mimeType || 'application/octet-stream' });
-    }
 
     if (url.startsWith('data:')) {
       const arr = url.split(',');
@@ -2107,59 +1407,17 @@ export const api = {
     let url = typeof urlOrRecord === 'string' ? urlOrRecord : urlOrRecord.downloadUrl;
     let filename = customFilename || (typeof urlOrRecord === 'object' ? urlOrRecord.name : '');
 
-    // 1. If it's a route like /api/files/:id/download, extract the fileId and get real downloadUrl
     if (url.includes('/api/files/') && url.includes('/download')) {
       const match = url.match(/\/api\/files\/([^/]+)\/download/);
       if (match && match[1]) {
-        const fileId = match[1];
-        try {
-          const docSnap = await getDoc(doc(db, 'files', fileId));
-          if (docSnap.exists()) {
-            const data = docSnap.data() as FileRecord;
-            url = data.downloadUrl || url;
-            if (!filename) filename = data.name;
-          }
-        } catch {}
-      }
-    }
-
-    // 2. If chunked storage from Firestore:
-    if (url.startsWith('chunked://')) {
-      const fileId = url.replace('chunked://', '');
-      try {
-        const q = query(collection(db, 'file_chunks'), where('fileId', '==', fileId));
-        const snap = await getDocs(q);
-        const sortedDocs = snap.docs
-          .map((d) => d.data() as { chunkIndex: number; data: string })
-          .sort((a, b) => a.chunkIndex - b.chunkIndex);
-
-        const byteArrays: Uint8Array[] = [];
-        for (const docItem of sortedDocs) {
-          const bstr = atob(docItem.data);
-          const u8arr = new Uint8Array(bstr.length);
-          for (let i = 0; i < bstr.length; i++) {
-            u8arr[i] = bstr.charCodeAt(i);
-          }
-          byteArrays.push(u8arr);
+        const record = await getDocById<FileRecord>('files', match[1]);
+        if (record) {
+          url = record.downloadUrl || url;
+          if (!filename) filename = record.name;
         }
-        const blob = new Blob(byteArrays as any, { type: 'application/octet-stream' });
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = filename || 'arquivo_original';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          URL.revokeObjectURL(blobUrl);
-          a.remove();
-        }, 1000);
-        return;
-      } catch (chunkErr) {
-        console.warn('Error downloading chunked file:', chunkErr);
       }
     }
 
-    // 3. If Data URL:
     if (url.startsWith('data:')) {
       try {
         const arr = url.split(',');
@@ -2187,7 +1445,6 @@ export const api = {
       }
     }
 
-    // 4. If relative /uploads/ URL or HTTP URL:
     try {
       const response = await fetch(url);
       if (response.ok) {
@@ -2206,7 +1463,6 @@ export const api = {
       }
     } catch {}
 
-    // 5. Fallback for mobile direct attachment
     const directUrl = url.startsWith('/uploads/')
       ? `/api/download?url=${encodeURIComponent(url)}&name=${encodeURIComponent(filename || '')}`
       : url;
@@ -2229,12 +1485,8 @@ export const api = {
 
     for (const item of items) {
       if (typeof item === 'string') {
-        try {
-          const snap = await getDoc(doc(db, 'files', item));
-          if (snap.exists()) {
-            files.push(snap.data() as FileRecord);
-          }
-        } catch {}
+        const docItem = await getDocById<FileRecord>('files', item);
+        if (docItem) files.push(docItem);
       } else {
         files.push(item);
       }
@@ -2310,7 +1562,6 @@ export const api = {
   // ==========================================
   // 10. PUBLIC CHURCH PAGE SERVICES
   // ==========================================
-
   getDefaultChurchProfile(): ChurchProfile {
     return {
       id: 'profile',
@@ -2398,48 +1649,26 @@ export const api = {
   },
 
   async getChurchProfile(): Promise<ChurchProfile> {
-    const profileRef = doc(db, 'church_settings', 'profile');
     try {
-      const snap = await getDoc(profileRef);
-      if (snap.exists()) {
-        return snap.data() as ChurchProfile;
-      }
-      const defaultProfile = api.getDefaultChurchProfile();
-      if (auth.currentUser) {
-        try {
-          await setDoc(profileRef, defaultProfile);
-        } catch {}
-      }
-      return defaultProfile;
-    } catch {
-      return api.getDefaultChurchProfile();
-    }
+      const existing = await getDocById<ChurchProfile>('church_settings', 'profile');
+      if (existing) return existing;
+    } catch {}
+    return api.getDefaultChurchProfile();
   },
 
   async updateChurchProfile(profileData: Partial<ChurchProfile>): Promise<ChurchProfile> {
-    const profileRef = doc(db, 'church_settings', 'profile');
     const effective = api.getEffectiveUser();
-    const updated: Partial<ChurchProfile> = removeUndefinedValues({
+    const updated: Partial<ChurchProfile> = {
       ...profileData,
       updatedAt: new Date().toISOString(),
       updatedBy: effective.displayName || 'Administrador',
-    });
-    try {
-      await setDoc(profileRef, updated, { merge: true });
-      const snap = await getDoc(profileRef);
-      return snap.data() as ChurchProfile;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'church_settings/profile');
-    }
+    };
+    return await setDocById('church_settings', 'profile', updated as ChurchProfile, true);
   },
 
-  // --- Church Announcements ---
   async getChurchAnnouncements(publishedOnly: boolean = false): Promise<ChurchAnnouncement[]> {
     try {
-      const colRef = collection(db, 'church_announcements');
-      const q = publishedOnly ? query(colRef, where('status', '==', 'published')) : colRef;
-      const snap = await getDocs(q);
-      let list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as ChurchAnnouncement));
+      let list = await listCol<ChurchAnnouncement>('church_announcements');
       if (publishedOnly) {
         list = list.filter((a) => a.status === 'published');
       }
@@ -2462,40 +1691,23 @@ export const api = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await setDoc(doc(db, 'church_announcements', newId), removeUndefinedValues(announcement));
-      return announcement;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `church_announcements/${newId}`);
-    }
+    return await setDocById('church_announcements', newId, announcement);
   },
 
   async updateChurchAnnouncement(id: string, updates: Partial<ChurchAnnouncement>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'church_announcements', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `church_announcements/${id}`);
-    }
+    await updateDocById('church_announcements', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteChurchAnnouncement(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'church_announcements', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `church_announcements/${id}`);
-    }
+    await deleteDocById('church_announcements', id);
   },
 
-  // --- Church Public Events & Schedule ---
   async getChurchPublicEvents(publishedOnly: boolean = false): Promise<ChurchPublicEvent[]> {
     try {
-      const colRef = collection(db, 'church_events');
-      const q = publishedOnly ? query(colRef, where('status', '==', 'published')) : colRef;
-      const snap = await getDocs(q);
-      let list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as ChurchPublicEvent));
+      let list = await listCol<ChurchPublicEvent>('church_events');
       if (publishedOnly) {
         list = list.filter((e) => e.status === 'published');
       }
@@ -2514,40 +1726,23 @@ export const api = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await setDoc(doc(db, 'church_events', newId), removeUndefinedValues(event));
-      return event;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `church_events/${newId}`);
-    }
+    return await setDocById('church_events', newId, event);
   },
 
   async updateChurchPublicEvent(id: string, updates: Partial<ChurchPublicEvent>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'church_events', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `church_events/${id}`);
-    }
+    await updateDocById('church_events', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteChurchPublicEvent(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'church_events', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `church_events/${id}`);
-    }
+    await deleteDocById('church_events', id);
   },
 
-  // --- Church Articles & Devotionals ---
   async getChurchArticles(publishedOnly: boolean = false): Promise<ChurchArticle[]> {
     try {
-      const colRef = collection(db, 'church_articles');
-      const q = publishedOnly ? query(colRef, where('status', '==', 'published')) : colRef;
-      const snap = await getDocs(q);
-      let list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as ChurchArticle));
+      let list = await listCol<ChurchArticle>('church_articles');
       if (publishedOnly) {
         list = list.filter((a) => a.status === 'published');
       }
@@ -2559,15 +1754,7 @@ export const api = {
   },
 
   async getChurchArticleById(id: string): Promise<ChurchArticle | null> {
-    try {
-      const snap = await getDoc(doc(db, 'church_articles', id));
-      if (snap.exists()) {
-        return { ...snap.data(), id: snap.id } as ChurchArticle;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return await getDocById<ChurchArticle>('church_articles', id);
   },
 
   async createChurchArticle(data: Omit<ChurchArticle, 'id' | 'createdAt' | 'updatedAt'>): Promise<ChurchArticle> {
@@ -2578,40 +1765,23 @@ export const api = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await setDoc(doc(db, 'church_articles', newId), removeUndefinedValues(article));
-      return article;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `church_articles/${newId}`);
-    }
+    return await setDocById('church_articles', newId, article);
   },
 
   async updateChurchArticle(id: string, updates: Partial<ChurchArticle>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'church_articles', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `church_articles/${id}`);
-    }
+    await updateDocById('church_articles', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteChurchArticle(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'church_articles', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `church_articles/${id}`);
-    }
+    await deleteDocById('church_articles', id);
   },
 
-  // --- Church Photo Albums & Videos ---
   async getChurchAlbums(publishedOnly: boolean = false): Promise<ChurchAlbum[]> {
     try {
-      const colRef = collection(db, 'church_albums');
-      const q = publishedOnly ? query(colRef, where('status', '==', 'published')) : colRef;
-      const snap = await getDocs(q);
-      let list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as ChurchAlbum));
+      let list = await listCol<ChurchAlbum>('church_albums');
       if (publishedOnly) {
         list = list.filter((a) => a.status === 'published');
       }
@@ -2630,40 +1800,23 @@ export const api = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await setDoc(doc(db, 'church_albums', newId), removeUndefinedValues(album));
-      return album;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `church_albums/${newId}`);
-    }
+    return await setDocById('church_albums', newId, album);
   },
 
   async updateChurchAlbum(id: string, updates: Partial<ChurchAlbum>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'church_albums', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `church_albums/${id}`);
-    }
+    await updateDocById('church_albums', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteChurchAlbum(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'church_albums', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `church_albums/${id}`);
-    }
+    await deleteDocById('church_albums', id);
   },
 
-  // --- Church Public Downloads ---
   async getChurchDownloads(publishedOnly: boolean = false): Promise<ChurchDownload[]> {
     try {
-      const colRef = collection(db, 'church_downloads');
-      const q = publishedOnly ? query(colRef, where('status', '==', 'published')) : colRef;
-      const snap = await getDocs(q);
-      let list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as ChurchDownload));
+      let list = await listCol<ChurchDownload>('church_downloads');
       if (publishedOnly) {
         list = list.filter((d) => d.status === 'published');
       }
@@ -2683,95 +1836,56 @@ export const api = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    try {
-      await setDoc(doc(db, 'church_downloads', newId), removeUndefinedValues(downloadItem));
-      return downloadItem;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `church_downloads/${newId}`);
-    }
+    return await setDocById('church_downloads', newId, downloadItem);
   },
 
   async updateChurchDownload(id: string, updates: Partial<ChurchDownload>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'church_downloads', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `church_downloads/${id}`);
-    }
+    await updateDocById('church_downloads', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteChurchDownload(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'church_downloads', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `church_downloads/${id}`);
-    }
+    await deleteDocById('church_downloads', id);
   },
 
   async incrementChurchDownloadCount(id: string): Promise<void> {
     try {
-      const docRef = doc(db, 'church_downloads', id);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const count = snap.data().downloadCount || 0;
-        await updateDoc(docRef, { downloadCount: count + 1 });
-      }
+      await apiFetch(`/api/church-downloads/${encodeURIComponent(id)}/increment`, {
+        method: 'POST',
+      });
     } catch {}
   },
 
-  // No automatic seeding - users create and publish their own content
   async seedInitialChurchDataIfEmpty(): Promise<void> {
-    // Intentionally empty: real users create their own announcements, events and publications
+    // Handled on server boot
   },
 
   // ==========================================
   // 12. CENTRAL DE AGENDA, ESCALAS & TAREFAS DA EQUIPE (REAL-TIME)
   // ==========================================
-  /**
-   * Real-time listener for Team Tasks and Member Assignments.
-   * Updates instantaneously whenever any member adds, updates or completes a task.
-   */
   subscribeTeamTasks(callback: (tasks: TeamTask[]) => void): () => void {
-    const tasksRef = collection(db, 'team_tasks');
-    return onSnapshot(
-      tasksRef,
-      (snapshot) => {
-        const list = snapshot.docs.map((d) => {
-          const t = d.data() as TeamTask;
-          return {
-            ...t,
-            id: t.id || d.id,
-          };
-        });
-        // Sort by date ascending, then urgency
-        const priorityWeight: Record<string, number> = { urgente: 4, alta: 3, media: 2, baixa: 1 };
-        list.sort((a, b) => {
-          // Completed tasks go lower
-          if (a.status === 'concluido' && b.status !== 'concluido') return 1;
-          if (a.status !== 'concluido' && b.status === 'concluido') return -1;
-          const dateA = a.dueDate || '';
-          const dateB = b.dueDate || '';
-          const diffDate = dateA.localeCompare(dateB);
-          if (diffDate !== 0) return diffDate;
-          const pA = priorityWeight[a.priority || 'media'] || 0;
-          const pB = priorityWeight[b.priority || 'media'] || 0;
-          return pB - pA;
-        });
-        callback(list);
-      },
-      (error) => {
-        console.warn('Real-time team tasks subscription sync:', error);
-      }
-    );
+    return subscribeCollection<TeamTask>('team_tasks', (list) => {
+      const priorityWeight: Record<string, number> = { urgente: 4, alta: 3, media: 2, baixa: 1 };
+      const sorted = [...list].sort((a, b) => {
+        if (a.status === 'concluido' && b.status !== 'concluido') return 1;
+        if (a.status !== 'concluido' && b.status === 'concluido') return -1;
+        const dateA = a.dueDate || '';
+        const dateB = b.dueDate || '';
+        const diffDate = dateA.localeCompare(dateB);
+        if (diffDate !== 0) return diffDate;
+        const pA = priorityWeight[a.priority || 'media'] || 0;
+        const pB = priorityWeight[b.priority || 'media'] || 0;
+        return pB - pA;
+      });
+      callback(sorted);
+    });
   },
 
   async getTeamTasks(): Promise<TeamTask[]> {
     try {
-      const snap = await getDocs(collection(db, 'team_tasks'));
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as TeamTask));
-      return list;
+      return await listCol<TeamTask>('team_tasks');
     } catch (err) {
       console.warn('Could not load team tasks:', err);
       return [];
@@ -2804,28 +1918,24 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      await setDoc(doc(db, 'team_tasks', taskId), removeUndefinedValues(task));
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: 'create_task',
-        actionLabel: 'Escalou novo afazer de equipe',
-        targetType: 'task',
-        targetName: task.title,
-        details: `${task.assignedToName} · ${task.dueDate}`,
-      });
-      return task;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `team_tasks/${taskId}`);
-    }
+    await setDocById('team_tasks', taskId, task);
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'create_task',
+      actionLabel: 'Escalou novo afazer de equipe',
+      targetType: 'task',
+      targetName: task.title,
+      details: `${task.assignedToName} · ${task.dueDate}`,
+    });
+    return task;
   },
 
   async createBatchTeamTasks(tasksData: Partial<TeamTask>[]): Promise<TeamTask[]> {
     if (!tasksData || tasksData.length === 0) return [];
     const effective = api.getEffectiveUser();
-    const batch = writeBatch(db);
     const createdTasks: TeamTask[] = [];
+    const ops: { type: 'set'; col: string; id: string; data: TeamTask }[] = [];
 
     for (let i = 0; i < tasksData.length; i++) {
       const data = tasksData[i];
@@ -2852,67 +1962,52 @@ export const api = {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      const taskRef = doc(db, 'team_tasks', taskId);
-      batch.set(taskRef, removeUndefinedValues(task));
+      ops.push({ type: 'set', col: 'team_tasks', id: taskId, data: task });
       createdTasks.push(task);
     }
 
-    try {
-      await batch.commit();
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: 'create_task',
-        actionLabel: 'Escalou equipe em lote (escala express)',
-        targetType: 'task',
-        targetName: `${createdTasks.length} afazeres da equipe`,
-        details: `${createdTasks[0]?.eventName || 'Escala de culto'} · ${createdTasks[0]?.dueDate}`,
-      });
-      return createdTasks;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'team_tasks/batch');
-      return [];
-    }
+    await batchWrite(ops);
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'create_task',
+      actionLabel: 'Escalou equipe em lote (escala express)',
+      targetType: 'task',
+      targetName: `${createdTasks.length} afazeres da equipe`,
+      details: `${createdTasks[0]?.eventName || 'Escala de culto'} · ${createdTasks[0]?.dueDate}`,
+    });
+    return createdTasks;
   },
 
   async batchUpdateTaskStatus(taskIds: string[], newStatus: TeamTaskStatus): Promise<void> {
     if (!taskIds || taskIds.length === 0) return;
-    const batch = writeBatch(db);
     const now = new Date().toISOString();
-    for (const id of taskIds) {
-      const ref = doc(db, 'team_tasks', id);
-      batch.update(ref, { status: newStatus, updatedAt: now });
-    }
-    try {
-      await batch.commit();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'team_tasks/batch_update');
-    }
+    await batchWrite(
+      taskIds.map((id) => ({
+        type: 'update' as const,
+        col: 'team_tasks',
+        id,
+        data: { status: newStatus, updatedAt: now },
+      }))
+    );
   },
 
   async batchDeleteTeamTasks(taskIds: string[]): Promise<void> {
     if (!taskIds || taskIds.length === 0) return;
-    const batch = writeBatch(db);
-    for (const id of taskIds) {
-      const ref = doc(db, 'team_tasks', id);
-      batch.delete(ref);
-    }
-    try {
-      await batch.commit();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'team_tasks/batch_delete');
-    }
+    await batchWrite(
+      taskIds.map((id) => ({
+        type: 'delete' as const,
+        col: 'team_tasks',
+        id,
+      }))
+    );
   },
 
   async updateTeamTask(id: string, updates: Partial<TeamTask>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'team_tasks', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `team_tasks/${id}`);
-    }
+    await updateDocById('team_tasks', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async toggleTaskComplete(id: string, currentStatus: TeamTaskStatus): Promise<void> {
@@ -2925,52 +2020,28 @@ export const api = {
   },
 
   async deleteTeamTask(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'team_tasks', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `team_tasks/${id}`);
-    }
+    await deleteDocById('team_tasks', id);
   },
 
   // ==========================================
   // 13. TRABALHO DE ANOTAÇÃO COLABORATIVA DA EQUIPE (REAL-TIME)
   // ==========================================
-  /**
-   * Real-time listener for Team Collaborative Notes & Alignments.
-   */
   subscribeTeamNotes(callback: (notes: TeamNote[]) => void): () => void {
-    const notesRef = collection(db, 'team_notes');
-    return onSnapshot(
-      notesRef,
-      (snapshot) => {
-        const list = snapshot.docs.map((d) => {
-          const n = d.data() as TeamNote;
-          return {
-            ...n,
-            id: n.id || d.id,
-          };
-        });
-        // Sort: pinned first, then newest updated
-        list.sort((a, b) => {
-          if (a.isPinned && !b.isPinned) return -1;
-          if (!a.isPinned && b.isPinned) return 1;
-          const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime() || 0;
-          const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime() || 0;
-          return timeB - timeA;
-        });
-        callback(list);
-      },
-      (error) => {
-        console.warn('Real-time team notes subscription sync:', error);
-      }
-    );
+    return subscribeCollection<TeamNote>('team_notes', (list) => {
+      const sorted = [...list].sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime() || 0;
+        const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime() || 0;
+        return timeB - timeA;
+      });
+      callback(sorted);
+    });
   },
 
   async getTeamNotes(): Promise<TeamNote[]> {
     try {
-      const snap = await getDocs(collection(db, 'team_notes'));
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as TeamNote));
-      return list;
+      return await listCol<TeamNote>('team_notes');
     } catch (err) {
       console.warn('Could not load team notes:', err);
       return [];
@@ -2996,63 +2067,36 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      await setDoc(doc(db, 'team_notes', noteId), removeUndefinedValues(note));
-      return note;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `team_notes/${noteId}`);
-    }
+    await setDocById('team_notes', noteId, note);
+    return note;
   },
 
   async updateTeamNote(id: string, updates: Partial<TeamNote>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'team_notes', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `team_notes/${id}`);
-    }
+    await updateDocById('team_notes', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteTeamNote(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'team_notes', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `team_notes/${id}`);
-    }
+    await deleteDocById('team_notes', id);
   },
 
   // ==========================================
   // LIVRO FINANCEIRO, CAIXA & GASTOS MÍDIA PT-B
   // ==========================================
-
   subscribeFinancialTransactions(callback: (records: FinancialTransaction[]) => void): () => void {
-    const q = collection(db, 'financial_records');
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        const list: FinancialTransaction[] = snapshot.docs.map((d) => {
-          const t = d.data() as FinancialTransaction;
-          return {
-            ...t,
-            id: t.id || d.id,
-          };
-        });
-        // Sort by date descending (most recent first)
-        list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
-        callback(list);
-      },
-      (error) => {
-        console.warn('Real-time financial transactions subscription sync:', error);
-      }
-    );
+    return subscribeCollection<FinancialTransaction>('financial_records', (list) => {
+      const sorted = [...list].sort(
+        (a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime()
+      );
+      callback(sorted);
+    });
   },
 
   async getFinancialTransactions(): Promise<FinancialTransaction[]> {
     try {
-      const snap = await getDocs(collection(db, 'financial_records'));
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as FinancialTransaction));
+      const list = await listCol<FinancialTransaction>('financial_records');
       list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
       return list;
     } catch (err) {
@@ -3082,78 +2126,49 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      await setDoc(doc(db, 'financial_records', txId), removeUndefinedValues(tx));
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: tx.type === 'entrada' ? 'create_income' : 'create_expense',
-        actionLabel: tx.type === 'entrada' ? 'Registrou Entrada de Caixa' : 'Registrou Saída de Caixa',
-        targetType: 'finance',
-        targetName: tx.title,
-        details: `R$ ${tx.amount.toFixed(2)} · ${tx.counterparty}`,
-      });
-      return tx;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `financial_records/${txId}`);
-    }
+    await setDocById('financial_records', txId, tx);
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: tx.type === 'entrada' ? 'create_income' : 'create_expense',
+      actionLabel: tx.type === 'entrada' ? 'Registrou Entrada de Caixa' : 'Registrou Saída de Caixa',
+      targetType: 'finance',
+      targetName: tx.title,
+      details: `R$ ${tx.amount.toFixed(2)} · ${tx.counterparty}`,
+    });
+    return tx;
   },
 
   async updateFinancialTransaction(id: string, updates: Partial<FinancialTransaction>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'financial_records', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `financial_records/${id}`);
-    }
+    await updateDocById('financial_records', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteFinancialTransaction(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'financial_records', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `financial_records/${id}`);
-    }
+    await deleteDocById('financial_records', id);
   },
 
   subscribeFinancialBills(callback: (bills: FinancialBill[]) => void): () => void {
-    const q = collection(db, 'financial_bills');
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        const list: FinancialBill[] = snapshot.docs.map((d) => {
-          const b = d.data() as FinancialBill;
-          return {
-            ...b,
-            id: b.id || d.id,
-          };
-        });
-        // Sort: pending first, then by date (if has date), then without date
-        list.sort((a, b) => {
-          if (a.status === 'pendente' && b.status !== 'pendente') return -1;
-          if (a.status !== 'pendente' && b.status === 'pendente') return 1;
-          if (!a.dueDate && b.dueDate) return 1;
-          if (a.dueDate && !b.dueDate) return -1;
-          if (a.dueDate && b.dueDate) {
-            return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
-          }
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        });
-        callback(list);
-      },
-      (error) => {
-        console.warn('Real-time financial bills subscription sync:', error);
-      }
-    );
+    return subscribeCollection<FinancialBill>('financial_bills', (list) => {
+      const sorted = [...list].sort((a, b) => {
+        if (a.status === 'pendente' && b.status !== 'pendente') return -1;
+        if (a.status !== 'pendente' && b.status === 'pendente') return 1;
+        if (!a.dueDate && b.dueDate) return 1;
+        if (a.dueDate && !b.dueDate) return -1;
+        if (a.dueDate && b.dueDate) {
+          return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+        }
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+      callback(sorted);
+    });
   },
 
   async getFinancialBills(): Promise<FinancialBill[]> {
     try {
-      const snap = await getDocs(collection(db, 'financial_bills'));
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as FinancialBill));
-      return list;
+      return await listCol<FinancialBill>('financial_bills');
     } catch (err) {
       console.warn('Could not load financial bills:', err);
       return [];
@@ -3182,40 +2197,28 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      await setDoc(doc(db, 'financial_bills', billId), removeUndefinedValues(bill));
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: 'create_bill',
-        actionLabel: bill.type === 'a_pagar' ? 'Cadastrou Conta a Pagar' : 'Cadastrou Conta a Receber',
-        targetType: 'finance_bill',
-        targetName: bill.title,
-        details: `R$ ${bill.amount.toFixed(2)} · ${bill.counterparty}`,
-      });
-      return bill;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `financial_bills/${billId}`);
-    }
+    await setDocById('financial_bills', billId, bill);
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'create_bill',
+      actionLabel: bill.type === 'a_pagar' ? 'Cadastrou Conta a Pagar' : 'Cadastrou Conta a Receber',
+      targetType: 'finance_bill',
+      targetName: bill.title,
+      details: `R$ ${bill.amount.toFixed(2)} · ${bill.counterparty}`,
+    });
+    return bill;
   },
 
   async updateFinancialBill(id: string, updates: Partial<FinancialBill>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'financial_bills', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `financial_bills/${id}`);
-    }
+    await updateDocById('financial_bills', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deleteFinancialBill(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'financial_bills', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `financial_bills/${id}`);
-    }
+    await deleteDocById('financial_bills', id);
   },
 
   async settleFinancialBill(
@@ -3223,32 +2226,27 @@ export const api = {
     paymentMethod: FinancialPaymentMethod = 'pix',
     createTransaction: boolean = true
   ): Promise<FinancialTransaction | null> {
-    try {
-      await api.updateFinancialBill(bill.id, {
-        status: 'pago',
-        paidAt: new Date().toISOString(),
-      });
+    await api.updateFinancialBill(bill.id, {
+      status: 'pago',
+      paidAt: new Date().toISOString(),
+    });
 
-      if (createTransaction) {
-        const tx = await api.createFinancialTransaction({
-          type: bill.type === 'a_pagar' ? 'saida' : 'entrada',
-          title: bill.title,
-          amount: bill.amount,
-          date: new Date().toISOString().split('T')[0],
-          category: bill.category,
-          description: `Liquidação de conta (${bill.type === 'a_pagar' ? 'Conta Paga' : 'Conta Recebida'}): ${bill.description}`,
-          counterparty: bill.counterparty,
-          paymentMethod,
-          receipt: bill.receipt || null,
-          status: 'confirmado',
-        });
-        return tx;
-      }
-      return null;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `financial_bills/${bill.id}/settle`);
-      return null;
+    if (createTransaction) {
+      const tx = await api.createFinancialTransaction({
+        type: bill.type === 'a_pagar' ? 'saida' : 'entrada',
+        title: bill.title,
+        amount: bill.amount,
+        date: new Date().toISOString().split('T')[0],
+        category: bill.category,
+        description: `Liquidação de conta (${bill.type === 'a_pagar' ? 'Conta Paga' : 'Conta Recebida'}): ${bill.description}`,
+        counterparty: bill.counterparty,
+        paymentMethod,
+        receipt: bill.receipt || null,
+        status: 'confirmado',
+      });
+      return tx;
     }
+    return null;
   },
 
   async uploadFinancialReceipt(file: File): Promise<FinancialReceipt> {
@@ -3256,7 +2254,6 @@ export const api = {
     const isPdf = file.type.includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
     const docType: 'image' | 'pdf' | 'document' = isImage ? 'image' : (isPdf ? 'pdf' : 'document');
 
-    // 1. Try server API upload
     try {
       const res = await new Promise<{ downloadUrl: string }>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -3290,7 +2287,6 @@ export const api = {
       console.warn('Upload via /api/upload falhou, usando FileReader DataURL fallback:', err);
     }
 
-    // 2. High-performance fallback: FileReader DataURL
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
@@ -3309,32 +2305,18 @@ export const api = {
   // ==========================================
   // SISTEMA DE EVENTOS PÚBLICOS COM INSCRIÇÃO & QR CODE
   // ==========================================
-
   subscribePublicEvents(callback: (events: PublicRegistrationEvent[]) => void): () => void {
-    const q = collection(db, 'public_events');
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        const list: PublicRegistrationEvent[] = snapshot.docs.map((d) => {
-          const ev = d.data() as PublicRegistrationEvent;
-          return {
-            ...ev,
-            id: ev.id || d.id,
-          };
-        });
-        list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
-        callback(list);
-      },
-      (error) => {
-        console.warn('Real-time public events subscription sync:', error);
-      }
-    );
+    return subscribeCollection<PublicRegistrationEvent>('public_events', (list) => {
+      const sorted = [...list].sort(
+        (a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime()
+      );
+      callback(sorted);
+    });
   },
 
   async getPublicEvents(): Promise<PublicRegistrationEvent[]> {
     try {
-      const snap = await getDocs(collection(db, 'public_events'));
-      const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as PublicRegistrationEvent));
+      const list = await listCol<PublicRegistrationEvent>('public_events');
       list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
       return list;
     } catch (err) {
@@ -3344,14 +2326,7 @@ export const api = {
   },
 
   async getPublicEventById(id: string): Promise<PublicRegistrationEvent | null> {
-    try {
-      const snap = await getDoc(doc(db, 'public_events', id));
-      if (!snap.exists()) return null;
-      return { ...snap.data(), id: snap.id } as PublicRegistrationEvent;
-    } catch (err) {
-      console.warn(`Could not load public event ${id}:`, err);
-      return null;
-    }
+    return await getDocById<PublicRegistrationEvent>('public_events', id);
   },
 
   async createPublicEvent(data: Partial<PublicRegistrationEvent>): Promise<PublicRegistrationEvent> {
@@ -3388,81 +2363,52 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      await setDoc(doc(db, 'public_events', eventId), removeUndefinedValues(event));
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: 'create_public_event',
-        actionLabel: 'Criou Evento Público com Inscrição',
-        targetType: 'public_event',
-        targetName: event.name,
-        details: `${event.date} · ${event.location}`,
-      });
-      return event;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `public_events/${eventId}`);
-    }
+    await setDocById('public_events', eventId, event);
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'create_public_event',
+      actionLabel: 'Criou Evento Público com Inscrição',
+      targetType: 'public_event',
+      targetName: event.name,
+      details: `${event.date} · ${event.location}`,
+    });
+    return event;
   },
 
   async updatePublicEvent(id: string, updates: Partial<PublicRegistrationEvent>): Promise<void> {
-    try {
-      await updateDoc(doc(db, 'public_events', id), removeUndefinedValues({
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `public_events/${id}`);
-    }
+    await updateDocById('public_events', id, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
   },
 
   async deletePublicEvent(id: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'public_events', id));
-      // Also cleanup registrations
-      const snap = await getDocs(query(collection(db, 'event_registrations'), where('eventId', '==', id)));
-      const batch = writeBatch(db);
-      snap.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `public_events/${id}`);
-    }
+    const regs = await listCol<EventRegistration & { docId?: string }>('event_registrations');
+    const ops: { type: 'delete'; col: string; id: string }[] = [
+      { type: 'delete', col: 'public_events', id },
+      ...regs
+        .filter((r) => r.eventId === id)
+        .map((r) => ({ type: 'delete' as const, col: 'event_registrations', id: (r as any).firestoreDocId || r.id })),
+    ];
+    await batchWrite(ops);
   },
 
   subscribeEventRegistrations(eventId: string, callback: (registrations: EventRegistration[]) => void): () => void {
-    const q = query(collection(db, 'event_registrations'), where('eventId', '==', eventId));
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        const list: EventRegistration[] = snapshot.docs
-          .map((d) => {
-            const r = d.data() as EventRegistration;
-            return {
-              ...r,
-              id: r.id || d.id,
-            };
-          })
-          // STRICT EVENT ISOLATION: Never mix attendees between different events
-          .filter((r) => r.eventId === eventId);
-        list.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
-        callback(list);
-      },
-      (error) => {
-        console.warn('Real-time event registrations subscription sync:', error);
-      }
-    );
+    return subscribeCollection<EventRegistration>('event_registrations', (items) => {
+      const list = items
+        .filter((r) => r.eventId === eventId)
+        .sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
+      callback(list);
+    });
   },
 
   async getEventRegistrations(eventId: string): Promise<EventRegistration[]> {
     try {
-      const q = query(collection(db, 'event_registrations'), where('eventId', '==', eventId));
-      const snap = await getDocs(q);
-      const list = snap.docs
-        .map((d) => ({ ...d.data(), id: d.id } as EventRegistration))
-        // STRICT EVENT ISOLATION
-        .filter((r) => r.eventId === eventId);
-      list.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
-      return list;
+      const items = await listCol<EventRegistration>('event_registrations');
+      return items
+        .filter((r) => r.eventId === eventId)
+        .sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
     } catch (err) {
       console.warn(`Could not load registrations for event ${eventId}:`, err);
       return [];
@@ -3479,7 +2425,6 @@ export const api = {
     const nowMs = Date.now();
     const expiresAt = data.paymentExpiresAt || new Date(nowMs + timeoutMin * 60 * 1000).toISOString();
 
-    // Build QR payload containing all verifiable ticket data and event rules
     const qrPayload = JSON.stringify({
       id: regCode,
       evento: data.eventName || 'Evento IEADAM Petrópolis B',
@@ -3511,8 +2456,6 @@ export const api = {
       status: isPaid && initialPaymentStatus !== 'paid' ? 'pendente' : 'confirmada',
       qrCodeData: qrPayload,
       registeredAt: new Date().toISOString(),
-
-      // Paid Event tracking
       isPaidEvent: isPaid,
       ticketPrice: data.ticketPrice || 0,
       paymentType: data.paymentType || 'pix',
@@ -3524,83 +2467,38 @@ export const api = {
       paidConfirmedAt: initialPaymentStatus === 'paid' ? new Date().toISOString() : null,
     };
 
-    try {
-      await setDoc(doc(db, 'event_registrations', regId), removeUndefinedValues({
-        ...registration,
-        firestoreDocId: regId,
-      }));
-      return { ...registration, id: regCode };
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `event_registrations/${regId}`);
-      return registration;
-    }
+    await setDocById('event_registrations', regId, {
+      ...registration,
+      firestoreDocId: regId,
+    });
+    return { ...registration, id: regCode };
   },
 
-  /**
-   * Real-time listener for a single registration (used on guest payment & ticket page).
-   * Automatically fires when admin confirms payment ("Pagou") or rejects ("Não Pagou").
-   */
   subscribeSingleRegistration(registrationId: string, callback: (reg: EventRegistration | null) => void): () => void {
-    const q = query(collection(db, 'event_registrations'), where('id', '==', registrationId));
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        if (!snapshot.empty) {
-          const docData = snapshot.docs[0].data() as EventRegistration;
-          callback({
-            ...docData,
-            id: docData.id || snapshot.docs[0].id,
-          });
-        } else {
-          // Fallback to direct doc query
-          const directRef = doc(db, 'event_registrations', registrationId);
-          getDoc(directRef).then((snap) => {
-            if (snap.exists()) {
-              callback(snap.data() as EventRegistration);
-            } else {
-              callback(null);
-            }
-          }).catch(() => callback(null));
-        }
-      },
-      (error) => {
-        console.warn('Real-time single registration sync error:', error);
-      }
-    );
+    return subscribeCollection<EventRegistration & { firestoreDocId?: string }>('event_registrations', (items) => {
+      const match = items.find((r) => r.id === registrationId || r.firestoreDocId === registrationId);
+      callback(match || null);
+    });
+  },
+
+  async findRegistrationDocKey(idOrCode: string): Promise<{ docKey: string; record: EventRegistration } | null> {
+    const items = await listCol<EventRegistration & { firestoreDocId?: string }>('event_registrations');
+    const found = items.find((r) => r.id === idOrCode || r.firestoreDocId === idOrCode);
+    if (!found) return null;
+    return { docKey: found.firestoreDocId || found.id, record: found };
   },
 
   async updateEventRegistration(id: string, updates: Partial<EventRegistration>): Promise<void> {
-    try {
-      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-      if (!snap.empty) {
-        await updateDoc(snap.docs[0].ref, removeUndefinedValues(updates));
-      } else {
-        await updateDoc(doc(db, 'event_registrations', id), removeUndefinedValues(updates));
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
-    }
+    const found = await api.findRegistrationDocKey(id);
+    const key = found?.docKey || id;
+    await updateDocById('event_registrations', key, updates);
   },
 
   async getEventRegistrationByCode(code: string): Promise<EventRegistration | null> {
     const cleanCode = code.trim();
     if (!cleanCode) return null;
-    try {
-      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', cleanCode)));
-      if (!snap.empty) {
-        const d = snap.docs[0].data() as EventRegistration;
-        return { ...d, id: d.id || snap.docs[0].id };
-      }
-      const directSnap = await getDoc(doc(db, 'event_registrations', cleanCode));
-      if (directSnap.exists()) {
-        const d = directSnap.data() as EventRegistration;
-        return { ...d, id: d.id || directSnap.id };
-      }
-      return null;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, `event_registrations/${cleanCode}`);
-      return null;
-    }
+    const found = await api.findRegistrationDocKey(cleanCode);
+    return found?.record || null;
   },
 
   async markRegistrationCheckIn(
@@ -3616,104 +2514,70 @@ export const api = {
       checkedInByName: present ? adminUser?.name || 'Credenciamento' : null,
     };
 
-    try {
-      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-      let updatedRecord: EventRegistration | null = null;
-      if (!snap.empty) {
-        const docSnap = snap.docs[0];
-        await updateDoc(docSnap.ref, removeUndefinedValues(updates));
-        const current = docSnap.data() as EventRegistration;
-        updatedRecord = { ...current, ...updates, id: current.id || docSnap.id };
-      } else {
-        const docRef = doc(db, 'event_registrations', id);
-        const directSnap = await getDoc(docRef);
-        await updateDoc(docRef, removeUndefinedValues(updates));
-        if (directSnap.exists()) {
-          const current = directSnap.data() as EventRegistration;
-          updatedRecord = { ...current, ...updates, id: current.id || directSnap.id };
-        }
-      }
+    const found = await api.findRegistrationDocKey(id);
+    if (!found) return null;
+    await updateDocById('event_registrations', found.docKey, updates);
+    const updatedRecord: EventRegistration = { ...found.record, ...updates };
 
-      if (present && updatedRecord) {
-        await this.addActivity({
-          userId: adminUser?.uid || 'system',
-          userName: adminUser?.name || 'Credenciamento',
-          action: 'event_checkin',
-          actionLabel: 'Check-in QR no evento',
-          targetType: 'event_registration',
-          targetName: updatedRecord.fullName,
-          details: `Presença confirmada em "${updatedRecord.eventName}" (${updatedRecord.id})`,
-        }).catch(() => {});
-      }
-
-      return updatedRecord;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
-      return null;
+    if (present) {
+      await this.addActivity({
+        userId: adminUser?.uid || 'system',
+        userName: adminUser?.name || 'Credenciamento',
+        action: 'event_checkin',
+        actionLabel: 'Check-in QR no evento',
+        targetType: 'event_registration',
+        targetName: updatedRecord.fullName,
+        details: `Presença confirmada em "${updatedRecord.eventName}" (${updatedRecord.id})`,
+      }).catch(() => {});
     }
+
+    return updatedRecord;
   },
 
-  /**
-   * Real-time summary grouped strictly by eventId for showing each event's live Cashbox & stats
-   * on the events list without ever mixing lists.
-   */
   subscribeAllEventRegistrationsSummary(
     callback: (summaryMap: Record<string, EventRegistrationsSummary>) => void
   ): () => void {
-    const q = collection(db, 'event_registrations');
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        const map: Record<string, EventRegistrationsSummary> = {};
-        snapshot.docs.forEach((d) => {
-          const r = d.data() as EventRegistration;
-          if (!r.eventId) return;
-          if (!map[r.eventId]) {
-            map[r.eventId] = {
-              total: 0,
-              waiting: 0,
-              paid: 0,
-              rejected: 0,
-              cashboxBalance: 0,
-              pendingBalance: 0,
-              rejectedBalance: 0,
-            };
-          }
-          const s = map[r.eventId];
-          s.total += 1;
-          const price = Number(r.ticketPrice) || 0;
-          if (r.paymentStatus === 'paid') {
-            s.paid += 1;
-            s.cashboxBalance += price;
-          } else if (r.paymentStatus === 'waiting_confirmation') {
-            s.waiting += 1;
-            s.pendingBalance += price;
-          } else if (r.paymentStatus === 'rejected' || r.status === 'cancelada') {
-            s.rejected += 1;
-            s.rejectedBalance += price;
-          }
-        });
-        callback(map);
-      },
-      (error) => {
-        console.warn('Real-time event summary sync:', error);
-      }
-    );
+    return subscribeCollection<EventRegistration>('event_registrations', (items) => {
+      const map: Record<string, EventRegistrationsSummary> = {};
+      items.forEach((r) => {
+        if (!r.eventId) return;
+        if (!map[r.eventId]) {
+          map[r.eventId] = {
+            total: 0,
+            waiting: 0,
+            paid: 0,
+            rejected: 0,
+            cashboxBalance: 0,
+            pendingBalance: 0,
+            rejectedBalance: 0,
+          };
+        }
+        const s = map[r.eventId];
+        s.total += 1;
+        const price = Number(r.ticketPrice) || 0;
+        if (r.paymentStatus === 'paid') {
+          s.paid += 1;
+          s.cashboxBalance += price;
+        } else if (r.paymentStatus === 'waiting_confirmation') {
+          s.waiting += 1;
+          s.pendingBalance += price;
+        } else if (r.paymentStatus === 'rejected' || r.status === 'cancelada') {
+          s.rejected += 1;
+          s.rejectedBalance += price;
+        }
+      });
+      callback(map);
+    });
   },
 
-  /**
-   * Appends a cashbox movement (entrada or estorno) to the public_events/{eventId} document
-   */
   async appendEventCashboxMovement(
     eventId: string,
     movement: Omit<EventCashboxMovement, 'id' | 'timestamp'>
   ): Promise<void> {
     if (!eventId) return;
     try {
-      const eventRef = doc(db, 'public_events', eventId);
-      const eventSnap = await getDoc(eventRef);
-      if (!eventSnap.exists()) return;
-      const evData = eventSnap.data() as PublicRegistrationEvent;
+      const evData = await getDocById<PublicRegistrationEvent>('public_events', eventId);
+      if (!evData) return;
       const prevMovements = Array.isArray(evData.cashboxMovements) ? evData.cashboxMovements : [];
       const newEntry: EventCashboxMovement = {
         id: `cx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -3721,8 +2585,8 @@ export const api = {
         ...movement,
       };
       const updatedMovements = [newEntry, ...prevMovements].slice(0, 120);
-      await updateDoc(eventRef, {
-        cashboxMovements: removeUndefinedValues(updatedMovements),
+      await updateDocById('public_events', eventId, {
+        cashboxMovements: updatedMovements,
         updatedAt: new Date().toISOString(),
       });
     } catch (error) {
@@ -3730,218 +2594,166 @@ export const api = {
     }
   },
 
-  /**
-   * Confirms payment for an attendee ("Pagou") - increases event cashbox
-   */
   async confirmRegistrationPayment(
     id: string,
     adminUser?: { uid?: string; name?: string },
     fallbackPrice?: number
   ): Promise<{ wasAlreadyPaid: boolean; amount: number }> {
-    try {
-      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-      const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
-      const existing = !snap.empty
-        ? (snap.docs[0].data() as EventRegistration)
-        : ((await getDoc(targetRef)).data() as EventRegistration | undefined);
+    const found = await api.findRegistrationDocKey(id);
+    const key = found?.docKey || id;
+    const existing = found?.record;
 
-      const wasAlreadyPaid = existing?.paymentStatus === 'paid';
-      const effectivePrice = Number(existing?.ticketPrice) || Number(fallbackPrice) || 0;
+    const wasAlreadyPaid = existing?.paymentStatus === 'paid';
+    const effectivePrice = Number(existing?.ticketPrice) || Number(fallbackPrice) || 0;
 
-      await updateDoc(targetRef, {
-        paymentStatus: 'paid',
-        status: 'confirmada',
-        ticketPrice: effectivePrice,
-        paidConfirmedAt: new Date().toISOString(),
-        confirmedByAdminUid: adminUser?.uid || 'admin',
-        confirmedByAdminName: adminUser?.name || 'Administrador / Vendedor',
-        maxWaitExceeded: false,
-        rejectionReason: null,
+    await updateDocById('event_registrations', key, {
+      paymentStatus: 'paid',
+      status: 'confirmada',
+      ticketPrice: effectivePrice,
+      paidConfirmedAt: new Date().toISOString(),
+      confirmedByAdminUid: adminUser?.uid || 'admin',
+      confirmedByAdminName: adminUser?.name || 'Administrador / Vendedor',
+      maxWaitExceeded: false,
+      rejectionReason: null,
+    });
+
+    if (!wasAlreadyPaid && existing?.eventId) {
+      await api.appendEventCashboxMovement(existing.eventId, {
+        type: 'entrada',
+        amount: effectivePrice,
+        registrationId: existing.id || id,
+        attendeeName: existing.fullName || 'Participante',
+        paymentType: existing.paymentType,
+        reason: 'Pagamento confirmado',
+        adminName: adminUser?.name || 'Administrador / Vendedor',
       });
-
-      if (!wasAlreadyPaid && existing?.eventId) {
-        await api.appendEventCashboxMovement(existing.eventId, {
-          type: 'entrada',
-          amount: effectivePrice,
-          registrationId: existing.id || id,
-          attendeeName: existing.fullName || 'Participante',
-          paymentType: existing.paymentType,
-          reason: 'Pagamento confirmado',
-          adminName: adminUser?.name || 'Administrador / Vendedor',
-        });
-      }
-
-      return { wasAlreadyPaid, amount: effectivePrice };
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
-      return { wasAlreadyPaid: false, amount: 0 };
     }
+
+    return { wasAlreadyPaid, amount: effectivePrice };
   },
 
-  /**
-   * Rejects/cancels payment for an attendee ("Não Pagou") - decreases event cashbox if previously paid
-   */
   async rejectRegistrationPayment(
     id: string,
     reason?: string,
     adminUser?: { uid?: string; name?: string }
   ): Promise<{ wasPaid: boolean; amount: number }> {
-    try {
-      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-      const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
-      const existing = !snap.empty
-        ? (snap.docs[0].data() as EventRegistration)
-        : ((await getDoc(targetRef)).data() as EventRegistration | undefined);
+    const found = await api.findRegistrationDocKey(id);
+    const key = found?.docKey || id;
+    const existing = found?.record;
 
-      const wasPaid = existing?.paymentStatus === 'paid';
-      const amount = Number(existing?.ticketPrice) || 0;
+    const wasPaid = existing?.paymentStatus === 'paid';
+    const amount = Number(existing?.ticketPrice) || 0;
 
-      await updateDoc(targetRef, {
-        paymentStatus: 'rejected',
-        status: 'cancelada',
-        paidConfirmedAt: null,
-        rejectionReason: reason || 'Pagamento não identificado ou cancelado pelo administrador.',
+    await updateDocById('event_registrations', key, {
+      paymentStatus: 'rejected',
+      status: 'cancelada',
+      paidConfirmedAt: null,
+      rejectionReason: reason || 'Pagamento não identificado ou cancelado pelo administrador.',
+    });
+
+    if (wasPaid && existing?.eventId) {
+      await api.appendEventCashboxMovement(existing.eventId, {
+        type: 'estorno',
+        amount,
+        registrationId: existing.id || id,
+        attendeeName: existing.fullName || 'Participante',
+        paymentType: existing.paymentType,
+        reason: 'Pagamento cancelado (Não Pagou)',
+        adminName: adminUser?.name || 'Administrador / Vendedor',
       });
-
-      if (wasPaid && existing?.eventId) {
-        await api.appendEventCashboxMovement(existing.eventId, {
-          type: 'estorno',
-          amount,
-          registrationId: existing.id || id,
-          attendeeName: existing.fullName || 'Participante',
-          paymentType: existing.paymentType,
-          reason: 'Pagamento cancelado (Não Pagou)',
-          adminName: adminUser?.name || 'Administrador / Vendedor',
-        });
-      }
-
-      return { wasPaid, amount };
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
-      return { wasPaid: false, amount: 0 };
     }
+
+    return { wasPaid, amount };
   },
 
-  /**
-   * Extends wait time by +5 minutes for an attendee in the payment queue
-   */
   async extendRegistrationWaitTime(id: string, additionalMinutes: number = 5): Promise<void> {
-    try {
-      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-      const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
-      const existing = !snap.empty ? (snap.docs[0].data() as EventRegistration) : null;
+    const found = await api.findRegistrationDocKey(id);
+    const key = found?.docKey || id;
+    const existing = found?.record;
 
-      const currentExpires = existing?.paymentExpiresAt ? new Date(existing.paymentExpiresAt).getTime() : Date.now();
-      const baseTime = Math.max(Date.now(), currentExpires);
-      const newExpires = new Date(baseTime + additionalMinutes * 60 * 1000).toISOString();
-      const prevExtended = existing?.extendedMinutes || 0;
+    const currentExpires = existing?.paymentExpiresAt ? new Date(existing.paymentExpiresAt).getTime() : Date.now();
+    const baseTime = Math.max(Date.now(), currentExpires);
+    const newExpires = new Date(baseTime + additionalMinutes * 60 * 1000).toISOString();
+    const prevExtended = existing?.extendedMinutes || 0;
 
-      await updateDoc(targetRef, {
-        paymentExpiresAt: newExpires,
-        extendedMinutes: prevExtended + additionalMinutes,
-        maxWaitExceeded: false,
-        paymentStatus: 'waiting_confirmation',
-        status: 'pendente',
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
-    }
+    await updateDocById('event_registrations', key, {
+      paymentExpiresAt: newExpires,
+      extendedMinutes: prevExtended + additionalMinutes,
+      maxWaitExceeded: false,
+      paymentStatus: 'waiting_confirmation',
+      status: 'pendente',
+    });
   },
 
-  /**
-   * Resets registration back to waiting confirmation status - decreases event cashbox if previously paid
-   */
   async resetRegistrationToWaiting(
     id: string,
     minutes: number = 10,
     adminUser?: { uid?: string; name?: string }
   ): Promise<{ wasPaid: boolean; amount: number }> {
-    try {
-      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-      const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
-      const existing = !snap.empty
-        ? (snap.docs[0].data() as EventRegistration)
-        : ((await getDoc(targetRef)).data() as EventRegistration | undefined);
+    const found = await api.findRegistrationDocKey(id);
+    const key = found?.docKey || id;
+    const existing = found?.record;
 
-      const wasPaid = existing?.paymentStatus === 'paid';
-      const amount = Number(existing?.ticketPrice) || 0;
-      const newExpires = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+    const wasPaid = existing?.paymentStatus === 'paid';
+    const amount = Number(existing?.ticketPrice) || 0;
+    const newExpires = new Date(Date.now() + minutes * 60 * 1000).toISOString();
 
-      await updateDoc(targetRef, {
-        paymentStatus: 'waiting_confirmation',
-        status: 'pendente',
-        paidConfirmedAt: null,
-        paymentExpiresAt: newExpires,
-        maxWaitExceeded: false,
+    await updateDocById('event_registrations', key, {
+      paymentStatus: 'waiting_confirmation',
+      status: 'pendente',
+      paidConfirmedAt: null,
+      paymentExpiresAt: newExpires,
+      maxWaitExceeded: false,
+    });
+
+    if (wasPaid && existing?.eventId) {
+      await api.appendEventCashboxMovement(existing.eventId, {
+        type: 'estorno',
+        amount,
+        registrationId: existing.id || id,
+        attendeeName: existing.fullName || 'Participante',
+        paymentType: existing.paymentType,
+        reason: 'Confirmação revertida para a fila',
+        adminName: adminUser?.name || 'Administrador / Vendedor',
       });
-
-      if (wasPaid && existing?.eventId) {
-        await api.appendEventCashboxMovement(existing.eventId, {
-          type: 'estorno',
-          amount,
-          registrationId: existing.id || id,
-          attendeeName: existing.fullName || 'Participante',
-          paymentType: existing.paymentType,
-          reason: 'Confirmação revertida para a fila',
-          adminName: adminUser?.name || 'Administrador / Vendedor',
-        });
-      }
-
-      return { wasPaid, amount };
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `event_registrations/${id}`);
-      return { wasPaid: false, amount: 0 };
     }
+
+    return { wasPaid, amount };
   },
 
   async deleteEventRegistration(
     id: string,
     adminUser?: { uid?: string; name?: string }
   ): Promise<{ wasPaid: boolean; amount: number }> {
-    try {
-      const snap = await getDocs(query(collection(db, 'event_registrations'), where('id', '==', id)));
-      const targetRef = !snap.empty ? snap.docs[0].ref : doc(db, 'event_registrations', id);
-      const existing = !snap.empty
-        ? (snap.docs[0].data() as EventRegistration)
-        : ((await getDoc(targetRef)).data() as EventRegistration | undefined);
+    const found = await api.findRegistrationDocKey(id);
+    const key = found?.docKey || id;
+    const existing = found?.record;
 
-      const wasPaid = existing?.paymentStatus === 'paid';
-      const amount = Number(existing?.ticketPrice) || 0;
+    const wasPaid = existing?.paymentStatus === 'paid';
+    const amount = Number(existing?.ticketPrice) || 0;
 
-      if (!snap.empty) {
-        await deleteDoc(snap.docs[0].ref);
-      } else {
-        await deleteDoc(doc(db, 'event_registrations', id));
-      }
+    await deleteDocById('event_registrations', key);
 
-      if (wasPaid && existing?.eventId) {
-        await api.appendEventCashboxMovement(existing.eventId, {
-          type: 'estorno',
-          amount,
-          registrationId: existing.id || id,
-          attendeeName: existing.fullName || 'Participante',
-          paymentType: existing.paymentType,
-          reason: 'Inscrição paga excluída',
-          adminName: adminUser?.name || 'Administrador / Vendedor',
-        });
-      }
-
-      return { wasPaid, amount };
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `event_registrations/${id}`);
-      return { wasPaid: false, amount: 0 };
+    if (wasPaid && existing?.eventId) {
+      await api.appendEventCashboxMovement(existing.eventId, {
+        type: 'estorno',
+        amount,
+        registrationId: existing.id || id,
+        attendeeName: existing.fullName || 'Participante',
+        paymentType: existing.paymentType,
+        reason: 'Inscrição paga excluída',
+        adminName: adminUser?.name || 'Administrador / Vendedor',
+      });
     }
+
+    return { wasPaid, amount };
   },
 
   async uploadEventBanner(file: File): Promise<string> {
     return api.uploadChurchImage(file, 'banner');
   },
 
-  /**
-   * Upload image for church portal, banners, logos, pastor photos, leadership, announcements
-   */
   async uploadChurchImage(file: File, prefix = 'church'): Promise<string> {
-    // 1. Try server API upload
     try {
       const res = await new Promise<{ downloadUrl: string }>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -3967,7 +2779,6 @@ export const api = {
       console.warn('Image upload via /api/upload fallback to canvas/FileReader:', err);
     }
 
-    // 2. High quality compressed canvas fallback for direct storage in Firestore / storage
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = () => {
@@ -4000,196 +2811,44 @@ export const api = {
     });
   },
 
-  // No automatic seeding - team members create and manage their own tasks and schedules
   async seedInitialTeamScheduleIfEmpty(): Promise<void> {
-    // Intentionally empty: real team members create and manage their own work and schedules
+    // Intentionally empty
   },
 
   // ==========================================
   // SISTEMA DE CHAMADA, PRESENÇA & FALTAS DE MEMBROS
   // ==========================================
   async ensureInitialAttendanceRoster(forceRestore = false): Promise<void> {
-    try {
-      const seedRef = doc(db, 'settings', 'attendance_roster_seeded');
-      if (!forceRestore) {
-        const seedSnap = await getDoc(seedRef);
-        if (seedSnap.exists() && seedSnap.data()?.seeded) {
-          return;
-        }
-        const existingDepts = await getDocs(collection(db, 'attendance_departments'));
-        if (!existingDepts.empty) {
-          await setDoc(seedRef, { seeded: true, updatedAt: new Date().toISOString() }, { merge: true });
-          return;
-        }
-      }
-
-      const effective = api.getEffectiveUser();
-      const now = new Date().toISOString();
-
-      const initialRoster: {
-        id: string;
-        name: string;
-        kind: AttendanceDepartmentKind;
-        order: number;
-        members: string[];
-      }[] = [
-        {
-          id: 'dept_pastores',
-          name: 'Pastores',
-          kind: 'ministerio',
-          order: 1,
-          members: ['Pr. Sobreiro', 'Pra. Fatima'],
-        },
-        {
-          id: 'dept_diaconos',
-          name: 'Diáconos',
-          kind: 'ministerio',
-          order: 2,
-          members: [
-            'Dc. Benedito',
-            'Dca. Katia',
-            'Dc. Charles',
-            'Dca. Ivone',
-            'Dca. Líder Sebastiana',
-            'Dca. Líder Kélia',
-            'Dca. Líder Cícera',
-            'Dc. Líder Erick',
-            'Dca. Líder Ingrid',
-          ],
-        },
-        {
-          id: 'dept_lideres',
-          name: 'Líderes',
-          kind: 'equipe',
-          order: 3,
-          members: [
-            'Líder Dulce',
-            'Líder Lene',
-            'Líder Jane',
-            'Líder Francirema',
-            'Líder Keylah',
-            'Líder Felipe',
-            'Líder Natã',
-            'Líder Elines',
-            'Líder Emilly',
-            'Líder Isabele Cristina',
-            'Líder Rayssa',
-            'Líder Eldrinei',
-            'Líder Eduardo Kyrk',
-            'Líder Hudson',
-          ],
-        },
-        {
-          id: 'dept_louvor',
-          name: 'Membros do louvor',
-          kind: 'ministerio',
-          order: 4,
-          members: [
-            'Diego',
-            'Hildete',
-            'Stelio',
-            'Micilene',
-            'Gabriele',
-            'João Felipe',
-            'W. Felipe',
-            'Israel',
-            'Angélica',
-            'José',
-            'Vinicius',
-            'Eduardo Mateus',
-            'Djanira',
-          ],
-        },
-      ];
-
-      const batch = writeBatch(db);
-      for (const group of initialRoster) {
-        const deptDoc: AttendanceDepartment = {
-          id: group.id,
-          name: group.name,
-          kind: group.kind,
-          order: group.order,
-          createdByUid: effective.uid,
-          createdByName: effective.displayName,
-          createdAt: now,
-          updatedAt: now,
-        };
-        batch.set(doc(db, 'attendance_departments', group.id), deptDoc);
-
-        group.members.forEach((memberName, idx) => {
-          const memberId = `mem_${group.id}_${idx + 1}`;
-          const memberCode = `PTB-MEM-${group.id.replace('dept_', '').toUpperCase()}-${String(idx + 1).padStart(2, '0')}`;
-          const memberDoc: AttendanceMember = {
-            id: memberId,
-            departmentId: group.id,
-            name: memberName,
-            memberCode,
-            roleTitle:
-              group.id === 'dept_pastores'
-                ? 'Corpo Pastoral'
-                : group.id === 'dept_diaconos'
-                ? 'Corpo Diaconal'
-                : group.id === 'dept_lideres'
-                ? 'Liderança'
-                : 'Ministério de Louvor',
-            congregation: 'IEADAM Petrópolis B',
-            area: 'Sede / Geral',
-            createdByUid: effective.uid,
-            createdByName: effective.displayName,
-            createdAt: now,
-            updatedAt: now,
-          };
-          batch.set(doc(db, 'attendance_members', memberId), memberDoc);
-        });
-      }
-
-      batch.set(seedRef, { seeded: true, updatedAt: now }, { merge: true });
-      await batch.commit();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'attendance_departments');
-    }
+    await apiFetch('/api/attendance/seed', {
+      method: 'POST',
+      body: JSON.stringify({ forceRestore }),
+    });
+    notifyLocalSubscribers(['attendance_departments', 'attendance_members', 'settings']);
   },
 
   subscribeAttendanceDepartments(callback: (departments: AttendanceDepartment[]) => void) {
-    return onSnapshot(
-      collection(db, 'attendance_departments'),
-      (snap) => {
-        const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as AttendanceDepartment));
-        list.sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name, 'pt-BR'));
-        callback(list);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'attendance_departments');
-      }
-    );
+    return subscribeCollection<AttendanceDepartment>('attendance_departments', (list) => {
+      const sorted = [...list].sort(
+        (a, b) => (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name, 'pt-BR')
+      );
+      callback(sorted);
+    });
   },
 
   subscribeAttendanceMembers(callback: (members: AttendanceMember[]) => void) {
-    return onSnapshot(
-      collection(db, 'attendance_members'),
-      (snap) => {
-        const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as AttendanceMember));
-        list.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-        callback(list);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'attendance_members');
-      }
-    );
+    return subscribeCollection<AttendanceMember>('attendance_members', (list) => {
+      const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+      callback(sorted);
+    });
   },
 
   subscribeAttendanceCalls(callback: (calls: AttendanceCall[]) => void) {
-    return onSnapshot(
-      collection(db, 'attendance_calls'),
-      (snap) => {
-        const list = snap.docs.map((d) => ({ ...d.data(), id: d.id } as AttendanceCall));
-        list.sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt.localeCompare(a.updatedAt));
-        callback(list);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'attendance_calls');
-      }
-    );
+    return subscribeCollection<AttendanceCall>('attendance_calls', (list) => {
+      const sorted = [...list].sort(
+        (a, b) => b.date.localeCompare(a.date) || b.updatedAt.localeCompare(a.updatedAt)
+      );
+      callback(sorted);
+    });
   },
 
   async createAttendanceDepartment(
@@ -4211,21 +2870,17 @@ export const api = {
       updatedAt: now,
     };
 
-    try {
-      await setDoc(doc(db, 'attendance_departments', id), removeUndefinedValues(dept));
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: 'create_attendance_department',
-        actionLabel: 'Criou Departamento/Equipe na Chamada',
-        targetType: 'attendance',
-        targetName: dept.name,
-        details: `Tipo: ${kind}`,
-      });
-      return dept;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `attendance_departments/${id}`);
-    }
+    await setDocById('attendance_departments', id, dept);
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'create_attendance_department',
+      actionLabel: 'Criou Departamento/Equipe na Chamada',
+      targetType: 'attendance',
+      targetName: dept.name,
+      details: `Tipo: ${kind}`,
+    });
+    return dept;
   },
 
   async updateAttendanceDepartment(
@@ -4234,53 +2889,42 @@ export const api = {
   ): Promise<void> {
     const effective = api.getEffectiveUser();
     const now = new Date().toISOString();
-    try {
-      await updateDoc(
-        doc(db, 'attendance_departments', departmentId),
-        removeUndefinedValues({
-          name: updates.name.trim(),
-          kind: updates.kind,
-          ...(updates.order !== undefined ? { order: updates.order } : {}),
-          updatedAt: now,
-        })
-      );
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: 'update_attendance_department',
-        actionLabel: 'Editou Categoria/Equipe na Chamada',
-        targetType: 'attendance',
-        targetName: updates.name.trim(),
-        details: `Tipo: ${updates.kind}`,
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `attendance_departments/${departmentId}`);
-    }
+    await updateDocById('attendance_departments', departmentId, {
+      name: updates.name.trim(),
+      kind: updates.kind,
+      ...(updates.order !== undefined ? { order: updates.order } : {}),
+      updatedAt: now,
+    });
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'update_attendance_department',
+      actionLabel: 'Editou Categoria/Equipe na Chamada',
+      targetType: 'attendance',
+      targetName: updates.name.trim(),
+      details: `Tipo: ${updates.kind}`,
+    });
   },
 
   async deleteAttendanceDepartment(departmentId: string, departmentName?: string): Promise<void> {
-    try {
-      const membersSnap = await getDocs(
-        query(collection(db, 'attendance_members'), where('departmentId', '==', departmentId))
-      );
-      const batch = writeBatch(db);
-      membersSnap.docs.forEach((m) => batch.delete(m.ref));
-      batch.delete(doc(db, 'attendance_departments', departmentId));
-      await batch.commit();
+    const members = await listCol<AttendanceMember>('attendance_members');
+    const deptMembers = members.filter((m) => m.departmentId === departmentId);
 
-      const effective = api.getEffectiveUser();
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: 'delete_attendance_department',
-        actionLabel: 'Excluiu Departamento/Equipe da Chamada',
-        targetType: 'attendance',
-        targetName: departmentName || departmentId,
-        details: `${membersSnap.size} membro(s) removidos`,
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `attendance_departments/${departmentId}`);
-    }
+    await batchWrite([
+      ...deptMembers.map((m) => ({ type: 'delete' as const, col: 'attendance_members', id: m.id })),
+      { type: 'delete', col: 'attendance_departments', id: departmentId },
+    ]);
+
+    const effective = api.getEffectiveUser();
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'delete_attendance_department',
+      actionLabel: 'Excluiu Departamento/Equipe da Chamada',
+      targetType: 'attendance',
+      targetName: departmentName || departmentId,
+      details: `${deptMembers.length} membro(s) removidos`,
+    });
   },
 
   async createAttendanceMember(
@@ -4317,21 +2961,17 @@ export const api = {
       updatedAt: now,
     };
 
-    try {
-      await setDoc(doc(db, 'attendance_members', id), removeUndefinedValues(member));
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: 'create_attendance_member',
-        actionLabel: 'Adicionou Membro na Chamada',
-        targetType: 'attendance',
-        targetName: member.name,
-        details: `Código: ${memberCode}`,
-      });
-      return member;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `attendance_members/${id}`);
-    }
+    await setDocById('attendance_members', id, member);
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'create_attendance_member',
+      actionLabel: 'Adicionou Membro na Chamada',
+      targetType: 'attendance',
+      targetName: member.name,
+      details: `Código: ${memberCode}`,
+    });
+    return member;
   },
 
   async updateAttendanceMember(
@@ -4349,51 +2989,40 @@ export const api = {
   ): Promise<void> {
     const effective = api.getEffectiveUser();
     const now = new Date().toISOString();
-    try {
-      await updateDoc(
-        doc(db, 'attendance_members', memberId),
-        removeUndefinedValues({
-          name: updates.name.trim(),
-          departmentId: updates.departmentId,
-          roleTitle: updates.roleTitle?.trim() || '',
-          phone: updates.phone?.trim() || '',
-          email: updates.email?.trim() || '',
-          congregation: updates.congregation?.trim() || 'IEADAM Petrópolis B',
-          area: updates.area?.trim() || '',
-          notes: updates.notes?.trim() || '',
-          updatedAt: now,
-        })
-      );
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: 'update_attendance_member',
-        actionLabel: 'Editou Membro na Chamada',
-        targetType: 'attendance',
-        targetName: updates.name.trim(),
-        details: `Categoria ID: ${updates.departmentId}`,
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `attendance_members/${memberId}`);
-    }
+    await updateDocById('attendance_members', memberId, {
+      name: updates.name.trim(),
+      departmentId: updates.departmentId,
+      roleTitle: updates.roleTitle?.trim() || '',
+      phone: updates.phone?.trim() || '',
+      email: updates.email?.trim() || '',
+      congregation: updates.congregation?.trim() || 'IEADAM Petrópolis B',
+      area: updates.area?.trim() || '',
+      notes: updates.notes?.trim() || '',
+      updatedAt: now,
+    });
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'update_attendance_member',
+      actionLabel: 'Editou Membro na Chamada',
+      targetType: 'attendance',
+      targetName: updates.name.trim(),
+      details: `Categoria ID: ${updates.departmentId}`,
+    });
   },
 
   async deleteAttendanceMember(memberId: string, memberName?: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'attendance_members', memberId));
-      const effective = api.getEffectiveUser();
-      await api.addActivity({
-        userId: effective.uid,
-        userName: effective.displayName,
-        action: 'delete_attendance_member',
-        actionLabel: 'Excluiu Membro da Chamada',
-        targetType: 'attendance',
-        targetName: memberName || memberId,
-        details: 'Membro removido da lista de chamada',
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `attendance_members/${memberId}`);
-    }
+    await deleteDocById('attendance_members', memberId);
+    const effective = api.getEffectiveUser();
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'delete_attendance_member',
+      actionLabel: 'Excluiu Membro da Chamada',
+      targetType: 'attendance',
+      targetName: memberName || memberId,
+      details: 'Membro removido da lista de chamada',
+    });
   },
 
   async claimAttendanceCall(
@@ -4401,52 +3030,17 @@ export const api = {
     operator?: { uid: string; name: string; email?: string }
   ): Promise<AttendanceCall> {
     const effective = api.getEffectiveUser();
-    const opUid = operator?.uid || effective.uid;
-    const opName = operator?.name || effective.displayName;
-    const opEmail = operator?.email || effective.email || '';
-    const now = new Date().toISOString();
-    const callRef = doc(db, 'attendance_calls', callBase.id);
-
-    try {
-      const result = await runTransaction(db, async (tx) => {
-        const snap = await tx.get(callRef);
-        const existing = snap.exists() ? (snap.data() as AttendanceCall) : null;
-
-        if (existing?.activeOperatorUid && existing.activeOperatorUid !== opUid) {
-          throw new Error(
-            `ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`
-          );
-        }
-
-        const nextPayload: AttendanceCall = {
-          ...(existing || callBase),
-          id: callBase.id,
-          activeOperatorUid: opUid,
-          activeOperatorName: opName,
-          activeOperatorEmail: opEmail,
-          activeOperatorStartedAt:
-            existing?.activeOperatorUid === opUid && existing.activeOperatorStartedAt
-              ? existing.activeOperatorStartedAt
-              : now,
-          callStatus: 'em_andamento',
-          updatedByUid: opUid,
-          updatedByName: opName,
-          updatedAt: now,
-          createdAt: existing?.createdAt || callBase.createdAt || now,
-          createdByUid: existing?.createdByUid || callBase.createdByUid || opUid,
-          createdByName: existing?.createdByName || callBase.createdByName || opName,
-        };
-
-        tx.set(callRef, removeUndefinedValues(nextPayload));
-        return nextPayload;
-      });
-      return result;
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith('ATTENDANCE_LOCKED:')) {
-        throw error;
-      }
-      handleFirestoreError(error, OperationType.WRITE, `attendance_calls/${callBase.id}`);
-    }
+    const op = {
+      uid: operator?.uid || effective.uid,
+      name: operator?.name || effective.displayName,
+      email: operator?.email || effective.email || '',
+    };
+    const res = await apiFetch<{ call: AttendanceCall }>('/api/attendance/claim', {
+      method: 'POST',
+      body: JSON.stringify({ callBase, operator: op }),
+    });
+    notifyLocalSubscribers(['attendance_calls']);
+    return res.call;
   },
 
   async releaseAttendanceCall(
@@ -4455,45 +3049,16 @@ export const api = {
     markFinished = false
   ): Promise<AttendanceCall | null> {
     const effective = api.getEffectiveUser();
-    const opUid = operator?.uid || effective.uid;
-    const opName = operator?.name || effective.displayName;
-    const now = new Date().toISOString();
-    const callRef = doc(db, 'attendance_calls', callId);
-
-    try {
-      const result = await runTransaction(db, async (tx) => {
-        const snap = await tx.get(callRef);
-        if (!snap.exists()) return null;
-        const existing = snap.data() as AttendanceCall;
-
-        if (existing.activeOperatorUid && existing.activeOperatorUid !== opUid) {
-          throw new Error(
-            `ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`
-          );
-        }
-
-        const nextPayload: AttendanceCall = {
-          ...existing,
-          id: callId,
-          activeOperatorUid: null,
-          activeOperatorName: null,
-          activeOperatorEmail: null,
-          activeOperatorStartedAt: null,
-          callStatus: markFinished ? 'finalizada' : 'aberta',
-          updatedByUid: opUid,
-          updatedByName: opName,
-          updatedAt: now,
-        };
-        tx.set(callRef, removeUndefinedValues(nextPayload));
-        return nextPayload;
-      });
-      return result;
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith('ATTENDANCE_LOCKED:')) {
-        throw error;
-      }
-      handleFirestoreError(error, OperationType.UPDATE, `attendance_calls/${callId}`);
-    }
+    const op = {
+      uid: operator?.uid || effective.uid,
+      name: operator?.name || effective.displayName,
+    };
+    const res = await apiFetch<{ call: AttendanceCall | null }>('/api/attendance/release', {
+      method: 'POST',
+      body: JSON.stringify({ callId, operator: op, markFinished }),
+    });
+    notifyLocalSubscribers(['attendance_calls']);
+    return res.call;
   },
 
   async saveAttendanceCall(
@@ -4501,74 +3066,17 @@ export const api = {
     options?: { autoClaimIfFree?: boolean; operator?: { uid: string; name: string; email?: string } }
   ): Promise<AttendanceCall> {
     const effective = api.getEffectiveUser();
-    const opUid = options?.operator?.uid || effective.uid;
-    const opName = options?.operator?.name || effective.displayName;
-    const opEmail = options?.operator?.email || effective.email || '';
-    const now = new Date().toISOString();
-    const callRef = doc(db, 'attendance_calls', call.id);
-
-    try {
-      const result = await runTransaction(db, async (tx) => {
-        const snap = await tx.get(callRef);
-        const existing = snap.exists() ? (snap.data() as AttendanceCall) : null;
-
-        if (existing?.activeOperatorUid && existing.activeOperatorUid !== opUid) {
-          throw new Error(
-            `ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`
-          );
-        }
-
-        const shouldClaim =
-          options?.autoClaimIfFree !== false &&
-          (!existing || !existing.activeOperatorUid || existing.activeOperatorUid === opUid);
-
-        const payload: AttendanceCall = {
-          ...call,
-          activeOperatorUid:
-            call.activeOperatorUid !== undefined
-              ? call.activeOperatorUid
-              : shouldClaim
-              ? opUid
-              : existing?.activeOperatorUid ?? null,
-          activeOperatorName:
-            call.activeOperatorName !== undefined
-              ? call.activeOperatorName
-              : shouldClaim
-              ? opName
-              : existing?.activeOperatorName ?? null,
-          activeOperatorEmail:
-            call.activeOperatorEmail !== undefined
-              ? call.activeOperatorEmail
-              : shouldClaim
-              ? opEmail
-              : existing?.activeOperatorEmail ?? null,
-          activeOperatorStartedAt:
-            call.activeOperatorStartedAt !== undefined
-              ? call.activeOperatorStartedAt
-              : shouldClaim
-              ? existing?.activeOperatorStartedAt || now
-              : existing?.activeOperatorStartedAt ?? null,
-          callStatus:
-            call.callStatus ||
-            (shouldClaim ? 'em_andamento' : existing?.callStatus || 'aberta'),
-          updatedByUid: opUid,
-          updatedByName: opName,
-          updatedAt: now,
-          createdAt: existing?.createdAt || call.createdAt || now,
-          createdByUid: existing?.createdByUid || call.createdByUid || opUid,
-          createdByName: existing?.createdByName || call.createdByName || opName,
-        };
-
-        tx.set(callRef, removeUndefinedValues(payload));
-        return payload;
-      });
-      return result;
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith('ATTENDANCE_LOCKED:')) {
-        throw error;
-      }
-      handleFirestoreError(error, OperationType.WRITE, `attendance_calls/${call.id}`);
-    }
+    const op = {
+      uid: options?.operator?.uid || effective.uid,
+      name: options?.operator?.name || effective.displayName,
+      email: options?.operator?.email || effective.email || '',
+    };
+    const res = await apiFetch<{ call: AttendanceCall }>('/api/attendance/save', {
+      method: 'POST',
+      body: JSON.stringify({ call, options, operator: op }),
+    });
+    notifyLocalSubscribers(['attendance_calls']);
+    return res.call;
   },
 
   async markMemberPresentByQr(
@@ -4582,108 +3090,36 @@ export const api = {
     entry: AttendanceEntry;
   }> {
     const effective = api.getEffectiveUser();
-    const opUid = operator?.uid || effective.uid;
-    const opName = operator?.name || effective.displayName;
-    const opEmail = operator?.email || effective.email || '';
-    const now = new Date().toISOString();
-    const callRef = doc(db, 'attendance_calls', callBase.id);
+    const op = {
+      uid: operator?.uid || effective.uid,
+      name: operator?.name || effective.displayName,
+      email: operator?.email || effective.email || '',
+    };
+    const res = await apiFetch<{
+      outcome: 'checked_in_now' | 'already_present';
+      call: AttendanceCall;
+      entry: AttendanceEntry;
+    }>('/api/attendance/qr-checkin', {
+      method: 'POST',
+      body: JSON.stringify({ callBase, member, department, operator: op }),
+    });
 
-    try {
-      const txResult = await runTransaction(db, async (tx) => {
-        const snap = await tx.get(callRef);
-        const existing = snap.exists() ? (snap.data() as AttendanceCall) : null;
-
-        if (existing?.activeOperatorUid && existing.activeOperatorUid !== opUid) {
-          throw new Error(
-            `ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`
-          );
-        }
-
-        const baseRecords = existing?.records || callBase.records || {};
-        const existingEntry = baseRecords[member.id];
-        if (existingEntry?.status === 'presente') {
-          return {
-            outcome: 'already_present' as const,
-            call: existing || callBase,
-            entry: existingEntry,
-          };
-        }
-
-        const entry: AttendanceEntry = {
-          memberId: member.id,
-          memberName: member.name,
-          departmentId: member.departmentId,
-          departmentName: department?.name || existingEntry?.departmentName || 'Geral',
-          status: 'presente',
-          markedByUid: opUid,
-          markedByName: opName,
-          markedAt: now,
-        };
-
-        const baseIncluded = existing?.includedMemberIds || callBase.includedMemberIds || [];
-        const nextIncluded = baseIncluded.includes(member.id)
-          ? baseIncluded
-          : [...baseIncluded, member.id];
-
-        const nextCall: AttendanceCall = {
-          ...(existing || callBase),
-          id: callBase.id,
-          includedMemberIds: nextIncluded,
-          records: {
-            ...baseRecords,
-            [member.id]: entry,
-          },
-          activeOperatorUid: opUid,
-          activeOperatorName: opName,
-          activeOperatorEmail: opEmail,
-          activeOperatorStartedAt:
-            existing?.activeOperatorUid === opUid && existing.activeOperatorStartedAt
-              ? existing.activeOperatorStartedAt
-              : now,
-          callStatus: 'em_andamento',
-          updatedByUid: opUid,
-          updatedByName: opName,
-          updatedAt: now,
-          createdAt: existing?.createdAt || callBase.createdAt || now,
-          createdByUid: existing?.createdByUid || callBase.createdByUid || opUid,
-          createdByName: existing?.createdByName || callBase.createdByName || opName,
-        };
-
-        tx.set(callRef, removeUndefinedValues(nextCall));
-        return {
-          outcome: 'checked_in_now' as const,
-          call: nextCall,
-          entry,
-        };
+    if (res.outcome === 'checked_in_now') {
+      notifyLocalSubscribers(['attendance_calls']);
+      await api.addActivity({
+        userId: op.uid,
+        userName: op.name,
+        action: 'attendance_qr_checkin',
+        actionLabel: 'Presença de Membro via QR Code',
+        targetType: 'attendance',
+        targetName: member.name,
+        details: `Chamada: ${callBase.title} (${callBase.date})`,
       });
-
-      if (txResult.outcome === 'checked_in_now') {
-        await api.addActivity({
-          userId: opUid,
-          userName: opName,
-          action: 'attendance_qr_checkin',
-          actionLabel: 'Presença de Membro via QR Code',
-          targetType: 'attendance',
-          targetName: member.name,
-          details: `Chamada: ${callBase.title} (${callBase.date})`,
-        });
-      }
-
-      return txResult;
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith('ATTENDANCE_LOCKED:')) {
-        throw error;
-      }
-      handleFirestoreError(error, OperationType.WRITE, `attendance_calls/${callBase.id}`);
     }
+    return res;
   },
 
   async deleteAttendanceCall(callId: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, 'attendance_calls', callId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `attendance_calls/${callId}`);
-    }
+    await deleteDocById('attendance_calls', callId);
   },
 };
-

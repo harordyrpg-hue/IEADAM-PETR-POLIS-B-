@@ -146,7 +146,7 @@ const MainLayout: React.FC = () => {
             PTB
           </div>
           <h2 className="text-base font-semibold text-neutral-200">PT-B Mídia</h2>
-          <p className="text-xs text-neutral-400">Conectando aos serviços oficiais do Firebase...</p>
+          <p className="text-xs text-neutral-400">Conectando ao servidor PT-B Mídia...</p>
         </div>
       </div>
     );

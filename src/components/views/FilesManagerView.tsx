@@ -132,8 +132,8 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
       setNewFolderName('');
       setIsNewFolderOpen(false);
       await refreshFolders();
-    } catch {
-      notify('Erro ao criar pasta', 'error');
+    } catch (err: any) {
+      notify(err?.message ? `Erro ao criar pasta: ${err.message}` : 'Erro ao criar pasta', 'error');
     }
   };
 
@@ -146,8 +146,8 @@ export const FilesManagerView: React.FC<FilesManagerViewProps> = ({
       notify('Pasta renomeada com sucesso!', 'success');
       setEditingFolder(null);
       await refreshFolders();
-    } catch {
-      notify('Erro ao renomear pasta', 'error');
+    } catch (err: any) {
+      notify(err?.message ? `Erro ao renomear pasta: ${err.message}` : 'Erro ao renomear pasta', 'error');
     }
   };
 
