@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
+  initializeFirestore,
   doc,
   getDocFromServer,
   Firestore,
@@ -20,9 +21,17 @@ export const FIREBASE_AUTH_DOMAIN = firebaseConfig.authDomain;
 
 const app: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-export const db: Firestore = FIRESTORE_DATABASE_ID
-  ? getFirestore(app, FIRESTORE_DATABASE_ID)
-  : getFirestore(app);
+function createFirestoreInstance(): Firestore {
+  try {
+    return FIRESTORE_DATABASE_ID
+      ? initializeFirestore(app, { experimentalAutoDetectLongPolling: true }, FIRESTORE_DATABASE_ID)
+      : initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+  } catch {
+    return FIRESTORE_DATABASE_ID ? getFirestore(app, FIRESTORE_DATABASE_ID) : getFirestore(app);
+  }
+}
+
+export const db: Firestore = createFirestoreInstance();
 
 export const auth: Auth = getAuth(app);
 export const storage: FirebaseStorage = getStorage(app);

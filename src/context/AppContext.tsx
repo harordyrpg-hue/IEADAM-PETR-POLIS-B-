@@ -514,7 +514,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const completeFirstLoginPassword = async (newPassword: string): Promise<User> => {
-    const updated = await api.completeFirstLoginPassword(newPassword);
+    const updated = await api.completeFirstLoginPassword(newPassword, user || undefined);
     setUser(updated);
     notify('Senha definitiva cadastrada! Use esta senha nos próximos acessos.', 'success');
     return updated;

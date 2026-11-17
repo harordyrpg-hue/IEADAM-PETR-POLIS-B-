@@ -1,7 +1,17 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
+import { initializeApp as initializeFbApp, getApps as getFbApps } from 'firebase/app';
+import {
+  getFirestore as getFbFirestore,
+  collection as fbCollection,
+  getDocs as fbGetDocs,
+  doc as fbDoc,
+  setDoc as fbSetDoc,
+  deleteField as fbDeleteField,
+} from 'firebase/firestore';
 import {
   localStore,
   ALLOWED_COLLECTIONS,
@@ -12,6 +22,55 @@ import {
 } from './server/store.js';
 
 dotenv.config();
+
+let serverFirestoreDb: ReturnType<typeof getFbFirestore> | null = null;
+function getServerFirestore() {
+  if (serverFirestoreDb) return serverFirestoreDb;
+  const cfgPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  const fbApp =
+    getFbApps().find((a) => a.name === 'server-firestore') ||
+    initializeFbApp(cfg, 'server-firestore');
+  serverFirestoreDb = cfg.firestoreDatabaseId
+    ? getFbFirestore(fbApp, cfg.firestoreDatabaseId)
+    : getFbFirestore(fbApp);
+  return serverFirestoreDb;
+}
+
+const SUPER_ADMIN_EMAIL_SET = new Set([
+  'pedro.martinss225@gmail.com',
+  'emillycampos308@gmail.com',
+]);
+
+function hashV1Credential(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const digest = crypto.createHash('sha256').update(`${salt}:${password}`).digest('hex');
+  return `v1:${salt}:${digest}`;
+}
+
+function verifyV1Credential(password: string, storedHash?: string | null): boolean {
+  if (!storedHash || typeof storedHash !== 'string') return false;
+  const parts = storedHash.split(':');
+  if (parts.length !== 3 || parts[0] !== 'v1') return false;
+  const [, salt, expectedDigest] = parts;
+  if (!salt || !expectedDigest) return false;
+  const actualDigest = crypto.createHash('sha256').update(`${salt}:${password}`).digest('hex');
+  return actualDigest === expectedDigest;
+}
+
+function sanitizeFirestoreUser(raw: any, docId: string) {
+  const { passwordHash: _ph, initialPasswordHash: _iph, ...rest } = raw || {};
+  const passwordSetOnce = Boolean(raw?.passwordSetOnce);
+  const mustChangePassword =
+    typeof raw?.mustChangePassword === 'boolean' ? raw.mustChangePassword : !passwordSetOnce;
+  return {
+    ...rest,
+    uid: raw?.uid || raw?.id || docId,
+    id: raw?.id || raw?.uid || docId,
+    passwordSetOnce,
+    mustChangePassword: passwordSetOnce ? false : mustChangePassword,
+  };
+}
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -437,6 +496,160 @@ app.get('/api/auth/profile/:uid', (req, res) => {
     return res.status(404).json({ error: 'Perfil não encontrado.' });
   }
   return res.json({ user: sanitizeUser(found) });
+});
+
+// ==========================================
+// CLOUD FIRESTORE AUTH FALLBACK (EMAIL + 12345 / ONE-TIME PASSWORD)
+// ==========================================
+app.post('/api/firestore-auth/login', async (req, res) => {
+  const cleanEmail = String(req.body?.email || '').trim().toLowerCase();
+  const cleanPass = String(req.body?.password || '').trim();
+
+  if (!cleanEmail || !cleanPass) {
+    return res.status(400).json({ error: 'Informe seu e-mail e sua senha.' });
+  }
+
+  try {
+    const db = getServerFirestore();
+    const snap = await fbGetDocs(fbCollection(db, 'users'));
+    const matched = snap.docs
+      .filter((d) => ((d.data() as any)?.email || '').toLowerCase().trim() === cleanEmail)
+      .map((d) => ({ id: d.id, data: d.data() as any }));
+
+    const canonical =
+      matched.find((d) => !d.id.startsWith('admin_') && !d.id.startsWith('user_')) || matched[0];
+
+    if (!canonical) {
+      return res.status(404).json({
+        error: 'Conta não cadastrada na equipe PT-B Mídia. Solicite acesso ao Super Administrador.',
+      });
+    }
+
+    const record = canonical.data;
+    if (record.status === 'blocked') {
+      return res.status(403).json({
+        error: 'Sua conta foi suspensa temporariamente pelo Administrador.',
+      });
+    }
+
+    const passwordAlreadyDefinedOnce = Boolean(record.passwordSetOnce && record.passwordHash);
+    if (passwordAlreadyDefinedOnce) {
+      if (!verifyV1Credential(cleanPass, record.passwordHash)) {
+        return res.status(401).json({
+          error:
+            'Senha incorreta. Após o primeiro acesso, utilize apenas a senha definitiva que você cadastrou.',
+        });
+      }
+    } else {
+      const hasCustomInitial = Boolean(record.initialPasswordHash);
+      const validInitial = hasCustomInitial
+        ? verifyV1Credential(cleanPass, record.initialPasswordHash)
+        : cleanPass === '12345';
+
+      if (!validInitial) {
+        return res.status(401).json({
+          error: hasCustomInitial
+            ? 'Senha provisória incorreta. Use a senha inicial informada pelo Administrador ou 12345 se resetada.'
+            : 'No primeiro acesso, entre utilizando seu e-mail e a senha provisória 12345.',
+        });
+      }
+    }
+
+    const user = sanitizeFirestoreUser(
+      {
+        ...record,
+        email: cleanEmail,
+        ...(SUPER_ADMIN_EMAIL_SET.has(cleanEmail)
+          ? {
+              role: 'super_admin',
+              roleLabel: 'Super Administrador',
+              canManageChurchPage: true,
+              canManageFinances: true,
+            }
+          : {}),
+        passwordSetOnce: passwordAlreadyDefinedOnce,
+        mustChangePassword: !passwordAlreadyDefinedOnce,
+      },
+      canonical.id
+    );
+
+    return res.json({ user });
+  } catch (err: any) {
+    console.error('[Firestore Auth Login Fallback Error]', err);
+    return res.status(500).json({ error: err?.message || 'Erro ao autenticar no Firestore.' });
+  }
+});
+
+app.post('/api/firestore-auth/set-password', async (req, res) => {
+  const cleanEmail = String(req.body?.email || '').trim().toLowerCase();
+  const uid = String(req.body?.uid || '').trim();
+  const newPassword = String(req.body?.newPassword || '').trim();
+
+  if (!cleanEmail) {
+    return res.status(400).json({ error: 'Sessão inválida. Entre novamente.' });
+  }
+  if (newPassword.length < 5) {
+    return res.status(400).json({ error: 'A senha definitiva deve ter no mínimo 5 caracteres.' });
+  }
+  if (newPassword === '12345') {
+    return res.status(400).json({
+      error: 'Por segurança, escolha uma senha diferente da senha provisória 12345.',
+    });
+  }
+
+  try {
+    const db = getServerFirestore();
+    const snap = await fbGetDocs(fbCollection(db, 'users'));
+    const matched = snap.docs
+      .filter((d) => ((d.data() as any)?.email || '').toLowerCase().trim() === cleanEmail)
+      .map((d) => ({ id: d.id, data: d.data() as any }));
+
+    const canonical =
+      matched.find((d) => !d.id.startsWith('admin_') && !d.id.startsWith('user_')) || matched[0];
+
+    if (canonical?.data?.passwordSetOnce) {
+      return res.status(409).json({
+        error: 'Sua senha definitiva já foi definida anteriormente e não pode ser alterada novamente.',
+      });
+    }
+
+    const now = new Date().toISOString();
+    const hashed = hashV1Credential(newPassword);
+    const targetIds = new Set<string>(matched.map((m) => m.id));
+    if (uid) targetIds.add(uid);
+
+    for (const targetId of targetIds) {
+      await fbSetDoc(
+        fbDoc(db, 'users', targetId),
+        {
+          passwordHash: hashed,
+          initialPasswordHash: fbDeleteField(),
+          passwordSetOnce: true,
+          mustChangePassword: false,
+          passwordUpdatedAt: now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+    }
+
+    const baseUser = canonical
+      ? sanitizeFirestoreUser(canonical.data, canonical.id)
+      : { uid, id: uid, email: cleanEmail };
+
+    return res.json({
+      user: {
+        ...baseUser,
+        passwordSetOnce: true,
+        mustChangePassword: false,
+        passwordUpdatedAt: now,
+        updatedAt: now,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Firestore Set Password Fallback Error]', err);
+    return res.status(500).json({ error: err?.message || 'Erro ao salvar senha definitiva.' });
+  }
 });
 
 // ==========================================
