@@ -11,11 +11,13 @@ export const ChurchHero: React.FC<ChurchHeroProps> = ({ profile }) => {
     <section id="inicio" className="relative min-h-[90vh] flex items-center justify-center overflow-hidden bg-stone-950 text-white">
       {/* Background Banner with warm gradient overlay */}
       <div className="absolute inset-0 z-0">
-        <img
-          src={profile.heroBannerUrl}
-          alt={profile.name}
-          className="w-full h-full object-cover object-center brightness-45 scale-105 transform animate-in fade-in duration-1000"
-        />
+        {profile.heroBannerUrl && (
+          <img
+            src={profile.heroBannerUrl}
+            alt={profile.name}
+            className="w-full h-full object-cover object-center brightness-45 scale-105 transform animate-in fade-in duration-1000"
+          />
+        )}
         <div className="absolute inset-0 bg-linear-to-t from-stone-950 via-stone-950/70 to-stone-950/40" />
         <div className="absolute inset-0 bg-radial from-amber-500/10 via-transparent to-black/60" />
       </div>

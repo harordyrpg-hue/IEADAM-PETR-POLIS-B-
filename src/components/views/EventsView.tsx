@@ -127,12 +127,18 @@ export const EventsView: React.FC = () => {
           {/* Event Cover Banner & Info */}
           <div className="rounded-2xl overflow-hidden bg-neutral-900 border border-neutral-800">
             <div className="relative h-40 sm:h-56 w-full bg-black">
-              <img
-                src={selectedEventDetails.event.coverUrl}
-                alt={selectedEventDetails.event.name}
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover"
-              />
+              {selectedEventDetails.event.coverUrl ? (
+                <img
+                  src={selectedEventDetails.event.coverUrl}
+                  alt={selectedEventDetails.event.name}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-neutral-900">
+                  <Calendar className="w-12 h-12 text-amber-400/30" />
+                </div>
+              )}
               <div className="absolute inset-0 bg-linear-to-t from-neutral-900 via-neutral-900/20 to-transparent" />
               <div className="absolute top-3 left-3 flex items-center gap-2 text-xs">
                 <span className="px-2.5 py-0.5 rounded-lg bg-amber-400 text-neutral-950 font-bold text-[11px]">
@@ -338,12 +344,18 @@ export const EventsView: React.FC = () => {
                   className="group rounded-2xl overflow-hidden bg-neutral-900 border border-neutral-800 hover:border-neutral-700 cursor-pointer transition-all flex flex-col justify-between"
                 >
                   <div className="relative h-44 w-full overflow-hidden bg-black">
-                    <img
-                      src={evt.coverUrl}
-                      alt={evt.name}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
+                    {evt.coverUrl ? (
+                      <img
+                        src={evt.coverUrl}
+                        alt={evt.name}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-neutral-900">
+                        <Calendar className="w-10 h-10 text-amber-400/30" />
+                      </div>
+                    )}
                     <div className="absolute inset-0 bg-linear-to-t from-neutral-950 via-neutral-950/30 to-transparent" />
 
                     <span className="absolute top-2 left-2 px-2.5 py-0.5 rounded bg-amber-400/90 text-neutral-950 text-[10px] font-bold uppercase tracking-wider">

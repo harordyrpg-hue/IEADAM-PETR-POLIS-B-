@@ -637,13 +637,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
                 onClick={() => setActiveTab('events')}
                 className="group rounded-xl overflow-hidden bg-neutral-950/60 border border-neutral-800 hover:border-neutral-700 cursor-pointer transition-colors flex flex-col text-left"
               >
-                <div className="relative h-28 w-full overflow-hidden">
-                  <img
-                    src={evt.coverUrl}
-                    alt={evt.name}
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
+                <div className="relative h-28 w-full overflow-hidden bg-neutral-900">
+                  {evt.coverUrl ? (
+                    <img
+                      src={evt.coverUrl}
+                      alt={evt.name}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Calendar className="w-7 h-7 text-amber-400/35" />
+                    </div>
+                  )}
                   <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/75 text-[10px] text-neutral-200 font-mono tabular-nums">
                     {formatDate(evt.date)}
                   </span>

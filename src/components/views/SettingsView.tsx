@@ -61,7 +61,7 @@ export const SettingsView: React.FC = () => {
         churchName: churchName.trim(),
         churchSubtitle: churchSubtitle.trim(),
         totalQuotaBytes: quotaBytes,
-        storageEngine: 'Servidor Dedicado PT-B Mídia',
+        storageEngine: 'Firebase Cloud Storage + Firestore',
       });
       notify('Configurações atualizadas com sucesso!', 'success');
     } catch {
@@ -78,7 +78,7 @@ export const SettingsView: React.FC = () => {
           Configurações
         </h1>
         <p className="text-xs text-neutral-400 mt-0.5">
-          Parâmetros da central e infraestrutura do servidor.
+          Parâmetros da central e infraestrutura Firebase Cloud.
         </p>
       </div>
 
@@ -151,37 +151,37 @@ export const SettingsView: React.FC = () => {
           <div className="rounded-2xl bg-neutral-900 border border-neutral-800 overflow-hidden text-xs">
             <div className="px-5 py-4 border-b border-neutral-800 flex items-center gap-2">
               <Cloud className="w-4 h-4 text-amber-400" />
-              <h2 className="text-sm font-semibold text-neutral-200">Serviços Conectados</h2>
+              <h2 className="text-sm font-semibold text-neutral-200">Infraestrutura Firebase Conectada</h2>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-neutral-800">
               <div className="p-4 bg-neutral-900">
                 <div className="flex items-center gap-2 text-emerald-400 font-semibold mb-1">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Autenticação Local</span>
+                  <span>Firebase Auth</span>
                 </div>
                 <p className="text-[11px] text-neutral-400">
-                  Login direto e controle de acesso por cargo.
+                  Google e E-mail/Senha ativos com controle RBAC.
                 </p>
               </div>
 
               <div className="p-4 bg-neutral-900">
                 <div className="flex items-center gap-2 text-emerald-400 font-semibold mb-1">
                   <Database className="w-4 h-4" />
-                  <span>Banco Persistente Local</span>
+                  <span>Cloud Firestore</span>
                 </div>
                 <p className="text-[11px] text-neutral-400">
-                  Sincronização em tempo real sem limite de cota.
+                  Sincronização em tempo real entre todos os membros.
                 </p>
               </div>
 
               <div className="p-4 bg-neutral-900">
                 <div className="flex items-center gap-2 text-emerald-400 font-semibold mb-1">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Armazenamento Dedicado</span>
+                  <span>Firebase Storage</span>
                 </div>
                 <p className="text-[11px] text-neutral-400">
-                  Mídias originais sem compressão.
+                  Mídias originais preservadas sem compressão.
                 </p>
               </div>
             </div>
@@ -193,28 +193,28 @@ export const SettingsView: React.FC = () => {
           <div className="p-5 rounded-2xl bg-neutral-900 border border-neutral-800 text-xs space-y-4">
             <h3 className="font-semibold text-neutral-200 flex items-center gap-2">
               <Shield className="w-4 h-4 text-amber-400" />
-              Servidor PT-B Mídia
+              Projeto Firebase
             </h3>
 
             <div className="space-y-3 font-mono text-[11px]">
               <div>
-                <span className="text-neutral-500 block">Identificador</span>
+                <span className="text-neutral-500 block">Project ID</span>
                 <span className="text-neutral-300 font-medium select-all break-all">
-                  {settings?.projectId || 'ptb-midia-local'}
+                  {settings?.projectId || 'massive-voyager-tgtt6'}
                 </span>
               </div>
 
               <div>
-                <span className="text-neutral-500 block">Diretório de Mídias</span>
+                <span className="text-neutral-500 block">Storage Bucket</span>
                 <span className="text-neutral-300 font-medium select-all break-all">
-                  {settings?.storageBucket || '/uploads'}
+                  {settings?.storageBucket || 'massive-voyager-tgtt6.firebasestorage.app'}
                 </span>
               </div>
 
               <div>
-                <span className="text-neutral-500 block">Motor de Dados</span>
+                <span className="text-neutral-500 block">Database ID</span>
                 <span className="text-neutral-300 font-medium select-all break-all">
-                  {settings?.firestoreDatabaseId || 'Banco Persistente Local'}
+                  {settings?.firestoreDatabaseId || 'ai-studio-ptbmdia-695ad5ee-916f-48c6-81f8-22f4d1a5dd48'}
                 </span>
               </div>
 

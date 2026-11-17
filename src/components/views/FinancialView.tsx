@@ -1794,7 +1794,7 @@ export const FinancialView: React.FC = () => {
             </div>
 
             <div className="p-4 flex-1 overflow-auto flex items-center justify-center bg-neutral-950">
-              {viewingReceipt.type === 'image' ? (
+              {viewingReceipt.type === 'image' && viewingReceipt.url ? (
                 <img
                   src={viewingReceipt.url}
                   alt={viewingReceipt.name}

@@ -182,10 +182,9 @@ export const PublicEventsAdminView: React.FC = () => {
     notify('Link de inscrição copiado para a área de transferência!', 'success');
   };
 
-  // Open Form Preview
+  // Open Form Preview inside the platform
   const handleOpenPreview = (event: PublicRegistrationEvent) => {
-    const origin = window.location.origin;
-    openExternalUrl(`${origin}/?inscricao=${event.id}`);
+    window.location.hash = `#inscricao=${event.id}`;
   };
 
   // Open QR Credential Scanner Panel
@@ -1918,9 +1917,9 @@ export const PublicEventsAdminView: React.FC = () => {
                         <button
                           onClick={() => handleOpenPreview(ev)}
                           className="min-w-[38px] min-h-[38px] bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl flex items-center justify-center transition-colors cursor-pointer"
-                          title="Abrir página pública"
+                          title="Abrir página dentro da plataforma"
                         >
-                          <ExternalLink className="w-3.5 h-3.5" />
+                          <Eye className="w-3.5 h-3.5" />
                         </button>
                       </div>
 

@@ -858,7 +858,18 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
   // 3. PUBLIC REGISTRATION FORM (DEFAULT VIEW)
   // ==========================================
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-12 px-4 sm:px-6 flex justify-center">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex flex-col items-center">
+      {onExit && (
+        <div className="w-full max-w-2xl mb-4 flex justify-start">
+          <button
+            type="button"
+            onClick={onExit}
+            className="px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 hover:text-white text-xs font-medium cursor-pointer transition-colors"
+          >
+            ← Voltar ao Sistema
+          </button>
+        </div>
+      )}
       <div className="w-full max-w-2xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
         {/* Banner image or top gradient */}
         {event.bannerUrl ? (

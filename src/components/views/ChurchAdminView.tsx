@@ -460,13 +460,12 @@ export const ChurchAdminView: React.FC = () => {
           <button
             type="button"
             onClick={() => {
-              openExternalUrl(`${window.location.origin}/?site`);
+              window.location.hash = '#site';
             }}
             className="inline-flex items-center gap-2 px-4 min-h-[40px] rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold text-xs transition-all cursor-pointer whitespace-nowrap"
           >
             <Eye className="w-4 h-4" />
-            <span>Ver Site</span>
-            <ExternalLink className="w-3.5 h-3.5" />
+            <span>Ver Site na Plataforma</span>
           </button>
         </div>
       </div>
@@ -502,7 +501,7 @@ export const ChurchAdminView: React.FC = () => {
             className="flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium border border-neutral-700 transition-all cursor-pointer"
           >
             <Eye className="w-3.5 h-3.5" />
-            <span>Abrir</span>
+            <span>Abrir Aqui</span>
           </button>
         </div>
       </div>
@@ -2047,7 +2046,7 @@ export const ChurchAdminView: React.FC = () => {
                   <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-36 overflow-y-auto pt-2">
                     {(editingAlbum.photos || []).map((ph, idx) => (
                       <div key={ph.id || idx} className="relative group aspect-square rounded-lg overflow-hidden bg-stone-900 border border-stone-750">
-                        <img src={ph.url} alt="" className="w-full h-full object-cover" />
+                        {ph.url ? <img src={ph.url} alt="" className="w-full h-full object-cover" /> : null}
                         <button
                           type="button"
                           onClick={() => {

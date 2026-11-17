@@ -29,11 +29,16 @@ export const PhotoLightbox: React.FC = () => {
 
   useEffect(() => {
     setZoom(1);
-    if (!lightboxFile) return;
-    let isMounted = true;
-    if (lightboxFile.thumbnailUrl && !lightboxFile.thumbnailUrl.startsWith('chunked://')) {
-      setPhotoUrl(lightboxFile.thumbnailUrl);
+    if (!lightboxFile) {
+      setPhotoUrl('');
+      return;
     }
+    let isMounted = true;
+    const safeThumb =
+      lightboxFile.thumbnailUrl && !lightboxFile.thumbnailUrl.startsWith('chunked://')
+        ? lightboxFile.thumbnailUrl
+        : '';
+    setPhotoUrl(safeThumb);
     api.resolveMediaUrl(lightboxFile, true).then((url) => {
       if (isMounted && url) {
         setPhotoUrl(url);
@@ -56,6 +61,13 @@ export const PhotoLightbox: React.FC = () => {
   }, [setLightboxFile]);
 
   if (!lightboxFile) return null;
+
+  const safeThumbFallback =
+    lightboxFile.thumbnailUrl && !lightboxFile.thumbnailUrl.startsWith('chunked://')
+      ? lightboxFile.thumbnailUrl
+      : '';
+  const displayPhotoUrl =
+    (photoUrl && !photoUrl.startsWith('chunked://') ? photoUrl : '') || safeThumbFallback;
 
   const handleDownload = () => {
     api.triggerDownload(lightboxFile.downloadUrl, lightboxFile.name);
@@ -137,14 +149,18 @@ export const PhotoLightbox: React.FC = () => {
 
       {/* Main Image Viewport */}
       <div className="flex-1 relative flex items-center justify-center p-4 overflow-hidden">
-        <img
-          src={photoUrl || lightboxFile.thumbnailUrl || ''}
-          alt=""
-          aria-hidden="true"
-          referrerPolicy="no-referrer"
-          className="max-w-full max-h-[80vh] object-contain transition-transform duration-200 shadow-2xl rounded-md"
-          style={{ transform: `scale(${zoom})` }}
-        />
+        {displayPhotoUrl ? (
+          <img
+            src={displayPhotoUrl}
+            alt=""
+            aria-hidden="true"
+            referrerPolicy="no-referrer"
+            className="max-w-full max-h-[80vh] object-contain transition-transform duration-200 shadow-2xl rounded-md"
+            style={{ transform: `scale(${zoom})` }}
+          />
+        ) : (
+          <div className="text-xs text-neutral-400">Carregando pré-visualização...</div>
+        )}
       </div>
 
       {/* Bottom Metadata & Uncompressed Assurance */}

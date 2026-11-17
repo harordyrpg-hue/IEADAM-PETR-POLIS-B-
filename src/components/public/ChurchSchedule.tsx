@@ -208,19 +208,36 @@ export const ChurchSchedule: React.FC<ChurchScheduleProps> = ({ profile, events 
                         <MapPin className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                         <span className="truncate">Local: <strong className="text-stone-200">{ev.location}</strong></span>
                       </div>
-                      {ev.registrationLink && (
-                        <div className="pt-2">
-                          <a
-                            href={ev.registrationLink}
-                            target={ev.registrationLink.startsWith('http') ? '_blank' : undefined}
-                            rel={ev.registrationLink.startsWith('http') ? 'noopener noreferrer' : undefined}
-                            className="w-full py-2 px-3 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors shadow-md"
-                          >
-                            <span>Fazer Inscrição Online</span>
-                            <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
-                          </a>
-                        </div>
-                      )}
+                      {ev.registrationLink && (() => {
+                        const rawLink = ev.registrationLink.trim();
+                        const isInternalInscricao =
+                          rawLink.includes('inscricao=') ||
+                          rawLink.includes('#evento=') ||
+                          rawLink.startsWith('#') ||
+                          rawLink.startsWith('/');
+                        return (
+                          <div className="pt-2">
+                            <a
+                              href={rawLink}
+                              target={!isInternalInscricao && rawLink.startsWith('http') ? '_blank' : undefined}
+                              rel={!isInternalInscricao && rawLink.startsWith('http') ? 'noopener noreferrer' : undefined}
+                              onClick={(e) => {
+                                if (rawLink.includes('inscricao=')) {
+                                  const match = rawLink.match(/inscricao=([^&#]+)/);
+                                  if (match?.[1]) {
+                                    e.preventDefault();
+                                    window.location.hash = `#inscricao=${match[1]}`;
+                                  }
+                                }
+                              }}
+                              className="w-full py-2 px-3 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors shadow-md"
+                            >
+                              <span>Fazer Inscrição Online</span>
+                              <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                            </a>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

@@ -120,12 +120,18 @@ export const ChurchMediaGallery: React.FC<ChurchMediaGalleryProps> = ({ albums }
                     onClick={() => setSelectedPhoto(photo)}
                     className="group relative aspect-square rounded-xl overflow-hidden bg-stone-800 cursor-pointer shadow-md hover:shadow-xl transition-all duration-300 border border-stone-800 hover:border-amber-500/50"
                   >
-                    <img
-                      src={photo.url}
-                      alt={photo.caption || albumTitle}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      loading="lazy"
-                    />
+                    {photo.url ? (
+                      <img
+                        src={photo.url}
+                        alt={photo.caption || albumTitle}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-stone-600">
+                        <ImageIcon className="w-8 h-8" />
+                      </div>
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 p-3 flex flex-col justify-end">
                       <p className="text-white text-xs font-semibold line-clamp-1">
                         {photo.caption || albumTitle}
@@ -240,11 +246,13 @@ export const ChurchMediaGallery: React.FC<ChurchMediaGalleryProps> = ({ albums }
             className="max-w-5xl max-h-[85vh] flex flex-col items-center"
             onClick={(e) => e.stopPropagation()}
           >
-            <img
-              src={selectedPhoto.url}
-              alt={selectedPhoto.caption || 'Foto'}
-              className="max-h-[75vh] max-w-full rounded-xl object-contain shadow-2xl"
-            />
+            {selectedPhoto.url && (
+              <img
+                src={selectedPhoto.url}
+                alt={selectedPhoto.caption || 'Foto'}
+                className="max-h-[75vh] max-w-full rounded-xl object-contain shadow-2xl"
+              />
+            )}
             {selectedPhoto.caption && (
               <div className="mt-4 bg-stone-900/90 px-5 py-2.5 rounded-full border border-stone-800 text-center">
                 <p className="text-stone-200 text-sm font-medium">{selectedPhoto.caption}</p>
@@ -276,13 +284,22 @@ export const ChurchMediaGallery: React.FC<ChurchMediaGalleryProps> = ({ albums }
               </button>
             </div>
             <div className="relative aspect-video w-full bg-black">
-              <iframe
-                src={getYoutubeEmbedUrl(selectedVideo)}
-                title={selectedVideo.title}
-                className="w-full h-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
+              {(() => {
+                const embedUrl = getYoutubeEmbedUrl(selectedVideo);
+                return embedUrl ? (
+                  <iframe
+                    src={embedUrl}
+                    title={selectedVideo.title}
+                    className="w-full h-full border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-stone-400 text-sm">
+                    Link de vídeo indisponível
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

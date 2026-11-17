@@ -13,7 +13,8 @@ import {
   FinancialBill,
   FinancialPaymentMethod,
 } from '../types.js';
-import { api } from '../services/api.js';
+import { api, onFirestoreQuotaAlert } from '../services/api.js';
+import { testConnection } from '../services/firebase.js';
 
 interface Toast {
   id: string;
@@ -36,6 +37,7 @@ interface ConfirmDialogState extends ConfirmOptions {
 interface AppContextType {
   user: User | null;
   authLoading: boolean;
+  loginWithGoogle: () => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   registerWithEmail: (name: string, email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -278,16 +280,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   }, [rawEvents, allFiles]);
 
-  // Restore and keep local server session synchronized
+  // Firebase health check, quota monitor & auth synchronization
   useEffect(() => {
-    const storedUser = api.getCurrentSessionUser();
-    if (storedUser) {
-      setUser(storedUser);
-      setAuthLoading(false);
-      refreshStats();
-      refreshFolders();
-      refreshEvents();
-    }
+    const unsubQuota = onFirestoreQuotaAlert((msg) => {
+      notify(msg, 'error');
+    });
+
+    testConnection().then((status) => {
+      if (status.quotaExceeded && status.error) {
+        notify(status.error, 'error');
+      }
+    });
+
+    api.checkRedirectAuth().then((redirectUser) => {
+      if (redirectUser) {
+        setUser(redirectUser);
+        setAuthLoading(false);
+      }
+    });
 
     const unsubscribe = api.onAuthStateChanged(async (sessionUser) => {
       if (sessionUser) {
@@ -305,7 +315,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             await Promise.all([refreshStats(), refreshFolders(), refreshEvents()]);
           }
         } catch (err) {
-          console.warn('Falha ao atualizar perfil no servidor:', err);
+          console.warn('Falha ao atualizar perfil no Firebase:', err);
           const fallback = api.getCurrentSessionUser();
           setUser(fallback || sessionUser);
         }
@@ -315,7 +325,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAuthLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubQuota();
+      unsubscribe();
+    };
   }, [refreshStats, refreshFolders, refreshEvents, notify]);
 
   // Real-time synchronization across all team members
@@ -445,6 +458,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
   }, [allFiles, folders, events]);
 
+  const loginWithGoogle = async () => {
+    const profile = await api.loginWithGoogle();
+    if (profile) {
+      setUser(profile);
+      notify(`Bem-vindo, ${profile.name}!`, 'success');
+    }
+  };
+
   const loginWithEmail = async (email: string, pass: string) => {
     const profile = await api.loginWithEmail(email, pass);
     setUser(profile);
@@ -466,9 +487,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const resetPassword = async (email: string, newPassword?: string) => {
     await api.resetPassword(email, newPassword);
     notify(
-      newPassword
-        ? 'Senha atualizada com sucesso! Faça login normalmente.'
-        : 'Acesso redefinido! Você já pode entrar definindo uma nova senha.',
+      'E-mail de redefinição de senha enviado pelo Firebase! Verifique sua caixa de entrada ou spam.',
       'success'
     );
   };
@@ -776,6 +795,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         user,
         authLoading,
+        loginWithGoogle,
         loginWithEmail,
         registerWithEmail,
         logout,

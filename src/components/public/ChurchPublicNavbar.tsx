@@ -38,6 +38,19 @@ export const ChurchPublicNavbar: React.FC<ChurchPublicNavbarProps> = ({ profile 
     }
   };
 
+  const handleReturnToPlatform = () => {
+    setMobileMenuOpen(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('site');
+    url.searchParams.delete('igreja');
+    url.searchParams.delete('portal');
+    url.searchParams.delete('publico');
+    url.hash = '';
+    window.history.replaceState({}, '', url.pathname);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
+
   const whatsappClean = profile.contact.whatsapp.replace(/\D/g, '');
 
   return (
@@ -124,7 +137,7 @@ export const ChurchPublicNavbar: React.FC<ChurchPublicNavbarProps> = ({ profile 
               ))}
             </div>
 
-            {/* Right Action: Conheça-nos / WhatsApp / Admin */}
+            {/* Right Action: Conheça-nos / WhatsApp / Voltar ao Sistema */}
             <div className="hidden sm:flex items-center gap-2">
               {whatsappClean && (
                 <a
@@ -140,25 +153,23 @@ export const ChurchPublicNavbar: React.FC<ChurchPublicNavbarProps> = ({ profile 
 
               <button
                 type="button"
-                onClick={() => {
-                  const url = new URL(window.location.href);
-                  url.searchParams.delete('site');
-                  url.searchParams.delete('igreja');
-                  url.searchParams.delete('portal');
-                  url.searchParams.delete('publico');
-                  url.hash = '';
-                  window.history.replaceState({}, '', url.pathname);
-                  window.location.reload();
-                }}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white border border-stone-700 transition-all cursor-pointer"
-                title="Acessar o Painel Administrativo PT-B Mídia"
+                onClick={handleReturnToPlatform}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 hover:text-white border border-stone-700 transition-all cursor-pointer"
+                title="Voltar ao sistema PT-B Mídia"
               >
-                <span>Painel Admin</span>
+                <span>Voltar ao Sistema</span>
               </button>
             </div>
 
-            {/* Mobile Hamburger Button */}
+            {/* Mobile Hamburger & Back Button */}
             <div className="flex lg:hidden items-center gap-2">
+              <button
+                type="button"
+                onClick={handleReturnToPlatform}
+                className="sm:hidden px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 cursor-pointer"
+              >
+                Sistema
+              </button>
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className="p-2 text-stone-300 hover:text-white rounded-lg hover:bg-stone-800 transition-colors"
@@ -184,8 +195,8 @@ export const ChurchPublicNavbar: React.FC<ChurchPublicNavbarProps> = ({ profile 
               </a>
             ))}
 
-            {whatsappClean && (
-              <div className="pt-3 border-t border-stone-800 mt-2">
+            <div className="pt-3 border-t border-stone-800 mt-2 space-y-2">
+              {whatsappClean && (
                 <a
                   href={`https://wa.me/55${whatsappClean}?text=Ol%C3%A1!%20Paz%20do%20Senhor!%20Gostaria%20de%20visitar%20a%20igreja.`}
                   target="_blank"
@@ -195,8 +206,15 @@ export const ChurchPublicNavbar: React.FC<ChurchPublicNavbarProps> = ({ profile 
                   <MessageCircle className="w-4 h-4" />
                   <span>Enviar mensagem no WhatsApp</span>
                 </a>
-              </div>
-            )}
+              )}
+              <button
+                type="button"
+                onClick={handleReturnToPlatform}
+                className="flex items-center justify-center w-full py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 font-medium text-xs border border-stone-700 cursor-pointer"
+              >
+                Voltar ao Sistema PT-B Mídia
+              </button>
+            </div>
           </div>
         )}
       </nav>

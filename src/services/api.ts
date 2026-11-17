@@ -1,5 +1,51 @@
 import JSZip from 'jszip';
 import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  where,
+  writeBatch,
+  runTransaction,
+  increment,
+} from 'firebase/firestore';
+import {
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  signOut,
+  onAuthStateChanged as firebaseOnAuthStateChanged,
+  getAuth,
+} from 'firebase/auth';
+import {
+  ref,
+  uploadBytesResumable,
+  getDownloadURL,
+  deleteObject,
+} from 'firebase/storage';
+import {
+  db,
+  auth,
+  storage,
+  googleProvider,
+  createSecondaryAuthApp,
+  FIREBASE_PROJECT_ID,
+  FIRESTORE_DATABASE_ID,
+  FIREBASE_STORAGE_BUCKET,
+  FIREBASE_AUTH_DOMAIN,
+  OperationType,
+  handleFirestoreError,
+  isQuotaError,
+} from './firebase.js';
+import {
   User,
   UserRole,
   FileRecord,
@@ -101,9 +147,188 @@ export function removeUndefinedValues<T>(obj: T): T {
 }
 
 // ==========================================
-// HTTP CLIENT & REAL-TIME SSE HUB
+// FIREBASE ERROR & QUOTA SUBSCRIPTION HUB
 // ==========================================
-async function apiFetch<T = any>(url: string, options?: RequestInit): Promise<T> {
+const quotaErrorListeners = new Set<(message: string) => void>();
+let lastQuotaAlertAt = 0;
+
+export function onFirestoreQuotaAlert(cb: (message: string) => void): () => void {
+  quotaErrorListeners.add(cb);
+  return () => quotaErrorListeners.delete(cb);
+}
+
+function notifyQuotaIfNeeded(error: unknown) {
+  if (!isQuotaError(error)) return;
+  const now = Date.now();
+  if (now - lastQuotaAlertAt < 8000) return;
+  lastQuotaAlertAt = now;
+  const msg =
+    'Cota diária do Cloud Firestore excedida (RESOURCE_EXHAUSTED). Algumas leituras ou gravações podem falhar até a renovação diária ou upgrade de cota no Firebase.';
+  quotaErrorListeners.forEach((cb) => {
+    try {
+      cb(msg);
+    } catch {}
+  });
+}
+
+function translateAuthError(error: any): string {
+  const code = error?.code || '';
+  const msg = error?.message || '';
+  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+    return 'E-mail ou senha incorretos.';
+  }
+  if (code === 'auth/email-already-in-use') {
+    return 'Este e-mail já está cadastrado no Firebase.';
+  }
+  if (code === 'auth/weak-password') {
+    return 'A senha deve ter pelo menos 6 caracteres.';
+  }
+  if (code === 'auth/invalid-email') {
+    return 'Formato de e-mail inválido.';
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'Muitas tentativas seguidas. Aguarde alguns instantes antes de tentar novamente.';
+  }
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return 'Login com Google cancelado.';
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'O navegador bloqueou a janela do Google. Redirecionando...';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'Falha de conexão com o Firebase. Verifique sua internet.';
+  }
+  if (isQuotaError(error)) {
+    return 'Cota do Firebase excedida temporariamente (RESOURCE_EXHAUSTED).';
+  }
+  return msg || 'Erro de autenticação no Firebase.';
+}
+
+// ==========================================
+// FIRESTORE COLLECTION HELPERS
+// ==========================================
+async function listCol<T>(col: string): Promise<T[]> {
+  try {
+    const snap = await getDocs(collection(db, col));
+    return snap.docs.map((d) => ({
+      ...(d.data() as any),
+      id: (d.data() as any)?.id || d.id,
+      firestoreDocId: d.id,
+    })) as T[];
+  } catch (error) {
+    notifyQuotaIfNeeded(error);
+    handleFirestoreError(error, OperationType.LIST, col);
+  }
+}
+
+async function getDocById<T>(col: string, id: string): Promise<T | null> {
+  try {
+    const refDoc = doc(db, col, id);
+    const snap = await getDoc(refDoc);
+    if (!snap.exists()) return null;
+    const data = snap.data() as any;
+    return {
+      ...data,
+      id: data?.id || snap.id,
+      firestoreDocId: snap.id,
+    } as T;
+  } catch (error) {
+    notifyQuotaIfNeeded(error);
+    handleFirestoreError(error, OperationType.GET, `${col}/${id}`);
+  }
+}
+
+async function setDocById<T>(col: string, id: string, data: T, merge = false): Promise<T> {
+  try {
+    const clean = removeUndefinedValues(data);
+    await setDoc(doc(db, col, id), clean as any, { merge });
+    return { ...(clean as any), id: (clean as any)?.id || id } as T;
+  } catch (error) {
+    notifyQuotaIfNeeded(error);
+    handleFirestoreError(error, OperationType.WRITE, `${col}/${id}`);
+  }
+}
+
+async function updateDocById(col: string, id: string, updates: Record<string, any>): Promise<void> {
+  try {
+    const clean = removeUndefinedValues(updates);
+    await updateDoc(doc(db, col, id), clean as any);
+  } catch (error) {
+    notifyQuotaIfNeeded(error);
+    handleFirestoreError(error, OperationType.UPDATE, `${col}/${id}`);
+  }
+}
+
+async function deleteDocById(col: string, id: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, col, id));
+  } catch (error) {
+    notifyQuotaIfNeeded(error);
+    handleFirestoreError(error, OperationType.DELETE, `${col}/${id}`);
+  }
+}
+
+async function batchWrite(
+  ops: { type: 'set' | 'update' | 'delete'; col: string; id: string; data?: any; merge?: boolean }[]
+): Promise<void> {
+  if (ops.length === 0) return;
+  const CHUNK_LIMIT = 400;
+  try {
+    for (let i = 0; i < ops.length; i += CHUNK_LIMIT) {
+      const slice = ops.slice(i, i + CHUNK_LIMIT);
+      const batch = writeBatch(db);
+      for (const op of slice) {
+        const refDoc = doc(db, op.col, op.id);
+        if (op.type === 'set') {
+          const clean = removeUndefinedValues(op.data || {});
+          batch.set(refDoc, clean, { merge: Boolean(op.merge) });
+        } else if (op.type === 'update') {
+          const clean = removeUndefinedValues(op.data || {});
+          batch.update(refDoc, clean);
+        } else if (op.type === 'delete') {
+          batch.delete(refDoc);
+        }
+      }
+      await batch.commit();
+    }
+  } catch (error) {
+    notifyQuotaIfNeeded(error);
+    handleFirestoreError(error, OperationType.WRITE, 'batchWrite');
+  }
+}
+
+function subscribeCollection<T>(
+  col: string,
+  transform: (items: T[]) => void
+): () => void {
+  const unsub = onSnapshot(
+    collection(db, col),
+    (snapshot) => {
+      const items = snapshot.docs.map((d) => {
+        const data = d.data() as any;
+        return {
+          ...data,
+          id: data?.id || d.id,
+          firestoreDocId: d.id,
+        } as T;
+      });
+      transform(items);
+    },
+    (error) => {
+      notifyQuotaIfNeeded(error);
+      console.error(`Firestore onSnapshot error on ${col}:`, error);
+    }
+  );
+  return unsub;
+}
+
+// ==========================================
+// STORAGE & CHUNKED BINARY UPLOAD FALLBACK
+// ==========================================
+const CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
+const resolvedChunkCache = new Map<string, string>();
+
+async function apiFetchJson<T = any>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
@@ -111,7 +336,6 @@ async function apiFetch<T = any>(url: string, options?: RequestInit): Promise<T>
     },
     ...options,
   });
-
   const text = await res.text();
   let parsed: any = {};
   try {
@@ -119,202 +343,11 @@ async function apiFetch<T = any>(url: string, options?: RequestInit): Promise<T>
   } catch {
     parsed = { error: text };
   }
-
   if (!res.ok) {
     throw new Error(parsed?.error || `Erro HTTP ${res.status}`);
   }
   return parsed as T;
 }
-
-async function listCol<T>(col: string): Promise<T[]> {
-  const res = await apiFetch<{ items: T[] }>(`/api/db/${col}`);
-  return Array.isArray(res.items) ? res.items : [];
-}
-
-async function getDocById<T>(col: string, id: string): Promise<T | null> {
-  try {
-    const res = await apiFetch<{ item: T }>(`/api/db/${col}/${encodeURIComponent(id)}`);
-    return res.item || null;
-  } catch (err: any) {
-    if (err?.message?.includes('404') || err?.message?.includes('não encontrado')) {
-      return null;
-    }
-    return null;
-  }
-}
-
-async function setDocById<T>(col: string, id: string, data: T, merge = false): Promise<T> {
-  const res = await apiFetch<{ item: T }>(
-    `/api/db/${col}/${encodeURIComponent(id)}${merge ? '?merge=true' : ''}`,
-    {
-      method: 'PUT',
-      body: JSON.stringify(removeUndefinedValues(data)),
-    }
-  );
-  notifyLocalSubscribers([col]);
-  return res.item;
-}
-
-async function updateDocById(col: string, id: string, updates: Record<string, any>): Promise<void> {
-  await apiFetch(`/api/db/${col}/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(removeUndefinedValues(updates)),
-  });
-  notifyLocalSubscribers([col]);
-}
-
-async function deleteDocById(col: string, id: string): Promise<void> {
-  await apiFetch(`/api/db/${col}/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
-  notifyLocalSubscribers([col]);
-}
-
-async function batchWrite(
-  ops: { type: 'set' | 'update' | 'delete'; col: string; id: string; data?: any; merge?: boolean }[]
-): Promise<void> {
-  if (ops.length === 0) return;
-  await apiFetch('/api/db/batch', {
-    method: 'POST',
-    body: JSON.stringify({
-      ops: ops.map((o) => ({
-        ...o,
-        data: o.data ? removeUndefinedValues(o.data) : undefined,
-      })),
-    }),
-  });
-  notifyLocalSubscribers(Array.from(new Set(ops.map((o) => o.col))));
-}
-
-type ListenerFn = () => void;
-const collectionSubscribers = new Map<string, Set<ListenerFn>>();
-let eventSource: EventSource | null = null;
-let fallbackInterval: ReturnType<typeof setInterval> | null = null;
-let syncChannel: BroadcastChannel | null = null;
-let syncListenersBound = false;
-let versionCheckInFlight = false;
-let versionsInitialized = false;
-let lastKnownVersions: Record<string, number> = {};
-
-function notifyLocalSubscribers(collections: string[], broadcastToTabs = true) {
-  const unique = Array.from(new Set(collections));
-  if (unique.length === 0) return;
-
-  for (const col of unique) {
-    const subs = collectionSubscribers.get(col);
-    if (subs) {
-      subs.forEach((fn) => fn());
-    }
-  }
-
-  if (broadcastToTabs && syncChannel) {
-    try {
-      syncChannel.postMessage({ collections: unique, ts: Date.now() });
-    } catch {}
-  }
-}
-
-function applyServerVersions(
-  serverVersions: Record<string, number> | undefined,
-  explicitCollections?: string[]
-) {
-  const changed = new Set<string>(explicitCollections || []);
-
-  if (serverVersions && typeof serverVersions === 'object') {
-    if (!versionsInitialized) {
-      lastKnownVersions = { ...serverVersions };
-      versionsInitialized = true;
-    } else {
-      for (const [col, ver] of Object.entries(serverVersions)) {
-        if (typeof ver === 'number' && ver !== lastKnownVersions[col]) {
-          changed.add(col);
-          lastKnownVersions[col] = ver;
-        }
-      }
-    }
-  }
-
-  if (changed.size > 0) {
-    notifyLocalSubscribers(Array.from(changed), false);
-  }
-}
-
-async function checkVersionsFromServer() {
-  if (typeof window === 'undefined' || versionCheckInFlight) return;
-  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-  versionCheckInFlight = true;
-  try {
-    const res = await apiFetch<{ versions: Record<string, number> }>('/api/realtime/versions', {
-      cache: 'no-store',
-    });
-    applyServerVersions(res?.versions);
-  } catch {
-    // Ignore transient network hiccups; next tick retries automatically
-  } finally {
-    versionCheckInFlight = false;
-  }
-}
-
-function ensureRealtimeConnection() {
-  if (typeof window === 'undefined') return;
-
-  if (!syncChannel && typeof BroadcastChannel !== 'undefined') {
-    try {
-      syncChannel = new BroadcastChannel('ptb_midia_sync');
-      syncChannel.onmessage = (msg) => {
-        if (Array.isArray(msg?.data?.collections)) {
-          notifyLocalSubscribers(msg.data.collections, false);
-        }
-      };
-    } catch {}
-  }
-
-  if (!eventSource) {
-    try {
-      eventSource = new EventSource('/api/realtime');
-      eventSource.onopen = () => {
-        void checkVersionsFromServer();
-      };
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          applyServerVersions(
-            data?.versions,
-            Array.isArray(data?.collections) ? data.collections : undefined
-          );
-        } catch {}
-      };
-      eventSource.onerror = () => {
-        // EventSource automatically reconnects; version check & focus listeners handle recovery
-      };
-    } catch {}
-  }
-
-  if (!syncListenersBound) {
-    syncListenersBound = true;
-    window.addEventListener('focus', () => {
-      void checkVersionsFromServer();
-    });
-    window.addEventListener('online', () => {
-      void checkVersionsFromServer();
-    });
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-          void checkVersionsFromServer();
-        }
-      });
-    }
-  }
-
-  if (!fallbackInterval) {
-    fallbackInterval = setInterval(() => {
-      void checkVersionsFromServer();
-    }, 2000);
-  }
-}
-
-const CHUNK_SIZE_BYTES = 4 * 1024 * 1024; // 4 MB chunks keep requests well below Cloud Run's 32 MiB cap
 
 function parseXhrError(xhr: XMLHttpRequest): string {
   try {
@@ -324,7 +357,7 @@ function parseXhrError(xhr: XMLHttpRequest): string {
   return `Servidor respondeu com status ${xhr.status}`;
 }
 
-async function uploadSingleRequest(
+async function uploadSingleToServerFallback(
   blob: Blob,
   filename: string,
   mimeType: string,
@@ -365,18 +398,18 @@ async function uploadSingleRequest(
   });
 }
 
-async function uploadBinaryToServer(
+async function uploadBinaryToServerFallback(
   file: Blob,
   filename: string,
   mimeType: string,
   onProgress?: (percent: number, speedText?: string) => void
 ): Promise<{ downloadUrl: string; filename: string; size?: number }> {
   if (file.size <= CHUNK_SIZE_BYTES) {
-    return uploadSingleRequest(file, filename, mimeType, onProgress);
+    return uploadSingleToServerFallback(file, filename, mimeType, onProgress);
   }
 
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE_BYTES);
-  const initRes = await apiFetch<{ uploadId: string }>('/api/upload/init', {
+  const initRes = await apiFetchJson<{ uploadId: string }>('/api/upload/init', {
     method: 'POST',
     body: JSON.stringify({
       filename,
@@ -424,7 +457,7 @@ async function uploadBinaryToServer(
   }
 
   if (onProgress) onProgress(99, 'Finalizando...');
-  return await apiFetch<{ downloadUrl: string; filename: string; size?: number }>(
+  return await apiFetchJson<{ downloadUrl: string; filename: string; size?: number }>(
     '/api/upload/complete',
     {
       method: 'POST',
@@ -437,75 +470,306 @@ async function uploadBinaryToServer(
   );
 }
 
-function subscribeCollection<T>(
-  col: string,
-  transform: (items: T[]) => void
-): () => void {
-  ensureRealtimeConnection();
+async function uploadToFirebaseStorage(
+  blob: Blob,
+  storagePath: string,
+  mimeType: string,
+  onProgress?: (percent: number, speedText?: string) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const storageRef = ref(storage, storagePath);
+    const task = uploadBytesResumable(storageRef, blob, {
+      contentType: mimeType || 'application/octet-stream',
+    });
 
-  let cancelled = false;
-  let inFlight = false;
-  let queued = false;
+    const startTime = Date.now();
+    let settled = false;
 
-  const fetchAndEmit = async () => {
-    if (cancelled) return;
-    if (inFlight) {
-      queued = true;
-      return;
-    }
-    inFlight = true;
-    try {
-      const items = await listCol<T>(col);
-      if (!cancelled) {
-        transform(items);
+    // Abort stall if Firebase Storage CORS or provisioning blocks the preflight for >7s with 0 bytes transferred
+    const stallTimer = setTimeout(() => {
+      if (!settled && task.snapshot.bytesTransferred === 0) {
+        settled = true;
+        try {
+          task.cancel();
+        } catch {}
+        reject(new Error('Firebase Storage indisponível ou bloqueado por CORS.'));
       }
-    } catch (err) {
-      console.warn(`Realtime sync (${col}):`, err);
-    } finally {
-      inFlight = false;
-      if (queued && !cancelled) {
-        queued = false;
-        void fetchAndEmit();
+    }, 7000);
+
+    task.on(
+      'state_changed',
+      (snapshot) => {
+        if (snapshot.bytesTransferred > 0) {
+          clearTimeout(stallTimer);
+        }
+        if (onProgress && snapshot.totalBytes > 0) {
+          const percent = Math.min(99, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+          const elapsed = Math.max(0.1, (Date.now() - startTime) / 1000);
+          const speedMb = snapshot.bytesTransferred / (1024 * 1024) / elapsed;
+          onProgress(percent, `${speedMb.toFixed(1)} MB/s`);
+        }
+      },
+      (err) => {
+        clearTimeout(stallTimer);
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      },
+      async () => {
+        clearTimeout(stallTimer);
+        if (settled) return;
+        settled = true;
+        try {
+          const url = await getDownloadURL(task.snapshot.ref);
+          resolve(url);
+        } catch (err) {
+          reject(err);
+        }
       }
-    }
-  };
-
-  if (!collectionSubscribers.has(col)) {
-    collectionSubscribers.set(col, new Set());
-  }
-  collectionSubscribers.get(col)!.add(fetchAndEmit);
-
-  // Initial load
-  void fetchAndEmit();
-
-  return () => {
-    cancelled = true;
-    const set = collectionSubscribers.get(col);
-    if (set) {
-      set.delete(fetchAndEmit);
-      if (set.size === 0) {
-        collectionSubscribers.delete(col);
-      }
-    }
-  };
-}
-
-// Local auth listeners
-const authListeners = new Set<(user: User | null) => void>();
-function emitAuthChange(user: User | null) {
-  authListeners.forEach((cb) => {
-    try {
-      cb(user);
-    } catch {}
+    );
   });
 }
 
+async function resolveChunkedFirestoreBlob(chunkUri: string, fallbackMime = 'application/octet-stream'): Promise<Blob | null> {
+  const fileId = chunkUri.replace('chunked://', '').trim();
+  if (!fileId) return null;
+
+  try {
+    // 1. Check single document file_data/{fileId}
+    const singleSnap = await getDoc(doc(db, 'file_data', fileId));
+    if (singleSnap.exists()) {
+      const data = singleSnap.data() as any;
+      if (data?.dataUrl && typeof data.dataUrl === 'string' && data.dataUrl.startsWith('data:')) {
+        const res = await fetch(data.dataUrl);
+        return await res.blob();
+      }
+      if (data?.base64) {
+        const byteChars = atob(data.base64);
+        const byteNumbers = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+        return new Blob([new Uint8Array(byteNumbers)], { type: data.mimeType || fallbackMime });
+      }
+    }
+
+    // 2. Query chunked docs in file_chunks where fileId == fileId
+    const q = query(collection(db, 'file_chunks'), where('fileId', '==', fileId));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const parts = snap.docs
+        .map((d) => d.data() as any)
+        .sort((a, b) => (a.index ?? a.chunkIndex ?? 0) - (b.index ?? b.chunkIndex ?? 0));
+      const fullBase64 = parts.map((p) => p.data || p.chunk || '').join('');
+      if (fullBase64.startsWith('data:')) {
+        const res = await fetch(fullBase64);
+        return await res.blob();
+      }
+      const byteChars = atob(fullBase64);
+      const byteNumbers = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+      return new Blob([byteNumbers], { type: parts[0]?.mimeType || fallbackMime });
+    }
+  } catch (err) {
+    console.warn(`Could not resolve chunked Firestore file ${fileId}:`, err);
+  }
+  return null;
+}
+
 // ==========================================
-// MAIN API OBJECT
+// PRE-CONFIGURED TEAM / SUPER ADMIN HELPERS
+// ==========================================
+const SUPER_ADMIN_EMAILS = new Set([
+  'pedro.martinss225@gmail.com',
+  'emillycampos308@gmail.com',
+]);
+
+function getInitialAdminDefaults(email: string, uid: string, displayName?: string, photoUrl?: string): User | null {
+  const clean = email.trim().toLowerCase();
+  const now = new Date().toISOString();
+  if (clean === 'pedro.martinss225@gmail.com') {
+    return {
+      uid,
+      id: uid,
+      name: displayName || 'Pedro Martins',
+      email: clean,
+      role: 'super_admin',
+      roleLabel: 'Super Administrador',
+      avatar: photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+      status: 'active',
+      canManageChurchPage: true,
+      canManageFinances: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: now,
+    };
+  }
+  if (clean === 'emillycampos308@gmail.com') {
+    return {
+      uid,
+      id: uid,
+      name: displayName || 'Emilly Campos',
+      email: clean,
+      role: 'super_admin',
+      roleLabel: 'Super Administrador',
+      avatar: photoUrl || 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&h=200&q=80',
+      status: 'active',
+      canManageChurchPage: true,
+      canManageFinances: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: now,
+    };
+  }
+  if (clean === 'menezesisabele505@gmail.com') {
+    return {
+      uid,
+      id: uid,
+      name: displayName || 'Isabele Menezes',
+      email: clean,
+      role: 'media_admin',
+      roleLabel: 'Administrador',
+      avatar: photoUrl || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&h=200&q=80',
+      status: 'active',
+      canManageChurchPage: true,
+      canManageFinances: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: now,
+    };
+  }
+  if (clean === 'francielearaujopinheiro862@gmail.com') {
+    return {
+      uid,
+      id: uid,
+      name: displayName || 'Franciele Pinheiro',
+      email: clean,
+      role: 'media_member',
+      roleLabel: 'Membro da Mídia',
+      avatar: photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+      status: 'active',
+      canManageChurchPage: false,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: now,
+    };
+  }
+  return null;
+}
+
+function buildInitialRoster(now: string) {
+  const groups = [
+    {
+      id: 'dept_pastores',
+      name: 'Pastores',
+      kind: 'ministerio' as AttendanceDepartmentKind,
+      order: 1,
+      roleTitle: 'Corpo Pastoral',
+      members: ['Pr. Sobreiro', 'Pra. Fatima'],
+    },
+    {
+      id: 'dept_diaconos',
+      name: 'Diáconos',
+      kind: 'ministerio' as AttendanceDepartmentKind,
+      order: 2,
+      roleTitle: 'Corpo Diaconal',
+      members: [
+        'Dc. Benedito',
+        'Dca. Katia',
+        'Dc. Charles',
+        'Dca. Ivone',
+        'Dca. Líder Sebastiana',
+        'Dca. Líder Kélia',
+        'Dca. Líder Cícera',
+        'Dc. Líder Erick',
+        'Dca. Líder Ingrid',
+      ],
+    },
+    {
+      id: 'dept_lideres',
+      name: 'Líderes',
+      kind: 'equipe' as AttendanceDepartmentKind,
+      order: 3,
+      roleTitle: 'Liderança',
+      members: [
+        'Líder Dulce',
+        'Líder Lene',
+        'Líder Jane',
+        'Líder Francirema',
+        'Líder Keylah',
+        'Líder Felipe',
+        'Líder Natã',
+        'Líder Elines',
+        'Líder Emilly',
+        'Líder Isabele Cristina',
+        'Líder Rayssa',
+        'Líder Eldrinei',
+        'Líder Eduardo Kyrk',
+        'Líder Hudson',
+      ],
+    },
+    {
+      id: 'dept_louvor',
+      name: 'Membros do louvor',
+      kind: 'ministerio' as AttendanceDepartmentKind,
+      order: 4,
+      roleTitle: 'Ministério de Louvor',
+      members: [
+        'Diego',
+        'Hildete',
+        'Stelio',
+        'Micilene',
+        'Gabriele',
+        'João Felipe',
+        'W. Felipe',
+        'Israel',
+        'Angélica',
+        'José',
+        'Vinicius',
+        'Eduardo Mateus',
+        'Djanira',
+      ],
+    },
+  ];
+
+  const departments: AttendanceDepartment[] = [];
+  const members: AttendanceMember[] = [];
+
+  for (const g of groups) {
+    departments.push({
+      id: g.id,
+      name: g.name,
+      kind: g.kind,
+      order: g.order,
+      createdByUid: 'admin_pedro_martins',
+      createdByName: 'Pedro Martins',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    g.members.forEach((memberName, idx) => {
+      const memberId = `mem_${g.id}_${idx + 1}`;
+      const memberCode = `PTB-MEM-${g.id.replace('dept_', '').toUpperCase()}-${String(idx + 1).padStart(2, '0')}`;
+      members.push({
+        id: memberId,
+        departmentId: g.id,
+        name: memberName,
+        memberCode,
+        roleTitle: g.roleTitle,
+        congregation: 'IEADAM Petrópolis B',
+        area: 'Sede / Geral',
+        createdByUid: 'admin_pedro_martins',
+        createdByName: 'Pedro Martins',
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+  }
+
+  return { departments, members };
+}
+
+// ==========================================
+// MAIN API OBJECT (FIREBASE + STORAGE FALLBACK)
 // ==========================================
 export const api = {
   // ==========================================
-  // 1. AUTHENTICATION & PROFILE
+  // 1. FIREBASE AUTHENTICATION & PROFILE
   // ==========================================
   getCurrentSessionUser(): User | null {
     try {
@@ -516,7 +780,16 @@ export const api = {
   },
 
   getEffectiveUser(): { uid: string; displayName: string; email: string; user?: User } {
+    const fbUser = auth.currentUser;
     const session = api.getCurrentSessionUser();
+    if (fbUser) {
+      return {
+        uid: fbUser.uid,
+        displayName: session?.name || fbUser.displayName || fbUser.email || 'Usuário',
+        email: fbUser.email || session?.email || '',
+        user: session || undefined,
+      };
+    }
     if (session) {
       return {
         uid: session.uid,
@@ -532,12 +805,138 @@ export const api = {
     };
   },
 
+  async resolveOrProvisionUserProfile(
+    uid: string,
+    email: string,
+    displayName?: string,
+    photoUrl?: string
+  ): Promise<User> {
+    const cleanEmail = email.trim().toLowerCase();
+
+    // 1. Direct lookup by Firebase Auth UID
+    const direct = await getDocById<User>('users', uid).catch(() => null);
+    if (direct) {
+      const normalized: User = {
+        ...direct,
+        uid,
+        id: uid,
+        name: direct.name || displayName || cleanEmail || 'Membro',
+        email: direct.email || cleanEmail,
+        avatar: direct.avatar || photoUrl || '',
+        ...(SUPER_ADMIN_EMAILS.has(cleanEmail)
+          ? {
+              role: 'super_admin' as UserRole,
+              roleLabel: 'Super Administrador',
+              canManageChurchPage: true,
+              canManageFinances: true,
+            }
+          : {}),
+      };
+      try {
+        localStorage.setItem('ptb_session_user', JSON.stringify(normalized));
+      } catch {}
+      return normalized;
+    }
+
+    // 2. Lookup across users collection by email (for pre-created or legacy UID records like admin_pedro_martins)
+    if (cleanEmail) {
+      try {
+        const allUsersSnap = await getDocs(collection(db, 'users'));
+        const matchedDoc = allUsersSnap.docs.find(
+          (d) => ((d.data() as any)?.email || '').toLowerCase().trim() === cleanEmail
+        );
+        if (matchedDoc) {
+          const data = matchedDoc.data() as User;
+          const syncedProfile: User = {
+            ...data,
+            uid,
+            id: uid,
+            name: data.name || displayName || cleanEmail,
+            email: cleanEmail,
+            avatar: data.avatar || photoUrl || '',
+            ...(SUPER_ADMIN_EMAILS.has(cleanEmail)
+              ? {
+                  role: 'super_admin' as UserRole,
+                  roleLabel: 'Super Administrador',
+                  canManageChurchPage: true,
+                  canManageFinances: true,
+                }
+              : {}),
+            updatedAt: new Date().toISOString(),
+          };
+          await setDocById('users', uid, syncedProfile, true).catch(() => {});
+          if (syncedProfile.role === 'super_admin') {
+            await setDocById('admins', uid, { uid, email: cleanEmail, updatedAt: syncedProfile.updatedAt }, true).catch(() => {});
+          }
+          try {
+            localStorage.setItem('ptb_session_user', JSON.stringify(syncedProfile));
+          } catch {}
+          return syncedProfile;
+        }
+      } catch (err) {
+        console.warn('Email lookup in users failed:', err);
+      }
+    }
+
+    // 3. Provision pre-authorized seeded team accounts cleanly if missing in Firestore
+    const seedDefaults = cleanEmail ? getInitialAdminDefaults(cleanEmail, uid, displayName, photoUrl) : null;
+    if (seedDefaults) {
+      await setDocById('users', uid, seedDefaults, true).catch(() => {});
+      if (seedDefaults.role === 'super_admin') {
+        await setDocById('admins', uid, { uid, email: cleanEmail, createdAt: seedDefaults.createdAt }, true).catch(() => {});
+      }
+      try {
+        localStorage.setItem('ptb_session_user', JSON.stringify(seedDefaults));
+      } catch {}
+      return seedDefaults;
+    }
+
+    throw new Error('Conta não cadastrada na equipe PT-B Mídia. Solicite acesso ao Super Administrador.');
+  },
+
   async loginWithGoogle(): Promise<User | null> {
-    throw new Error('Login com Google desativado. Utilize seu e-mail e senha de acesso.');
+    try {
+      const cred = await signInWithPopup(auth, googleProvider);
+      const fbUser = cred.user;
+      const profile = await api.resolveOrProvisionUserProfile(
+        fbUser.uid,
+        fbUser.email || '',
+        fbUser.displayName || undefined,
+        fbUser.photoURL || undefined
+      );
+      if (profile.status === 'blocked') {
+        await signOut(auth);
+        throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
+      }
+      return profile;
+    } catch (error: any) {
+      if (error?.code === 'auth/popup-blocked') {
+        await signInWithRedirect(auth, googleProvider);
+        return null;
+      }
+      if (error?.message?.includes('não cadastrada na equipe')) {
+        await signOut(auth).catch(() => {});
+        throw error;
+      }
+      throw new Error(translateAuthError(error));
+    }
   },
 
   async checkRedirectAuth(): Promise<User | null> {
-    return null;
+    try {
+      const result = await getRedirectResult(auth);
+      if (!result?.user) return null;
+      const fbUser = result.user;
+      return await api.resolveOrProvisionUserProfile(
+        fbUser.uid,
+        fbUser.email || '',
+        fbUser.displayName || undefined,
+        fbUser.photoURL || undefined
+      );
+    } catch (err) {
+      console.warn('Redirect auth check note:', err);
+      return null;
+    }
   },
 
   async loginWithEmail(email: string, pass: string): Promise<User> {
@@ -548,77 +947,123 @@ export const api = {
       throw new Error('Informe e-mail e senha.');
     }
 
-    const res = await apiFetch<{ user: User }>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email: cleanEmail, password: cleanPass }),
-    });
-
-    const profile = res.user;
     try {
-      localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-    } catch {}
-    emitAuthChange(profile);
-    return profile;
+      const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
+      const fbUser = cred.user;
+      const profile = await api.resolveOrProvisionUserProfile(
+        fbUser.uid,
+        fbUser.email || cleanEmail,
+        fbUser.displayName || undefined,
+        fbUser.photoURL || undefined
+      );
+      if (profile.status === 'blocked') {
+        await signOut(auth);
+        throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
+      }
+      return profile;
+    } catch (error: any) {
+      if (error?.message?.includes('suspensa') || error?.message?.includes('não cadastrada')) {
+        throw error;
+      }
+      throw new Error(translateAuthError(error));
+    }
   },
 
   async registerWithEmail(name: string, email: string, pass: string): Promise<User> {
-    const res = await apiFetch<{ user: User }>('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: name.trim(),
-        email: email.trim().toLowerCase(),
-        password: pass.trim(),
-      }),
-    });
-
-    const profile = res.user;
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPass = pass.trim();
+    if (!SUPER_ADMIN_EMAILS.has(cleanEmail)) {
+      throw new Error(
+        'Cadastro público desabilitado. Novos membros devem ser cadastrados pelo Super Administrador.'
+      );
+    }
     try {
-      localStorage.setItem('ptb_session_user', JSON.stringify(profile));
-    } catch {}
-    emitAuthChange(profile);
-    return profile;
+      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
+      return await api.resolveOrProvisionUserProfile(
+        cred.user.uid,
+        cleanEmail,
+        name.trim()
+      );
+    } catch (error: any) {
+      throw new Error(translateAuthError(error));
+    }
   },
 
   async logout(): Promise<void> {
     try {
       localStorage.removeItem('ptb_session_user');
     } catch {}
-    emitAuthChange(null);
+    await signOut(auth);
   },
 
-  async resetPassword(email: string, newPassword?: string): Promise<void> {
-    await apiFetch('/api/auth/reset-password', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: email.trim().toLowerCase(),
-        ...(newPassword ? { newPassword } : {}),
-      }),
-    });
+  async resetPassword(email: string, _newPassword?: string): Promise<void> {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      throw new Error('Informe o e-mail para redefinir a senha.');
+    }
+    try {
+      await sendPasswordResetEmail(auth, cleanEmail);
+    } catch (error: any) {
+      throw new Error(translateAuthError(error));
+    }
   },
 
   onAuthStateChanged(callback: (user: User | null) => void) {
-    authListeners.add(callback);
-    callback(api.getCurrentSessionUser());
-    return () => {
-      authListeners.delete(callback);
-    };
+    return firebaseOnAuthStateChanged(auth, async (fbUser) => {
+      if (!fbUser) {
+        try {
+          localStorage.removeItem('ptb_session_user');
+        } catch {}
+        callback(null);
+        return;
+      }
+
+      try {
+        const profile = await api.resolveOrProvisionUserProfile(
+          fbUser.uid,
+          fbUser.email || '',
+          fbUser.displayName || undefined,
+          fbUser.photoURL || undefined
+        );
+        callback(profile);
+      } catch (err) {
+        console.warn('Falha ao resolver perfil no Firestore:', err);
+        const seedFallback = fbUser.email
+          ? getInitialAdminDefaults(
+              fbUser.email,
+              fbUser.uid,
+              fbUser.displayName || undefined,
+              fbUser.photoURL || undefined
+            )
+          : null;
+        if (seedFallback) {
+          callback(seedFallback);
+        } else {
+          callback({
+            uid: fbUser.uid,
+            id: fbUser.uid,
+            name: fbUser.displayName || fbUser.email || 'Membro',
+            email: fbUser.email || '',
+            role: 'media_member',
+            roleLabel: 'Membro da Mídia',
+            avatar: fbUser.photoURL || '',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+          });
+        }
+      }
+    });
   },
 
   async getUserProfile(uid: string, fallbackEmail: string = ''): Promise<User> {
-    const effectiveEmail = fallbackEmail.trim().toLowerCase();
-    try {
-      const res = await apiFetch<{ user: User }>(
-        `/api/auth/profile/${encodeURIComponent(uid)}${effectiveEmail ? `?email=${encodeURIComponent(effectiveEmail)}` : ''}`
-      );
-      if (res?.user) return res.user;
-    } catch {}
-
-    const session = api.getCurrentSessionUser();
-    if (session && (session.uid === uid || (effectiveEmail && session.email?.toLowerCase() === effectiveEmail))) {
-      return session;
-    }
-
-    throw new Error('Perfil de usuário não encontrado.');
+    const fbUser = auth.currentUser;
+    const effectiveEmail = fallbackEmail.trim().toLowerCase() || fbUser?.email?.toLowerCase() || '';
+    return await api.resolveOrProvisionUserProfile(
+      uid,
+      effectiveEmail,
+      fbUser?.displayName || undefined,
+      fbUser?.photoURL || undefined
+    );
   },
 
   // ==========================================
@@ -627,7 +1072,20 @@ export const api = {
   async getUsers(): Promise<User[]> {
     try {
       const list = await listCol<User>('users');
-      return list.map((u) => ({ ...u, id: u.uid || u.id, uid: u.uid || u.id || '' }));
+      // Deduplicate by email/uid preferring real auth UID docs over legacy docs if both exist
+      const byKey = new Map<string, User>();
+      for (const raw of list) {
+        const uid = raw.uid || raw.id || '';
+        const item: User = { ...raw, uid, id: uid };
+        const key = (item.email || uid).toLowerCase();
+        const existing = byKey.get(key);
+        if (!existing || (!existing.uid.startsWith('admin_') && item.uid.startsWith('admin_')) === false) {
+          if (!existing || !item.uid.startsWith('admin_')) {
+            byKey.set(key, item);
+          }
+        }
+      }
+      return Array.from(byKey.values());
     } catch (error) {
       console.warn('Could not list users:', error);
       const current = api.getCurrentSessionUser();
@@ -643,10 +1101,51 @@ export const api = {
     avatar?: string;
   }): Promise<User> {
     const currentUser = api.getEffectiveUser();
-    const res = await apiFetch<{ user: User }>('/api/auth/users', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    const cleanEmail = data.email.trim().toLowerCase();
+    const roleLabels: Record<UserRole, string> = {
+      super_admin: 'Super Administrador',
+      media_admin: 'Administrador de Mídia',
+      media_member: 'Membro da Mídia',
+    };
+
+    const secondaryApp = createSecondaryAuthApp('secondary-team-creator');
+    const secondaryAuth = getAuth(secondaryApp);
+
+    let createdUid = '';
+    try {
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, data.initialPassword);
+      createdUid = cred.user.uid;
+    } catch (error: any) {
+      if (error?.code === 'auth/email-already-in-use') {
+        throw new Error('Este e-mail já possui uma conta registrada no Firebase Authentication.');
+      }
+      throw new Error(translateAuthError(error));
+    } finally {
+      await signOut(secondaryAuth).catch(() => {});
+    }
+
+    const now = new Date().toISOString();
+    const newUser: User = {
+      uid: createdUid,
+      id: createdUid,
+      name: data.name.trim(),
+      email: cleanEmail,
+      role: data.role,
+      roleLabel: roleLabels[data.role],
+      avatar:
+        data.avatar ||
+        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
+      status: 'active',
+      canManageChurchPage: data.role === 'super_admin' || data.role === 'media_admin',
+      canManageFinances: data.role === 'super_admin' || data.role === 'media_admin',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await setDocById('users', createdUid, newUser);
+    if (data.role === 'super_admin') {
+      await setDocById('admins', createdUid, { uid: createdUid, email: cleanEmail, createdAt: now }, true);
+    }
 
     await api.addActivity({
       userId: currentUser.uid,
@@ -654,12 +1153,11 @@ export const api = {
       action: 'role_change',
       actionLabel: 'Criou novo membro da equipe',
       targetType: 'user',
-      targetName: res.user.name,
-      details: `${res.user.roleLabel} (${res.user.email})`,
+      targetName: newUser.name,
+      details: `${newUser.roleLabel} (${newUser.email})`,
     });
 
-    notifyLocalSubscribers(['users']);
-    return res.user;
+    return newUser;
   },
 
   async updateUserRole(uid: string, role: UserRole): Promise<void> {
@@ -729,7 +1227,17 @@ export const api = {
 
   async uploadAvatar(file: File): Promise<string> {
     try {
-      const res = await uploadBinaryToServer(
+      return await uploadToFirebaseStorage(
+        file,
+        `avatars/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`,
+        file.type || 'image/jpeg'
+      );
+    } catch (fbErr) {
+      console.warn('Avatar upload via Firebase Storage fallback:', fbErr);
+    }
+
+    try {
+      const res = await uploadBinaryToServerFallback(
         file,
         `avatar_${Date.now()}_${file.name}`,
         file.type || 'image/jpeg'
@@ -776,7 +1284,7 @@ export const api = {
   },
 
   // ==========================================
-  // 3. SERVER STORAGE & FILES
+  // 3. FIREBASE STORAGE & FIRESTORE FILES
   // ==========================================
   async uploadFile(
     file: File,
@@ -797,22 +1305,41 @@ export const api = {
       console.warn('Thumbnail generation note:', thumbErr);
     }
 
-    const uploadResult = await uploadBinaryToServer(
-      file,
-      file.name,
-      file.type || 'application/octet-stream',
-      onProgress
-    );
+    const safeFileName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    let storagePath = `media/${fileId}_${safeFileName}`;
+    let downloadUrl = '';
+    let engineLabel = 'Firebase Storage';
 
-    const downloadUrl = uploadResult.downloadUrl;
-    const storagePath = `/uploads/${uploadResult.filename}`;
+    try {
+      downloadUrl = await uploadToFirebaseStorage(
+        file,
+        storagePath,
+        file.type || 'application/octet-stream',
+        onProgress
+      );
+    } catch (storageErr) {
+      console.warn('Firebase Storage falhou (usando fallback local em partes):', storageErr);
+      const serverRes = await uploadBinaryToServerFallback(
+        file,
+        file.name,
+        file.type || 'application/octet-stream',
+        onProgress
+      );
+      downloadUrl = serverRes.downloadUrl;
+      storagePath = `/uploads/${serverRes.filename}`;
+      engineLabel = 'Servidor Fallback + Firestore';
+    }
+
     if (onProgress) onProgress(100, 'Concluído');
 
     let finalThumb = generatedThumb;
     if (!finalThumb) {
       if (downloadUrl.startsWith('data:image/')) {
         finalThumb = downloadUrl;
-      } else if ((downloadUrl.startsWith('http') || downloadUrl.startsWith('/uploads/')) && (category === 'photo' || category === 'art')) {
+      } else if (
+        (downloadUrl.startsWith('http') || downloadUrl.startsWith('/uploads/')) &&
+        (category === 'photo' || category === 'art')
+      ) {
         finalThumb = downloadUrl;
       }
     }
@@ -842,6 +1369,7 @@ export const api = {
       duration: category === 'video' ? 'Original' : category === 'audio' ? 'Master' : null,
       metadata: {
         uploadedAt: new Date().toISOString(),
+        engine: engineLabel,
       },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -856,7 +1384,7 @@ export const api = {
       actionLabel: `Upload de ${category === 'photo' ? 'foto' : category === 'video' ? 'vídeo' : category === 'art' ? 'arte gráfica' : category === 'audio' ? 'áudio' : 'documento'} original`,
       targetType: 'file',
       targetName: file.name,
-      details: `${(file.size / (1024 * 1024)).toFixed(2)} MB · Servidor Local`,
+      details: `${(file.size / (1024 * 1024)).toFixed(2)} MB · ${engineLabel}`,
     });
 
     return newRecord;
@@ -941,9 +1469,9 @@ export const api = {
         list = list.filter(
           (f) =>
             f.name.toLowerCase().includes(q) ||
-            f.ownerName.toLowerCase().includes(q) ||
+            (f.ownerName || '').toLowerCase().includes(q) ||
             (f.tags && f.tags.some((t) => t.toLowerCase().includes(q))) ||
-            f.extension.toLowerCase().includes(q)
+            (f.extension || '').toLowerCase().includes(q)
         );
       }
 
@@ -983,6 +1511,12 @@ export const api = {
     if (!file) return;
 
     if (permanent) {
+      if (file.storagePath && !file.storagePath.startsWith('/uploads/')) {
+        try {
+          await deleteObject(ref(storage, file.storagePath));
+        } catch {}
+      }
+      await deleteDocById('file_data', id).catch(() => {});
       await deleteDocById('files', id);
       await api.addActivity({
         userId: currentUser.uid,
@@ -991,7 +1525,7 @@ export const api = {
         actionLabel: 'Excluiu arquivo permanentemente',
         targetType: 'file',
         targetName: file.name,
-        details: 'Arquivo removido definitivamente do servidor',
+        details: 'Arquivo removido definitivamente do Firebase',
       });
     } else {
       await updateDocById('files', id, {
@@ -1020,7 +1554,7 @@ export const api = {
     });
 
     if (file?.folderId) {
-      const folder = await getDocById<Folder>('folders', file.folderId);
+      const folder = await getDocById<Folder>('folders', file.folderId).catch(() => null);
       if (folder?.inTrash) {
         await updateDocById('folders', file.folderId, {
           inTrash: false,
@@ -1091,7 +1625,7 @@ export const api = {
 
   async deleteFolder(id: string, permanent: boolean = false): Promise<void> {
     const currentUser = api.getEffectiveUser();
-    const folder = await getDocById<Folder>('folders', id);
+    const folder = await getDocById<Folder>('folders', id).catch(() => null);
     const folderName = folder?.name || 'Pasta';
 
     const allFiles = await listCol<FileRecord>('files');
@@ -1147,7 +1681,7 @@ export const api = {
 
   async restoreFolder(id: string): Promise<void> {
     const currentUser = api.getEffectiveUser();
-    const folder = await getDocById<Folder>('folders', id);
+    const folder = await getDocById<Folder>('folders', id).catch(() => null);
     const folderName = folder?.name || 'Pasta';
     const now = new Date().toISOString();
 
@@ -1165,7 +1699,7 @@ export const api = {
     ];
 
     if (folder?.parentId) {
-      const parent = await getDocById<Folder>('folders', folder.parentId);
+      const parent = await getDocById<Folder>('folders', folder.parentId).catch(() => null);
       if (parent?.inTrash) {
         ops.push({
           type: 'update',
@@ -1371,7 +1905,7 @@ export const api = {
     const defaultData: any = {
       churchName: 'PT-B Mídia',
       churchSubtitle: 'Central de Arquivos e Mídias',
-      storageEngine: 'Servidor Dedicado PT-B Mídia',
+      storageEngine: 'Firebase Cloud Storage + Firestore',
       totalQuotaBytes: 2 * 1024 * 1024 * 1024 * 1024,
       updatedAt: new Date().toISOString(),
     };
@@ -1382,22 +1916,24 @@ export const api = {
 
       return {
         ...baseData,
-        projectId: 'ptb-midia-local',
-        storageBucket: '/uploads',
-        firestoreDatabaseId: 'Banco Persistente Local',
+        projectId: FIREBASE_PROJECT_ID,
+        storageBucket: FIREBASE_STORAGE_BUCKET,
+        firestoreDatabaseId: FIRESTORE_DATABASE_ID,
+        authDomain: FIREBASE_AUTH_DOMAIN,
         settings: baseData,
         gcsInstructions: {
           active: true,
-          bucket: '/uploads',
-          status: 'Armazenamento Dedicado Ativo',
+          bucket: FIREBASE_STORAGE_BUCKET,
+          status: 'Firebase Cloud Conectado',
         },
       };
     } catch {
       return {
         ...defaultData,
-        projectId: 'ptb-midia-local',
-        storageBucket: '/uploads',
-        firestoreDatabaseId: 'Banco Persistente Local',
+        projectId: FIREBASE_PROJECT_ID,
+        storageBucket: FIREBASE_STORAGE_BUCKET,
+        firestoreDatabaseId: FIRESTORE_DATABASE_ID,
+        authDomain: FIREBASE_AUTH_DOMAIN,
         settings: defaultData,
       };
     }
@@ -1428,7 +1964,7 @@ export const api = {
           totalQuotaBytes: 2 * 1024 * 1024 * 1024 * 1024,
           churchName: 'PT-B Mídia',
           churchSubtitle: 'Central de Arquivos e Mídias',
-          storageEngine: 'Servidor Dedicado PT-B Mídia',
+          storageEngine: 'Firebase Cloud Storage + Firestore',
           updatedAt: new Date().toISOString(),
         } as SystemSettings)),
       ]);
@@ -1544,12 +2080,28 @@ export const api = {
     const secondary = preferOriginal ? file.thumbnailUrl : file.downloadUrl;
     const source = primary || secondary;
     if (!source) return null;
+
+    if (source.startsWith('chunked://')) {
+      if (resolvedChunkCache.has(source)) {
+        return resolvedChunkCache.get(source)!;
+      }
+      const blob = await resolveChunkedFirestoreBlob(source, file.mimeType);
+      if (!blob) return secondary && !secondary.startsWith('chunked://') ? secondary : null;
+      const objectUrl = URL.createObjectURL(blob);
+      resolvedChunkCache.set(source, objectUrl);
+      return objectUrl;
+    }
+
     return source;
   },
 
   async resolveFileBlob(file: FileRecord): Promise<Blob | null> {
     const url = file.downloadUrl || file.thumbnailUrl;
     if (!url) return null;
+
+    if (url.startsWith('chunked://')) {
+      return await resolveChunkedFirestoreBlob(url, file.mimeType);
+    }
 
     if (url.startsWith('data:')) {
       const arr = url.split(',');
@@ -1571,11 +2123,29 @@ export const api = {
   async triggerDownload(urlOrRecord: string | FileRecord, customFilename?: string) {
     let url = typeof urlOrRecord === 'string' ? urlOrRecord : urlOrRecord.downloadUrl;
     let filename = customFilename || (typeof urlOrRecord === 'object' ? urlOrRecord.name : '');
+    const mimeHint = typeof urlOrRecord === 'object' ? urlOrRecord.mimeType : undefined;
+
+    if (url.startsWith('chunked://')) {
+      const blob = await resolveChunkedFirestoreBlob(url, mimeHint);
+      if (blob) {
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename || 'arquivo_original';
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          URL.revokeObjectURL(blobUrl);
+          link.remove();
+        }, 1000);
+        return;
+      }
+    }
 
     if (url.includes('/api/files/') && url.includes('/download')) {
       const match = url.match(/\/api\/files\/([^/]+)\/download/);
       if (match && match[1]) {
-        const record = await getDocById<FileRecord>('files', match[1]);
+        const record = await getDocById<FileRecord>('files', match[1]).catch(() => null);
         if (record) {
           url = record.downloadUrl || url;
           if (!filename) filename = record.name;
@@ -1650,7 +2220,7 @@ export const api = {
 
     for (const item of items) {
       if (typeof item === 'string') {
-        const docItem = await getDocById<FileRecord>('files', item);
+        const docItem = await getDocById<FileRecord>('files', item).catch(() => null);
         if (docItem) files.push(docItem);
       } else {
         files.push(item);
@@ -2017,14 +2587,14 @@ export const api = {
 
   async incrementChurchDownloadCount(id: string): Promise<void> {
     try {
-      await apiFetch(`/api/church-downloads/${encodeURIComponent(id)}/increment`, {
-        method: 'POST',
+      await updateDoc(doc(db, 'church_downloads', id), {
+        downloadCount: increment(1),
       });
     } catch {}
   },
 
   async seedInitialChurchDataIfEmpty(): Promise<void> {
-    // Handled on server boot
+    // Existing Firestore data is preserved as-is
   },
 
   // ==========================================
@@ -2420,23 +2990,24 @@ export const api = {
     const docType: 'image' | 'pdf' | 'document' = isImage ? 'image' : (isPdf ? 'pdf' : 'document');
 
     try {
-      const res = await uploadBinaryToServer(
+      const url = await uploadToFirebaseStorage(
+        file,
+        `receipts/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`,
+        file.type || 'application/octet-stream'
+      );
+      return { url, name: file.name, type: docType, size: file.size };
+    } catch {}
+
+    try {
+      const res = await uploadBinaryToServerFallback(
         file,
         `recibo_${Date.now()}_${file.name}`,
         file.type || 'application/octet-stream'
       );
-
       if (res?.downloadUrl) {
-        return {
-          url: res.downloadUrl,
-          name: file.name,
-          type: docType,
-          size: file.size,
-        };
+        return { url: res.downloadUrl, name: file.name, type: docType, size: file.size };
       }
-    } catch (err) {
-      console.warn('Upload via /api/upload falhou, usando FileReader DataURL fallback:', err);
-    }
+    } catch {}
 
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -2535,7 +3106,7 @@ export const api = {
   },
 
   async deletePublicEvent(id: string): Promise<void> {
-    const regs = await listCol<EventRegistration & { docId?: string }>('event_registrations');
+    const regs = await listCol<EventRegistration & { firestoreDocId?: string }>('event_registrations');
     const ops: { type: 'delete'; col: string; id: string }[] = [
       { type: 'delete', col: 'public_events', id },
       ...regs
@@ -2727,18 +3298,22 @@ export const api = {
   ): Promise<void> {
     if (!eventId) return;
     try {
-      const evData = await getDocById<PublicRegistrationEvent>('public_events', eventId);
-      if (!evData) return;
-      const prevMovements = Array.isArray(evData.cashboxMovements) ? evData.cashboxMovements : [];
-      const newEntry: EventCashboxMovement = {
-        id: `cx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        timestamp: new Date().toISOString(),
-        ...movement,
-      };
-      const updatedMovements = [newEntry, ...prevMovements].slice(0, 120);
-      await updateDocById('public_events', eventId, {
-        cashboxMovements: updatedMovements,
-        updatedAt: new Date().toISOString(),
+      await runTransaction(db, async (tx) => {
+        const refEv = doc(db, 'public_events', eventId);
+        const snap = await tx.get(refEv);
+        if (!snap.exists()) return;
+        const evData = snap.data() as PublicRegistrationEvent;
+        const prevMovements = Array.isArray(evData.cashboxMovements) ? evData.cashboxMovements : [];
+        const newEntry: EventCashboxMovement = {
+          id: `cx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          timestamp: new Date().toISOString(),
+          ...movement,
+        };
+        const updatedMovements = [newEntry, ...prevMovements].slice(0, 120);
+        tx.update(refEv, removeUndefinedValues({
+          cashboxMovements: updatedMovements,
+          updatedAt: new Date().toISOString(),
+        }));
       });
     } catch (error) {
       console.warn('Could not append event cashbox movement:', error);
@@ -2906,7 +3481,15 @@ export const api = {
 
   async uploadChurchImage(file: File, prefix = 'church'): Promise<string> {
     try {
-      const res = await uploadBinaryToServer(
+      return await uploadToFirebaseStorage(
+        file,
+        `church_images/${prefix}_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`,
+        file.type || 'image/jpeg'
+      );
+    } catch {}
+
+    try {
+      const res = await uploadBinaryToServerFallback(
         file,
         `${prefix}_${Date.now()}_${file.name}`,
         file.type || 'image/jpeg'
@@ -2949,18 +3532,59 @@ export const api = {
   },
 
   async seedInitialTeamScheduleIfEmpty(): Promise<void> {
-    // Intentionally empty
+    // Existing Firestore data is preserved as-is
   },
 
   // ==========================================
-  // SISTEMA DE CHAMADA, PRESENÇA & FALTAS DE MEMBROS
+  // SISTEMA DE CHAMADA, PRESENÇA & FALTAS DE MEMBROS (FIRESTORE TRANSACTIONS)
   // ==========================================
   async ensureInitialAttendanceRoster(forceRestore = false): Promise<void> {
-    await apiFetch('/api/attendance/seed', {
-      method: 'POST',
-      body: JSON.stringify({ forceRestore }),
-    });
-    notifyLocalSubscribers(['attendance_departments', 'attendance_members', 'settings']);
+    try {
+      if (!forceRestore) {
+        const seedMarker = await getDocById<any>('settings', 'attendance_roster_seeded').catch(() => null);
+        if (seedMarker?.seeded) return;
+
+        const existingDepts = await getDocs(collection(db, 'attendance_departments'));
+        if (!existingDepts.empty) {
+          await setDocById(
+            'settings',
+            'attendance_roster_seeded',
+            { seeded: true, updatedAt: new Date().toISOString() },
+            true
+          ).catch(() => {});
+          return;
+        }
+      }
+
+      const now = new Date().toISOString();
+      const { departments, members } = buildInitialRoster(now);
+      const ops: { type: 'set'; col: string; id: string; data: any; merge?: boolean }[] = [
+        ...departments.map((d) => ({
+          type: 'set' as const,
+          col: 'attendance_departments',
+          id: d.id,
+          data: d,
+          merge: true,
+        })),
+        ...members.map((m) => ({
+          type: 'set' as const,
+          col: 'attendance_members',
+          id: m.id,
+          data: m,
+          merge: true,
+        })),
+        {
+          type: 'set',
+          col: 'settings',
+          id: 'attendance_roster_seeded',
+          data: { seeded: true, updatedAt: now },
+          merge: true,
+        },
+      ];
+      await batchWrite(ops);
+    } catch (error) {
+      console.warn('Could not ensure initial attendance roster:', error);
+    }
   },
 
   subscribeAttendanceDepartments(callback: (departments: AttendanceDepartment[]) => void) {
@@ -3172,12 +3796,39 @@ export const api = {
       name: operator?.name || effective.displayName,
       email: operator?.email || effective.email || '',
     };
-    const res = await apiFetch<{ call: AttendanceCall }>('/api/attendance/claim', {
-      method: 'POST',
-      body: JSON.stringify({ callBase, operator: op }),
+    const now = new Date().toISOString();
+
+    return await runTransaction(db, async (tx) => {
+      const refDoc = doc(db, 'attendance_calls', callBase.id);
+      const snap = await tx.get(refDoc);
+      const existing = snap.exists() ? (snap.data() as AttendanceCall) : null;
+
+      if (existing?.activeOperatorUid && existing.activeOperatorUid !== op.uid) {
+        throw new Error(`ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`);
+      }
+
+      const nextPayload: AttendanceCall = removeUndefinedValues({
+        ...(existing || callBase),
+        id: callBase.id,
+        activeOperatorUid: op.uid,
+        activeOperatorName: op.name,
+        activeOperatorEmail: op.email || '',
+        activeOperatorStartedAt:
+          existing?.activeOperatorUid === op.uid && existing.activeOperatorStartedAt
+            ? existing.activeOperatorStartedAt
+            : now,
+        callStatus: 'em_andamento',
+        updatedByUid: op.uid,
+        updatedByName: op.name,
+        updatedAt: now,
+        createdAt: existing?.createdAt || callBase.createdAt || now,
+        createdByUid: existing?.createdByUid || callBase.createdByUid || op.uid,
+        createdByName: existing?.createdByName || callBase.createdByName || op.name,
+      });
+
+      tx.set(refDoc, nextPayload);
+      return nextPayload;
     });
-    notifyLocalSubscribers(['attendance_calls']);
-    return res.call;
   },
 
   async releaseAttendanceCall(
@@ -3190,12 +3841,34 @@ export const api = {
       uid: operator?.uid || effective.uid,
       name: operator?.name || effective.displayName,
     };
-    const res = await apiFetch<{ call: AttendanceCall | null }>('/api/attendance/release', {
-      method: 'POST',
-      body: JSON.stringify({ callId, operator: op, markFinished }),
+    const now = new Date().toISOString();
+
+    return await runTransaction(db, async (tx) => {
+      const refDoc = doc(db, 'attendance_calls', callId);
+      const snap = await tx.get(refDoc);
+      if (!snap.exists()) return null;
+
+      const existing = snap.data() as AttendanceCall;
+      if (existing.activeOperatorUid && existing.activeOperatorUid !== op.uid) {
+        throw new Error(`ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`);
+      }
+
+      const nextPayload: AttendanceCall = removeUndefinedValues({
+        ...existing,
+        id: callId,
+        activeOperatorUid: null,
+        activeOperatorName: null,
+        activeOperatorEmail: null,
+        activeOperatorStartedAt: null,
+        callStatus: markFinished ? 'finalizada' : 'aberta',
+        updatedByUid: op.uid,
+        updatedByName: op.name,
+        updatedAt: now,
+      });
+
+      tx.set(refDoc, nextPayload);
+      return nextPayload;
     });
-    notifyLocalSubscribers(['attendance_calls']);
-    return res.call;
   },
 
   async saveAttendanceCall(
@@ -3208,12 +3881,61 @@ export const api = {
       name: options?.operator?.name || effective.displayName,
       email: options?.operator?.email || effective.email || '',
     };
-    const res = await apiFetch<{ call: AttendanceCall }>('/api/attendance/save', {
-      method: 'POST',
-      body: JSON.stringify({ call, options, operator: op }),
+    const now = new Date().toISOString();
+
+    return await runTransaction(db, async (tx) => {
+      const refDoc = doc(db, 'attendance_calls', call.id);
+      const snap = await tx.get(refDoc);
+      const existing = snap.exists() ? (snap.data() as AttendanceCall) : null;
+
+      if (existing?.activeOperatorUid && existing.activeOperatorUid !== op.uid) {
+        throw new Error(`ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`);
+      }
+
+      const shouldClaim =
+        options?.autoClaimIfFree !== false &&
+        (!existing || !existing.activeOperatorUid || existing.activeOperatorUid === op.uid);
+
+      const payload: AttendanceCall = removeUndefinedValues({
+        ...call,
+        activeOperatorUid:
+          call.activeOperatorUid !== undefined
+            ? call.activeOperatorUid
+            : shouldClaim
+            ? op.uid
+            : existing?.activeOperatorUid ?? null,
+        activeOperatorName:
+          call.activeOperatorName !== undefined
+            ? call.activeOperatorName
+            : shouldClaim
+            ? op.name
+            : existing?.activeOperatorName ?? null,
+        activeOperatorEmail:
+          call.activeOperatorEmail !== undefined
+            ? call.activeOperatorEmail
+            : shouldClaim
+            ? op.email || ''
+            : existing?.activeOperatorEmail ?? null,
+        activeOperatorStartedAt:
+          call.activeOperatorStartedAt !== undefined
+            ? call.activeOperatorStartedAt
+            : shouldClaim
+            ? existing?.activeOperatorStartedAt || now
+            : existing?.activeOperatorStartedAt ?? null,
+        callStatus:
+          call.callStatus ||
+          (shouldClaim ? 'em_andamento' : existing?.callStatus || 'aberta'),
+        updatedByUid: op.uid,
+        updatedByName: op.name,
+        updatedAt: now,
+        createdAt: existing?.createdAt || call.createdAt || now,
+        createdByUid: existing?.createdByUid || call.createdByUid || op.uid,
+        createdByName: existing?.createdByName || call.createdByName || op.name,
+      });
+
+      tx.set(refDoc, payload);
+      return payload;
     });
-    notifyLocalSubscribers(['attendance_calls']);
-    return res.call;
   },
 
   async markMemberPresentByQr(
@@ -3232,17 +3954,76 @@ export const api = {
       name: operator?.name || effective.displayName,
       email: operator?.email || effective.email || '',
     };
-    const res = await apiFetch<{
-      outcome: 'checked_in_now' | 'already_present';
-      call: AttendanceCall;
-      entry: AttendanceEntry;
-    }>('/api/attendance/qr-checkin', {
-      method: 'POST',
-      body: JSON.stringify({ callBase, member, department, operator: op }),
+    const now = new Date().toISOString();
+
+    const txResult = await runTransaction(db, async (tx) => {
+      const refDoc = doc(db, 'attendance_calls', callBase.id);
+      const snap = await tx.get(refDoc);
+      const existing = snap.exists() ? (snap.data() as AttendanceCall) : null;
+
+      if (existing?.activeOperatorUid && existing.activeOperatorUid !== op.uid) {
+        throw new Error(`ATTENDANCE_LOCKED:${existing.activeOperatorName || 'Outro membro'}`);
+      }
+
+      const baseRecords = existing?.records || callBase.records || {};
+      const existingEntry = baseRecords[member.id];
+      if (existingEntry?.status === 'presente') {
+        return {
+          outcome: 'already_present' as const,
+          call: existing || callBase,
+          entry: existingEntry,
+        };
+      }
+
+      const entry: AttendanceEntry = {
+        memberId: member.id,
+        memberName: member.name,
+        departmentId: member.departmentId,
+        departmentName: department?.name || existingEntry?.departmentName || 'Geral',
+        status: 'presente',
+        markedByUid: op.uid,
+        markedByName: op.name,
+        markedAt: now,
+      };
+
+      const baseIncluded = existing?.includedMemberIds || callBase.includedMemberIds || [];
+      const nextIncluded = baseIncluded.includes(member.id)
+        ? baseIncluded
+        : [...baseIncluded, member.id];
+
+      const nextCall: AttendanceCall = removeUndefinedValues({
+        ...(existing || callBase),
+        id: callBase.id,
+        includedMemberIds: nextIncluded,
+        records: {
+          ...baseRecords,
+          [member.id]: entry,
+        },
+        activeOperatorUid: op.uid,
+        activeOperatorName: op.name,
+        activeOperatorEmail: op.email || '',
+        activeOperatorStartedAt:
+          existing?.activeOperatorUid === op.uid && existing.activeOperatorStartedAt
+            ? existing.activeOperatorStartedAt
+            : now,
+        callStatus: 'em_andamento',
+        updatedByUid: op.uid,
+        updatedByName: op.name,
+        updatedAt: now,
+        createdAt: existing?.createdAt || callBase.createdAt || now,
+        createdByUid: existing?.createdByUid || callBase.createdByUid || op.uid,
+        createdByName: existing?.createdByName || callBase.createdByName || op.name,
+      });
+
+      tx.set(refDoc, nextCall);
+      return {
+        outcome: 'checked_in_now' as const,
+        call: nextCall,
+        entry,
+      };
     });
 
-    if (res.outcome === 'checked_in_now') {
-      notifyLocalSubscribers(['attendance_calls']);
+    if (txResult.outcome === 'checked_in_now') {
       await api.addActivity({
         userId: op.uid,
         userName: op.name,
@@ -3253,7 +4034,8 @@ export const api = {
         details: `Chamada: ${callBase.title} (${callBase.date})`,
       });
     }
-    return res;
+
+    return txResult;
   },
 
   async deleteAttendanceCall(callId: string): Promise<void> {
