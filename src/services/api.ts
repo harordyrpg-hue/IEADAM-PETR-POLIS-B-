@@ -13,17 +13,19 @@ import {
   writeBatch,
   runTransaction,
   increment,
+  deleteField,
 } from 'firebase/firestore';
 import {
   signInWithPopup,
-  signInWithRedirect,
   getRedirectResult,
-  signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut,
   onAuthStateChanged as firebaseOnAuthStateChanged,
-  getAuth,
+  EmailAuthProvider,
+  linkWithCredential,
+  updatePassword,
+  reauthenticateWithCredential,
 } from 'firebase/auth';
 import {
   ref,
@@ -36,7 +38,6 @@ import {
   auth,
   storage,
   googleProvider,
-  createSecondaryAuthApp,
   FIREBASE_PROJECT_ID,
   FIRESTORE_DATABASE_ID,
   FIREBASE_STORAGE_BUCKET,
@@ -175,7 +176,7 @@ function translateAuthError(error: any): string {
   const code = error?.code || '';
   const msg = error?.message || '';
   if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
-    return 'E-mail ou senha incorretos.';
+    return 'E-mail ou senha incorretos no Firebase. Se você entra com o Google ou ainda não definiu uma senha, use "Entrar com Google" ou clique em "Esqueci minha senha".';
   }
   if (code === 'auth/email-already-in-use') {
     return 'Este e-mail já está cadastrado no Firebase.';
@@ -187,21 +188,40 @@ function translateAuthError(error: any): string {
     return 'Formato de e-mail inválido.';
   }
   if (code === 'auth/too-many-requests') {
-    return 'Muitas tentativas seguidas. Aguarde alguns instantes antes de tentar novamente.';
+    return 'Muitas tentativas seguidas. Aguarde alguns minutos ou redefina a senha pelo e-mail.';
   }
   if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-    return 'Login com Google cancelado.';
+    return 'Janela de login com Google fechada antes de concluir. Tente novamente ou abra o app em uma nova aba.';
   }
   if (code === 'auth/popup-blocked') {
-    return 'O navegador bloqueou a janela do Google. Redirecionando...';
+    return 'O navegador bloqueou a janela de login do Google. Permita pop-ups ou abra o app em uma nova aba.';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+    return `Domínio não autorizado no Firebase Authentication${host ? ` (${host})` : ''}. Abra em uma aba autorizada ou use E-mail e Senha.`;
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'Método de login não habilitado no Firebase Authentication.';
+  }
+  if (code === 'auth/user-disabled') {
+    return 'Esta conta foi desativada no Firebase Authentication.';
+  }
+  if (code === 'auth/requires-recent-login') {
+    return 'Por segurança, confirme sua senha atual ou faça login novamente antes de alterar a senha.';
+  }
+  if (code === 'auth/account-exists-with-different-credential') {
+    return 'Este e-mail já existe com outro método de acesso. Entre com E-mail/Senha ou Google.';
   }
   if (code === 'auth/network-request-failed') {
     return 'Falha de conexão com o Firebase. Verifique sua internet.';
   }
+  if (code === 'auth/internal-error') {
+    return 'Erro interno na autenticação do Firebase. Tente abrir o sistema em uma nova aba ou usar E-mail e Senha.';
+  }
   if (isQuotaError(error)) {
     return 'Cota do Firebase excedida temporariamente (RESOURCE_EXHAUSTED).';
   }
-  return msg || 'Erro de autenticação no Firebase.';
+  return code ? `${msg || 'Erro de autenticação no Firebase.'} (${code})` : (msg || 'Erro de autenticação no Firebase.');
 }
 
 // ==========================================
@@ -578,10 +598,159 @@ async function resolveChunkedFirestoreBlob(chunkUri: string, fallbackMime = 'app
 // ==========================================
 // PRE-CONFIGURED TEAM / SUPER ADMIN HELPERS
 // ==========================================
+const DEFAULT_INITIAL_PASSWORD = '12345';
+
 const SUPER_ADMIN_EMAILS = new Set([
   'pedro.martinss225@gmail.com',
   'emillycampos308@gmail.com',
 ]);
+
+function sha256HexFallback(input: string): string {
+  const bytes = new TextEncoder().encode(input);
+  const K = new Uint32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ]);
+  const H = new Uint32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  ]);
+
+  const bitLen = bytes.length * 8;
+  const totalLen = Math.ceil((bytes.length + 9) / 64) * 64;
+  const padded = new Uint8Array(totalLen);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(totalLen - 8, Math.floor(bitLen / 0x100000000), false);
+  view.setUint32(totalLen - 4, bitLen >>> 0, false);
+
+  const w = new Uint32Array(64);
+  const rotr = (n: number, x: number) => (x >>> n) | (x << (32 - n));
+
+  for (let offset = 0; offset < totalLen; offset += 64) {
+    for (let i = 0; i < 16; i++) {
+      w[i] = view.getUint32(offset + i * 4, false);
+    }
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(7, w[i - 15]) ^ rotr(18, w[i - 15]) ^ (w[i - 15] >>> 3);
+      const s1 = rotr(17, w[i - 2]) ^ rotr(19, w[i - 2]) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+
+    let a = H[0], b = H[1], c = H[2], d = H[3];
+    let e = H[4], f = H[5], g = H[6], h = H[7];
+
+    for (let i = 0; i < 64; i++) {
+      const S1 = rotr(6, e) ^ rotr(11, e) ^ rotr(25, e);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + S1 + ch + K[i] + w[i]) >>> 0;
+      const S0 = rotr(2, a) ^ rotr(13, a) ^ rotr(22, a);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (S0 + maj) >>> 0;
+
+      h = g; g = f; f = e; e = (d + temp1) >>> 0;
+      d = c; c = b; b = a; a = (temp1 + temp2) >>> 0;
+    }
+
+    H[0] = (H[0] + a) >>> 0;
+    H[1] = (H[1] + b) >>> 0;
+    H[2] = (H[2] + c) >>> 0;
+    H[3] = (H[3] + d) >>> 0;
+    H[4] = (H[4] + e) >>> 0;
+    H[5] = (H[5] + f) >>> 0;
+    H[6] = (H[6] + g) >>> 0;
+    H[7] = (H[7] + h) >>> 0;
+  }
+
+  return Array.from(H)
+    .map((n) => n.toString(16).padStart(8, '0'))
+    .join('');
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
+      const data = new TextEncoder().encode(input);
+      const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
+      return Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+    }
+  } catch {}
+  return sha256HexFallback(input);
+}
+
+function generateRandomSalt(): string {
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.crypto?.getRandomValues) {
+      const buf = new Uint8Array(16);
+      globalThis.crypto.getRandomValues(buf);
+      return Array.from(buf).map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch {}
+  return `${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
+}
+
+async function hashLocalCredential(password: string): Promise<string> {
+  const salt = generateRandomSalt();
+  const digest = await sha256Hex(`${salt}:${password}`);
+  return `v1:${salt}:${digest}`;
+}
+
+async function verifyLocalCredential(password: string, storedHash?: string | null): Promise<boolean> {
+  if (!storedHash || typeof storedHash !== 'string') return false;
+  const parts = storedHash.split(':');
+  if (parts.length !== 3 || parts[0] !== 'v1') return false;
+  const [, salt, expectedDigest] = parts;
+  if (!salt || !expectedDigest) return false;
+  const actualDigest = await sha256Hex(`${salt}:${password}`);
+  return actualDigest === expectedDigest;
+}
+
+type StoredUserRecord = User & {
+  firestoreDocId?: string;
+  passwordHash?: string;
+  initialPasswordHash?: string;
+};
+
+function sanitizeUserRecord(raw: StoredUserRecord): User {
+  const {
+    passwordHash: _ph,
+    initialPasswordHash: _iph,
+    firestoreDocId: _fid,
+    ...rest
+  } = raw;
+  const passwordSetOnce = Boolean(raw.passwordSetOnce);
+  const mustChangePassword =
+    typeof raw.mustChangePassword === 'boolean' ? raw.mustChangePassword : !passwordSetOnce;
+  return {
+    ...rest,
+    uid: raw.uid || raw.id || raw.firestoreDocId || '',
+    id: raw.id || raw.uid || raw.firestoreDocId || '',
+    passwordSetOnce,
+    mustChangePassword: passwordSetOnce ? false : mustChangePassword,
+  };
+}
+
+function pickCanonicalUserDoc(docs: { id: string; data: StoredUserRecord }[]): { id: string; data: StoredUserRecord } | null {
+  if (docs.length === 0) return null;
+  const nonLegacy = docs.find((d) => !d.id.startsWith('admin_') && !d.id.startsWith('user_'));
+  return nonLegacy || docs[0];
+}
+
+async function findUserDocsByEmail(cleanEmail: string): Promise<{ id: string; data: StoredUserRecord }[]> {
+  const snap = await getDocs(collection(db, 'users'));
+  return snap.docs
+    .filter((d) => ((d.data() as any)?.email || '').toLowerCase().trim() === cleanEmail)
+    .map((d) => ({ id: d.id, data: d.data() as StoredUserRecord }));
+}
 
 function getInitialAdminDefaults(email: string, uid: string, displayName?: string, photoUrl?: string): User | null {
   const clean = email.trim().toLowerCase();
@@ -598,6 +767,8 @@ function getInitialAdminDefaults(email: string, uid: string, displayName?: strin
       status: 'active',
       canManageChurchPage: true,
       canManageFinances: true,
+      mustChangePassword: true,
+      passwordSetOnce: false,
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: now,
     };
@@ -614,6 +785,8 @@ function getInitialAdminDefaults(email: string, uid: string, displayName?: strin
       status: 'active',
       canManageChurchPage: true,
       canManageFinances: true,
+      mustChangePassword: true,
+      passwordSetOnce: false,
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: now,
     };
@@ -630,6 +803,8 @@ function getInitialAdminDefaults(email: string, uid: string, displayName?: strin
       status: 'active',
       canManageChurchPage: true,
       canManageFinances: true,
+      mustChangePassword: true,
+      passwordSetOnce: false,
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: now,
     };
@@ -640,11 +815,30 @@ function getInitialAdminDefaults(email: string, uid: string, displayName?: strin
       id: uid,
       name: displayName || 'Franciele Pinheiro',
       email: clean,
-      role: 'media_member',
-      roleLabel: 'Membro da Mídia',
+      role: 'media_admin',
+      roleLabel: 'Administrador',
       avatar: photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
       status: 'active',
       canManageChurchPage: false,
+      mustChangePassword: true,
+      passwordSetOnce: false,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: now,
+    };
+  }
+  if (clean === 'elinesaraujo46@gmail.com') {
+    return {
+      uid,
+      id: uid,
+      name: displayName || 'Elines Araujo',
+      email: clean,
+      role: 'media_admin',
+      roleLabel: 'Administrador',
+      avatar: photoUrl || '',
+      status: 'active',
+      canManageChurchPage: false,
+      mustChangePassword: true,
+      passwordSetOnce: false,
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: now,
     };
@@ -813,10 +1007,10 @@ export const api = {
   ): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
 
-    // 1. Direct lookup by Firebase Auth UID
-    const direct = await getDocById<User>('users', uid).catch(() => null);
+    // 1. Direct lookup by Firebase Auth UID / Document ID
+    const direct = await getDocById<StoredUserRecord>('users', uid).catch(() => null);
     if (direct) {
-      const normalized: User = {
+      const normalized = sanitizeUserRecord({
         ...direct,
         uid,
         id: uid,
@@ -831,26 +1025,25 @@ export const api = {
               canManageFinances: true,
             }
           : {}),
-      };
+      });
       try {
         localStorage.setItem('ptb_session_user', JSON.stringify(normalized));
       } catch {}
       return normalized;
     }
 
-    // 2. Lookup across users collection by email (for pre-created or legacy UID records like admin_pedro_martins)
+    // 2. Lookup across users collection by email (preferring canonical UID docs over legacy admin_/user_ docs)
     if (cleanEmail) {
       try {
-        const allUsersSnap = await getDocs(collection(db, 'users'));
-        const matchedDoc = allUsersSnap.docs.find(
-          (d) => ((d.data() as any)?.email || '').toLowerCase().trim() === cleanEmail
-        );
-        if (matchedDoc) {
-          const data = matchedDoc.data() as User;
-          const syncedProfile: User = {
+        const matchedDocs = await findUserDocsByEmail(cleanEmail);
+        const canonical = pickCanonicalUserDoc(matchedDocs);
+        if (canonical) {
+          const data = canonical.data;
+          const targetUid = canonical.id || uid;
+          const sanitized = sanitizeUserRecord({
             ...data,
-            uid,
-            id: uid,
+            uid: targetUid,
+            id: targetUid,
             name: data.name || displayName || cleanEmail,
             email: cleanEmail,
             avatar: data.avatar || photoUrl || '',
@@ -863,15 +1056,15 @@ export const api = {
                 }
               : {}),
             updatedAt: new Date().toISOString(),
-          };
-          await setDocById('users', uid, syncedProfile, true).catch(() => {});
-          if (syncedProfile.role === 'super_admin') {
-            await setDocById('admins', uid, { uid, email: cleanEmail, updatedAt: syncedProfile.updatedAt }, true).catch(() => {});
+          });
+          await setDocById('users', targetUid, { ...sanitized }, true).catch(() => {});
+          if (sanitized.role === 'super_admin') {
+            await setDocById('admins', targetUid, { uid: targetUid, email: cleanEmail, updatedAt: sanitized.updatedAt }, true).catch(() => {});
           }
           try {
-            localStorage.setItem('ptb_session_user', JSON.stringify(syncedProfile));
+            localStorage.setItem('ptb_session_user', JSON.stringify(sanitized));
           } catch {}
-          return syncedProfile;
+          return sanitized;
         }
       } catch (err) {
         console.warn('Email lookup in users failed:', err);
@@ -894,6 +1087,39 @@ export const api = {
     throw new Error('Conta não cadastrada na equipe PT-B Mídia. Solicite acesso ao Super Administrador.');
   },
 
+  async refreshSessionUser(uid: string, email: string): Promise<User | null> {
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      let record: StoredUserRecord | null = null;
+      let targetId = uid;
+
+      if (uid) {
+        record = await getDocById<StoredUserRecord>('users', uid).catch(() => null);
+      }
+      if (!record && cleanEmail) {
+        const docs = await findUserDocsByEmail(cleanEmail);
+        const canonical = pickCanonicalUserDoc(docs);
+        if (canonical) {
+          record = canonical.data;
+          targetId = canonical.id;
+        }
+      }
+      if (!record) return null;
+
+      const sanitized = sanitizeUserRecord({
+        ...record,
+        uid: record.uid || targetId,
+        id: record.id || targetId,
+      });
+      try {
+        localStorage.setItem('ptb_session_user', JSON.stringify(sanitized));
+      } catch {}
+      return sanitized;
+    } catch {
+      return null;
+    }
+  },
+
   async loginWithGoogle(): Promise<User | null> {
     try {
       const cred = await signInWithPopup(auth, googleProvider);
@@ -906,15 +1132,14 @@ export const api = {
       );
       if (profile.status === 'blocked') {
         await signOut(auth);
+        try {
+          localStorage.removeItem('ptb_session_user');
+        } catch {}
         throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
       }
       return profile;
     } catch (error: any) {
-      if (error?.code === 'auth/popup-blocked') {
-        await signInWithRedirect(auth, googleProvider);
-        return null;
-      }
-      if (error?.message?.includes('não cadastrada na equipe')) {
+      if (error?.message?.includes('não cadastrada na equipe') || error?.message?.includes('suspensa')) {
         await signOut(auth).catch(() => {});
         throw error;
       }
@@ -941,44 +1166,168 @@ export const api = {
 
   async loginWithEmail(email: string, pass: string): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPass = pass.trim();
 
-    if (!cleanEmail || !cleanPass) {
-      throw new Error('Informe e-mail e senha.');
+    if (!cleanEmail || !pass) {
+      throw new Error('Informe seu e-mail e sua senha.');
     }
+
+    const matchedDocs = await findUserDocsByEmail(cleanEmail);
+    let canonical = pickCanonicalUserDoc(matchedDocs);
+
+    if (!canonical) {
+      const seedDefaults = getInitialAdminDefaults(
+        cleanEmail,
+        `user_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`
+      );
+      if (!seedDefaults) {
+        throw new Error('Conta não cadastrada na equipe PT-B Mídia. Solicite acesso ao Super Administrador.');
+      }
+      await setDocById('users', seedDefaults.uid, seedDefaults, true);
+      if (seedDefaults.role === 'super_admin') {
+        await setDocById('admins', seedDefaults.uid, { uid: seedDefaults.uid, email: cleanEmail, createdAt: seedDefaults.createdAt }, true).catch(() => {});
+      }
+      canonical = { id: seedDefaults.uid, data: seedDefaults };
+    }
+
+    const record = canonical.data;
+    if (record.status === 'blocked') {
+      throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
+    }
+
+    const passwordAlreadyDefinedOnce = Boolean(record.passwordSetOnce && record.passwordHash);
+
+    if (passwordAlreadyDefinedOnce) {
+      const valid = await verifyLocalCredential(pass, record.passwordHash);
+      if (!valid) {
+        throw new Error('Senha incorreta. Após o primeiro acesso, utilize apenas a senha definitiva que você cadastrou.');
+      }
+    } else {
+      const hasCustomInitial = Boolean(record.initialPasswordHash);
+      const validInitial = hasCustomInitial
+        ? await verifyLocalCredential(pass, record.initialPasswordHash)
+        : pass === DEFAULT_INITIAL_PASSWORD;
+
+      if (!validInitial) {
+        throw new Error(
+          hasCustomInitial
+            ? 'Senha provisória incorreta. Use a senha inicial informada pelo Administrador ou 12345 se resetada.'
+            : 'No primeiro acesso, entre utilizando seu e-mail e a senha provisória 12345.'
+        );
+      }
+    }
+
+    const sanitized = sanitizeUserRecord({
+      ...record,
+      uid: record.uid || canonical.id,
+      id: record.id || canonical.id,
+      email: cleanEmail,
+      ...(SUPER_ADMIN_EMAILS.has(cleanEmail)
+        ? {
+            role: 'super_admin' as UserRole,
+            roleLabel: 'Super Administrador',
+            canManageChurchPage: true,
+            canManageFinances: true,
+          }
+        : {}),
+      passwordSetOnce: passwordAlreadyDefinedOnce,
+      mustChangePassword: !passwordAlreadyDefinedOnce,
+    });
 
     try {
-      const cred = await signInWithEmailAndPassword(auth, cleanEmail, cleanPass);
-      const fbUser = cred.user;
-      const profile = await api.resolveOrProvisionUserProfile(
-        fbUser.uid,
-        fbUser.email || cleanEmail,
-        fbUser.displayName || undefined,
-        fbUser.photoURL || undefined
-      );
-      if (profile.status === 'blocked') {
-        await signOut(auth);
-        throw new Error('Sua conta foi suspensa temporariamente pelo Administrador.');
-      }
-      return profile;
-    } catch (error: any) {
-      if (error?.message?.includes('suspensa') || error?.message?.includes('não cadastrada')) {
-        throw error;
-      }
-      throw new Error(translateAuthError(error));
+      localStorage.setItem('ptb_session_user', JSON.stringify(sanitized));
+    } catch {}
+
+    return sanitized;
+  },
+
+  async completeFirstLoginPassword(newPassword: string): Promise<User> {
+    const current = api.getCurrentSessionUser();
+    if (!current || !current.email) {
+      throw new Error('Sessão expirada. Entre novamente com sua senha provisória.');
     }
+
+    const trimmed = newPassword.trim();
+    if (!trimmed || trimmed.length < 5) {
+      throw new Error('A senha definitiva deve ter no mínimo 5 caracteres.');
+    }
+    if (trimmed === DEFAULT_INITIAL_PASSWORD) {
+      throw new Error('Por segurança, escolha uma senha diferente da senha provisória 12345.');
+    }
+
+    const cleanEmail = current.email.trim().toLowerCase();
+    const matchedDocs = await findUserDocsByEmail(cleanEmail);
+    const canonical = pickCanonicalUserDoc(matchedDocs);
+
+    if (canonical?.data?.passwordSetOnce) {
+      const synced = sanitizeUserRecord({
+        ...canonical.data,
+        uid: canonical.data.uid || canonical.id,
+        id: canonical.data.id || canonical.id,
+      });
+      try {
+        localStorage.setItem('ptb_session_user', JSON.stringify(synced));
+      } catch {}
+      throw new Error('Sua senha definitiva já foi definida anteriormente e não pode ser alterada novamente.');
+    }
+
+    const now = new Date().toISOString();
+    const hashed = await hashLocalCredential(trimmed);
+
+    const targetIds = new Set<string>(matchedDocs.map((d) => d.id));
+    if (current.uid) targetIds.add(current.uid);
+
+    for (const targetId of targetIds) {
+      await setDoc(
+        doc(db, 'users', targetId),
+        {
+          passwordHash: hashed,
+          initialPasswordHash: deleteField(),
+          passwordSetOnce: true,
+          mustChangePassword: false,
+          passwordUpdatedAt: now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+    }
+
+    const updatedUser: User = {
+      ...current,
+      passwordSetOnce: true,
+      mustChangePassword: false,
+      passwordUpdatedAt: now,
+      updatedAt: now,
+    };
+
+    try {
+      localStorage.setItem('ptb_session_user', JSON.stringify(updatedUser));
+    } catch {}
+
+    // Best-effort sync to Firebase Auth if signed in with Google/Auth and >= 6 chars
+    if (auth.currentUser && trimmed.length >= 6) {
+      try {
+        const hasPasswordProvider = auth.currentUser.providerData.some((p) => p.providerId === 'password');
+        if (!hasPasswordProvider && auth.currentUser.email) {
+          const cred = EmailAuthProvider.credential(auth.currentUser.email, trimmed);
+          await linkWithCredential(auth.currentUser, cred);
+        } else {
+          await updatePassword(auth.currentUser, trimmed);
+        }
+      } catch {}
+    }
+
+    return updatedUser;
   },
 
   async registerWithEmail(name: string, email: string, pass: string): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPass = pass.trim();
     if (!SUPER_ADMIN_EMAILS.has(cleanEmail)) {
       throw new Error(
         'Cadastro público desabilitado. Novos membros devem ser cadastrados pelo Super Administrador.'
       );
     }
     try {
-      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
+      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
       return await api.resolveOrProvisionUserProfile(
         cred.user.uid,
         cleanEmail,
@@ -993,7 +1342,7 @@ export const api = {
     try {
       localStorage.removeItem('ptb_session_user');
     } catch {}
-    await signOut(auth);
+    await signOut(auth).catch(() => {});
   },
 
   async resetPassword(email: string, _newPassword?: string): Promise<void> {
@@ -1008,12 +1357,52 @@ export const api = {
     }
   },
 
+  async updateOwnPassword(newPassword: string, currentPassword?: string): Promise<'linked' | 'updated'> {
+    const session = api.getCurrentSessionUser();
+    if (session && !session.passwordSetOnce) {
+      await api.completeFirstLoginPassword(newPassword);
+      return 'linked';
+    }
+    const fbUser = auth.currentUser;
+    if (!fbUser || !fbUser.email) {
+      throw new Error('A senha definitiva só pode ser definida uma única vez após o primeiro acesso.');
+    }
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('A senha deve ter no mínimo 6 caracteres.');
+    }
+
+    const hasPasswordProvider = fbUser.providerData.some((p) => p.providerId === 'password');
+
+    try {
+      if (!hasPasswordProvider) {
+        const cred = EmailAuthProvider.credential(fbUser.email, newPassword);
+        await linkWithCredential(fbUser, cred);
+        return 'linked';
+      }
+
+      if (currentPassword) {
+        const reauthCred = EmailAuthProvider.credential(fbUser.email, currentPassword);
+        await reauthenticateWithCredential(fbUser, reauthCred);
+      }
+      await updatePassword(fbUser, newPassword);
+      return 'updated';
+    } catch (error: any) {
+      if (error?.code === 'auth/provider-already-linked') {
+        await updatePassword(fbUser, newPassword);
+        return 'updated';
+      }
+      throw new Error(translateAuthError(error));
+    }
+  },
+
   onAuthStateChanged(callback: (user: User | null) => void) {
     return firebaseOnAuthStateChanged(auth, async (fbUser) => {
       if (!fbUser) {
-        try {
-          localStorage.removeItem('ptb_session_user');
-        } catch {}
+        const localSession = api.getCurrentSessionUser();
+        if (localSession?.email) {
+          callback(localSession);
+          return;
+        }
         callback(null);
         return;
       }
@@ -1048,6 +1437,8 @@ export const api = {
             roleLabel: 'Membro da Mídia',
             avatar: fbUser.photoURL || '',
             status: 'active',
+            mustChangePassword: true,
+            passwordSetOnce: false,
             createdAt: new Date().toISOString(),
           });
         }
@@ -1071,18 +1462,17 @@ export const api = {
   // ==========================================
   async getUsers(): Promise<User[]> {
     try {
-      const list = await listCol<User>('users');
-      // Deduplicate by email/uid preferring real auth UID docs over legacy docs if both exist
+      const list = await listCol<StoredUserRecord>('users');
+      // Deduplicate by email/uid preferring real UID docs over legacy admin_/user_ docs
       const byKey = new Map<string, User>();
       for (const raw of list) {
-        const uid = raw.uid || raw.id || '';
-        const item: User = { ...raw, uid, id: uid };
-        const key = (item.email || uid).toLowerCase();
+        const docId = raw.firestoreDocId || raw.uid || raw.id || '';
+        const item = sanitizeUserRecord(raw);
+        const key = (item.email || item.uid).toLowerCase();
         const existing = byKey.get(key);
-        if (!existing || (!existing.uid.startsWith('admin_') && item.uid.startsWith('admin_')) === false) {
-          if (!existing || !item.uid.startsWith('admin_')) {
-            byKey.set(key, item);
-          }
+        const isLegacy = docId.startsWith('admin_') || docId.startsWith('user_');
+        if (!existing || !isLegacy) {
+          byKey.set(key, item);
         }
       }
       return Array.from(byKey.values());
@@ -1096,36 +1486,38 @@ export const api = {
   async createTeamUser(data: {
     name: string;
     email: string;
-    initialPassword: string;
+    initialPassword?: string;
     role: UserRole;
     avatar?: string;
   }): Promise<User> {
     const currentUser = api.getEffectiveUser();
     const cleanEmail = data.email.trim().toLowerCase();
+    const initialPass = (data.initialPassword || DEFAULT_INITIAL_PASSWORD).trim();
+
+    if (!cleanEmail) {
+      throw new Error('Informe um e-mail válido para o novo membro.');
+    }
+    if (initialPass.length < 5) {
+      throw new Error('A senha inicial precisa ter pelo menos 5 caracteres.');
+    }
+
+    const existingDocs = await findUserDocsByEmail(cleanEmail);
+    if (existingDocs.length > 0) {
+      throw new Error('Este e-mail já está cadastrado na equipe PT-B Mídia.');
+    }
+
     const roleLabels: Record<UserRole, string> = {
       super_admin: 'Super Administrador',
       media_admin: 'Administrador de Mídia',
       media_member: 'Membro da Mídia',
     };
 
-    const secondaryApp = createSecondaryAuthApp('secondary-team-creator');
-    const secondaryAuth = getAuth(secondaryApp);
-
-    let createdUid = '';
-    try {
-      const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, data.initialPassword);
-      createdUid = cred.user.uid;
-    } catch (error: any) {
-      if (error?.code === 'auth/email-already-in-use') {
-        throw new Error('Este e-mail já possui uma conta registrada no Firebase Authentication.');
-      }
-      throw new Error(translateAuthError(error));
-    } finally {
-      await signOut(secondaryAuth).catch(() => {});
-    }
-
+    const createdUid = `member_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const now = new Date().toISOString();
-    const newUser: User = {
+    const initialPasswordHash =
+      initialPass !== DEFAULT_INITIAL_PASSWORD ? await hashLocalCredential(initialPass) : undefined;
+
+    const storedRecord: StoredUserRecord = {
       uid: createdUid,
       id: createdUid,
       name: data.name.trim(),
@@ -1138,14 +1530,19 @@ export const api = {
       status: 'active',
       canManageChurchPage: data.role === 'super_admin' || data.role === 'media_admin',
       canManageFinances: data.role === 'super_admin' || data.role === 'media_admin',
+      mustChangePassword: true,
+      passwordSetOnce: false,
+      ...(initialPasswordHash ? { initialPasswordHash } : {}),
       createdAt: now,
       updatedAt: now,
     };
 
-    await setDocById('users', createdUid, newUser);
+    await setDocById('users', createdUid, storedRecord);
     if (data.role === 'super_admin') {
       await setDocById('admins', createdUid, { uid: createdUid, email: cleanEmail, createdAt: now }, true);
     }
+
+    const createdUser = sanitizeUserRecord(storedRecord);
 
     await api.addActivity({
       userId: currentUser.uid,
@@ -1153,11 +1550,32 @@ export const api = {
       action: 'role_change',
       actionLabel: 'Criou novo membro da equipe',
       targetType: 'user',
-      targetName: newUser.name,
-      details: `${newUser.roleLabel} (${newUser.email})`,
+      targetName: createdUser.name,
+      details: `${createdUser.roleLabel} (${createdUser.email})`,
     });
 
-    return newUser;
+    return createdUser;
+  },
+
+  async resetTeamUserPassword(uid: string, email?: string): Promise<void> {
+    const now = new Date().toISOString();
+    const targetIds = new Set<string>([uid]);
+    const cleanEmail = email?.trim().toLowerCase();
+    if (cleanEmail) {
+      const matched = await findUserDocsByEmail(cleanEmail).catch(() => []);
+      matched.forEach((m) => targetIds.add(m.id));
+    }
+
+    for (const targetId of targetIds) {
+      await updateDoc(doc(db, 'users', targetId), {
+        mustChangePassword: true,
+        passwordSetOnce: false,
+        passwordHash: deleteField(),
+        initialPasswordHash: deleteField(),
+        passwordUpdatedAt: deleteField(),
+        updatedAt: now,
+      }).catch(() => {});
+    }
   },
 
   async updateUserRole(uid: string, role: UserRole): Promise<void> {
@@ -1166,44 +1584,79 @@ export const api = {
       media_admin: 'Administrador de Mídia',
       media_member: 'Membro da Mídia',
     };
-    await updateDocById('users', uid, {
-      role,
-      roleLabel: roleLabels[role],
-      canManageChurchPage: role === 'super_admin' || role === 'media_admin',
-      updatedAt: new Date().toISOString(),
-    });
+    const now = new Date().toISOString();
+    const docData = await getDocById<StoredUserRecord>('users', uid).catch(() => null);
+    const matched = docData?.email
+      ? await findUserDocsByEmail(docData.email.trim().toLowerCase()).catch(() => [])
+      : [];
+    const targetIds = new Set<string>([uid, ...matched.map((m) => m.id)]);
+
+    for (const targetId of targetIds) {
+      await updateDocById('users', targetId, {
+        role,
+        roleLabel: roleLabels[role],
+        canManageChurchPage: role === 'super_admin' || role === 'media_admin',
+        updatedAt: now,
+      }).catch(() => {});
+    }
 
     if (role === 'super_admin') {
-      await setDocById('admins', uid, { uid, updatedAt: new Date().toISOString() }, true);
+      await setDocById('admins', uid, { uid, updatedAt: now }, true);
     } else {
       await deleteDocById('admins', uid).catch(() => {});
     }
   },
 
   async setUserStatus(uid: string, status: 'active' | 'blocked'): Promise<void> {
-    await updateDocById('users', uid, {
-      status,
-      updatedAt: new Date().toISOString(),
-    });
+    const now = new Date().toISOString();
+    const docData = await getDocById<StoredUserRecord>('users', uid).catch(() => null);
+    const matched = docData?.email
+      ? await findUserDocsByEmail(docData.email.trim().toLowerCase()).catch(() => [])
+      : [];
+    const targetIds = new Set<string>([uid, ...matched.map((m) => m.id)]);
+
+    for (const targetId of targetIds) {
+      await updateDocById('users', targetId, {
+        status,
+        updatedAt: now,
+      }).catch(() => {});
+    }
   },
 
   async updateUserChurchPermission(uid: string, canManageChurchPage: boolean): Promise<void> {
-    await updateDocById('users', uid, {
-      canManageChurchPage,
-      updatedAt: new Date().toISOString(),
-    });
+    const now = new Date().toISOString();
+    const docData = await getDocById<StoredUserRecord>('users', uid).catch(() => null);
+    const matched = docData?.email
+      ? await findUserDocsByEmail(docData.email.trim().toLowerCase()).catch(() => [])
+      : [];
+    const targetIds = new Set<string>([uid, ...matched.map((m) => m.id)]);
+
+    for (const targetId of targetIds) {
+      await updateDocById('users', targetId, {
+        canManageChurchPage,
+        updatedAt: now,
+      }).catch(() => {});
+    }
   },
 
   async deleteTeamUser(uid: string): Promise<void> {
-    await deleteDocById('users', uid);
-    await deleteDocById('admins', uid).catch(() => {});
+    const docData = await getDocById<StoredUserRecord>('users', uid).catch(() => null);
+    const matched = docData?.email
+      ? await findUserDocsByEmail(docData.email.trim().toLowerCase()).catch(() => [])
+      : [];
+    const targetIds = new Set<string>([uid, ...matched.map((m) => m.id)]);
+
+    for (const targetId of targetIds) {
+      await deleteDocById('users', targetId).catch(() => {});
+      await deleteDocById('admins', targetId).catch(() => {});
+    }
   },
 
   async createUser(data: { name: string; email: string; role: UserRole; avatar?: string; status?: 'active' | 'blocked' }): Promise<User> {
     return api.createTeamUser({
       name: data.name,
       email: data.email,
-      initialPassword: 'MidiaPTB2026!#',
+      initialPassword: DEFAULT_INITIAL_PASSWORD,
       role: data.role,
       avatar: data.avatar,
     });
@@ -1217,11 +1670,19 @@ export const api = {
       await api.setUserStatus(uid, updates.status);
     }
     if (updates.name || updates.avatar) {
-      await updateDocById('users', uid, {
-        ...(updates.name ? { name: updates.name } : {}),
-        ...(updates.avatar ? { avatar: updates.avatar } : {}),
-        updatedAt: new Date().toISOString(),
-      });
+      const now = new Date().toISOString();
+      const docData = await getDocById<StoredUserRecord>('users', uid).catch(() => null);
+      const matched = docData?.email
+        ? await findUserDocsByEmail(docData.email.trim().toLowerCase()).catch(() => [])
+        : [];
+      const targetIds = new Set<string>([uid, ...matched.map((m) => m.id)]);
+      for (const targetId of targetIds) {
+        await updateDocById('users', targetId, {
+          ...(updates.name ? { name: updates.name } : {}),
+          ...(updates.avatar ? { avatar: updates.avatar } : {}),
+          updatedAt: now,
+        }).catch(() => {});
+      }
     }
   },
 

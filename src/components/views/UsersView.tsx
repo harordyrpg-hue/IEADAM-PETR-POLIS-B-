@@ -24,7 +24,7 @@ export const UsersView: React.FC = () => {
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('12345');
   const [newUserRole, setNewUserRole] = useState<UserRole>('media_member');
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editRole, setEditRole] = useState<UserRole>('media_member');
@@ -50,8 +50,8 @@ export const UsersView: React.FC = () => {
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUserName.trim() || !newUserEmail.trim()) return;
-    if (newUserPassword.length < 6) {
-      notify('A senha inicial precisa ter no mínimo 6 dígitos.', 'error');
+    if (newUserPassword.trim().length < 5) {
+      notify('A senha inicial precisa ter no mínimo 5 dígitos (padrão 12345).', 'error');
       return;
     }
 
@@ -59,17 +59,34 @@ export const UsersView: React.FC = () => {
       await api.createTeamUser({
         name: newUserName.trim(),
         email: newUserEmail.trim().toLowerCase(),
-        initialPassword: newUserPassword,
+        initialPassword: newUserPassword.trim(),
         role: newUserRole,
       });
       notify('Novo membro criado com sucesso!', 'success');
       setNewUserName('');
       setNewUserEmail('');
-      setNewUserPassword('');
+      setNewUserPassword('12345');
       setIsAddUserOpen(false);
       loadUsers();
     } catch (err: any) {
       notify(err.message || 'Erro ao adicionar membro', 'error');
+    }
+  };
+
+  const handleResetPasswordToDefault = async (userItem: User) => {
+    const confirmed = await requestConfirm({
+      title: 'Resetar senha para 12345',
+      message: `Deseja retornar a senha de ${userItem.name} (${userItem.email}) para a senha provisória 12345? No próximo login, o usuário deverá definir uma nova senha definitiva uma única vez.`,
+      confirmLabel: 'Resetar para 12345',
+      danger: false,
+    });
+    if (!confirmed) return;
+    try {
+      await api.resetTeamUserPassword(userItem.uid, userItem.email);
+      notify(`Senha de ${userItem.name} resetada para 12345 (primeiro acesso).`, 'success');
+      loadUsers();
+    } catch {
+      notify('Erro ao resetar senha do membro.', 'error');
     }
   };
 
@@ -277,6 +294,13 @@ export const UsersView: React.FC = () => {
                       {isSuperAdmin && (
                         <div className="flex items-center gap-1 shrink-0">
                           <button
+                            onClick={() => handleResetPasswordToDefault(u)}
+                            className="p-2 text-neutral-400 hover:text-amber-300 hover:bg-neutral-800 rounded-xl cursor-pointer"
+                            title="Resetar senha para 12345"
+                          >
+                            <Key className="w-4 h-4" />
+                          </button>
+                          <button
                             onClick={() => {
                               setEditingUserId(u.uid);
                               setEditRole(u.role);
@@ -417,6 +441,14 @@ export const UsersView: React.FC = () => {
                           {isSuperAdmin && (
                             <>
                               <button
+                                onClick={() => handleResetPasswordToDefault(u)}
+                                className="p-1.5 text-neutral-400 hover:text-amber-300 hover:bg-neutral-800 rounded-lg cursor-pointer"
+                                title="Resetar senha para 12345 (1º acesso)"
+                              >
+                                <Key className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
                                 onClick={() => {
                                   setEditingUserId(u.uid);
                                   setEditRole(u.role);
@@ -494,14 +526,18 @@ export const UsersView: React.FC = () => {
                 <div className="relative">
                   <Key className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
                   <input
-                    type="password"
+                    type="text"
                     required
+                    minLength={5}
                     value={newUserPassword}
                     onChange={(e) => setNewUserPassword(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder="Padrão 12345 (mín. 5 dígitos)"
                     className="w-full pl-9 pr-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-lg text-neutral-200 focus:outline-none focus:border-amber-500"
                   />
                 </div>
+                <p className="text-[10px] text-neutral-400 mt-1">
+                  Ao entrar pela primeira vez, o membro definirá sua senha definitiva uma única vez.
+                </p>
               </div>
 
               <div>

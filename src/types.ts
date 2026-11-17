@@ -11,6 +11,9 @@ export interface User {
   status: 'active' | 'blocked';
   canManageChurchPage?: boolean;
   canManageFinances?: boolean;
+  mustChangePassword?: boolean;
+  passwordSetOnce?: boolean;
+  passwordUpdatedAt?: string;
   createdAt: string;
   updatedAt?: string;
 }

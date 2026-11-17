@@ -42,6 +42,7 @@ interface AppContextType {
   registerWithEmail: (name: string, email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string, newPassword?: string) => Promise<void>;
+  completeFirstLoginPassword: (newPassword: string) => Promise<User>;
   updateUserProfile: (updates: { name?: string; avatar?: string }) => Promise<void>;
   theme: 'dark' | 'light';
   toggleTheme: () => void;
@@ -299,28 +300,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    const unsubscribe = api.onAuthStateChanged(async (sessionUser) => {
-      if (sessionUser) {
-        try {
-          const profile = await api.getUserProfile(sessionUser.uid, sessionUser.email || '');
-          if (profile.status === 'blocked') {
+    const initialLocalSession = api.getCurrentSessionUser();
+    if (initialLocalSession?.email) {
+      if (initialLocalSession.status === 'blocked') {
+        api.logout();
+        setUser(null);
+      } else {
+        setUser(initialLocalSession);
+        setAuthLoading(false);
+        api.refreshSessionUser(initialLocalSession.uid, initialLocalSession.email).then(async (fresh) => {
+          if (!fresh) return;
+          if (fresh.status === 'blocked') {
             await api.logout();
             notify('Sua conta foi suspensa temporariamente pelo Administrador.', 'error');
             setUser(null);
           } else {
-            setUser(profile);
+            setUser(fresh);
+          }
+        });
+      }
+    }
+
+    const unsubscribe = api.onAuthStateChanged(async (sessionUser) => {
+      if (sessionUser) {
+        try {
+          if (sessionUser.status === 'blocked') {
+            await api.logout();
+            notify('Sua conta foi suspensa temporariamente pelo Administrador.', 'error');
+            setUser(null);
+          } else {
+            setUser(sessionUser);
             try {
-              localStorage.setItem('ptb_session_user', JSON.stringify(profile));
+              localStorage.setItem('ptb_session_user', JSON.stringify(sessionUser));
             } catch {}
             await Promise.all([refreshStats(), refreshFolders(), refreshEvents()]);
           }
         } catch (err) {
           console.warn('Falha ao atualizar perfil no Firebase:', err);
-          const fallback = api.getCurrentSessionUser();
-          setUser(fallback || sessionUser);
+          setUser(sessionUser);
         }
       } else {
-        setUser(null);
+        const localFallback = api.getCurrentSessionUser();
+        setUser(localFallback && localFallback.status !== 'blocked' ? localFallback : null);
       }
       setAuthLoading(false);
     });
@@ -490,6 +511,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'E-mail de redefinição de senha enviado pelo Firebase! Verifique sua caixa de entrada ou spam.',
       'success'
     );
+  };
+
+  const completeFirstLoginPassword = async (newPassword: string): Promise<User> => {
+    const updated = await api.completeFirstLoginPassword(newPassword);
+    setUser(updated);
+    notify('Senha definitiva cadastrada! Use esta senha nos próximos acessos.', 'success');
+    return updated;
   };
 
   const openUpload = (folderId: string | null = null, eventId: string | null = null) => {
@@ -800,6 +828,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         registerWithEmail,
         logout,
         resetPassword,
+        completeFirstLoginPassword,
         updateUserProfile,
         theme,
         toggleTheme,

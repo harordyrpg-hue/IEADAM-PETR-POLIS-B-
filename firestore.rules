@@ -2,78 +2,73 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global safety net
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Helper functions
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    // Connection health check (used on startup before login)
+    // Connection health check
     match /test/{docId} {
       allow read: if true;
       allow write: if false;
     }
 
-    // 1. User Profiles & Team RBAC (Authenticated team only)
+    // 1. User Profiles & Team RBAC
     match /users/{userId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
     match /admins/{adminId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
-    // 2. Media Files & Folders
-    // Read allowed for signed-in team AND public #share= links; writes require authentication
+    // 2. Media Files & Folders (Shared Workspace: all users can see, upload, download and modify in real-time)
     match /files/{fileId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /folders/{folderId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /events/{eventId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /shares/{shareId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /activities/{activityId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
     match /settings/{settingId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
     match /file_data/{fileId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /file_chunks/{chunkId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     // Team Schedule, Tasks & Collaborative Notes (Real-time team workspace)
     match /team_tasks/{taskId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
     match /team_notes/{noteId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
     // ==================================================
@@ -81,67 +76,70 @@ service cloud.firestore {
     // ==================================================
     match /church_settings/{docId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /church_announcements/{announcementId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /church_events/{eventId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /church_articles/{articleId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /church_albums/{albumId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /church_downloads/{downloadId} {
       allow read: if true;
-      allow create, delete: if isSignedIn();
-      allow update: if isSignedIn() ||
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['downloadCount']);
+      allow write: if true;
     }
 
-    // 4. Church Media Financial System (Authenticated team only)
+    // 4. Church Media Financial System (Livro Caixa, Contas & Previsões)
     match /financial_records/{recordId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
     match /financial_bills/{billId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
     // 5. Public Registration Events & Guest Registrations (no login required for guests)
     match /public_events/{eventId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if true;
     }
 
     match /event_registrations/{registrationId} {
-      allow read, create: if true;
-      allow update, delete: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
-    // 6. Member Attendance & Roll Call System (Authenticated team only)
+    // 6. Member Attendance & Roll Call System
     match /attendance_departments/{departmentId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
     match /attendance_members/{memberId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
 
     match /attendance_calls/{callId} {
-      allow read, write: if isSignedIn();
+      allow read: if true;
+      allow write: if true;
     }
   }
 }

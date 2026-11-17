@@ -42,7 +42,7 @@ import { AttendanceView } from './components/views/AttendanceView.js';
 import { PublicEventRegistrationPage } from './components/public/PublicEventRegistrationPage.js';
 import { PublicChurchPage } from './components/public/PublicChurchPage.js';
 import { LoginView } from './components/auth/LoginView.js';
-import { X, CheckCircle2, AlertCircle, Info, AlertTriangle } from 'lucide-react';
+import { X, CheckCircle2, AlertCircle, Info, AlertTriangle, Lock, Eye, EyeOff, ArrowRight, RefreshCw, LogOut } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const {
@@ -54,7 +54,15 @@ const MainLayout: React.FC = () => {
     resolveConfirm,
     user,
     authLoading,
+    completeFirstLoginPassword,
+    logout,
   } = useApp();
+
+  const [firstNewPassword, setFirstNewPassword] = useState('');
+  const [firstConfirmPassword, setFirstConfirmPassword] = useState('');
+  const [showFirstPassword, setShowFirstPassword] = useState(false);
+  const [savingFirstPassword, setSavingFirstPassword] = useState(false);
+  const [firstPasswordError, setFirstPasswordError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!confirmDialog) return;
@@ -154,6 +162,144 @@ const MainLayout: React.FC = () => {
 
   if (!user) {
     return <LoginView />;
+  }
+
+  if (user.mustChangePassword || !user.passwordSetOnce) {
+    const handleCompleteFirstPassword = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setFirstPasswordError(null);
+      const trimmed = firstNewPassword.trim();
+
+      if (trimmed.length < 5) {
+        setFirstPasswordError('A senha definitiva deve ter no mínimo 5 caracteres.');
+        return;
+      }
+      if (trimmed === '12345') {
+        setFirstPasswordError('Escolha uma senha diferente da senha provisória 12345.');
+        return;
+      }
+      if (trimmed !== firstConfirmPassword.trim()) {
+        setFirstPasswordError('A confirmação da senha não confere.');
+        return;
+      }
+
+      try {
+        setSavingFirstPassword(true);
+        await completeFirstLoginPassword(trimmed);
+        setFirstNewPassword('');
+        setFirstConfirmPassword('');
+      } catch (err: any) {
+        setFirstPasswordError(err?.message || 'Erro ao salvar sua senha definitiva.');
+      } finally {
+        setSavingFirstPassword(false);
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4 text-neutral-100">
+        <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-5 animate-in fade-in duration-200">
+          <div className="flex flex-col items-center text-center space-y-2">
+            <div className="w-12 h-12 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center">
+              <Lock className="w-6 h-6" />
+            </div>
+            <h1 className="text-lg font-bold text-neutral-100">
+              Primeiro Acesso — Defina sua Senha
+            </h1>
+            <p className="text-xs text-neutral-400 leading-relaxed">
+              Olá, <strong className="text-neutral-200">{user.name}</strong>! A senha provisória{' '}
+              <span className="font-mono text-amber-300">12345</span> vale apenas para este primeiro acesso.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-200 text-[11px] leading-relaxed flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <span>
+              <strong>Atenção:</strong> você só pode definir sua senha definitiva <strong>uma única vez</strong> agora. Essa senha substituirá a <span className="font-mono">12345</span> e será usada em todos os próximos acessos.
+            </span>
+          </div>
+
+          {firstPasswordError && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{firstPasswordError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleCompleteFirstPassword} className="space-y-4 text-xs">
+            <div>
+              <label className="block text-neutral-300 font-medium mb-1.5">
+                Nova Senha Definitiva *
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+                <input
+                  type={showFirstPassword ? 'text' : 'password'}
+                  required
+                  minLength={5}
+                  value={firstNewPassword}
+                  onChange={(e) => setFirstNewPassword(e.target.value)}
+                  placeholder="Mínimo 5 caracteres (diferente de 12345)"
+                  className="w-full pl-9 pr-10 py-2.5 bg-neutral-800 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowFirstPassword(!showFirstPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 cursor-pointer"
+                  tabIndex={-1}
+                >
+                  {showFirstPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-neutral-300 font-medium mb-1.5">
+                Confirmar Nova Senha *
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+                <input
+                  type={showFirstPassword ? 'text' : 'password'}
+                  required
+                  minLength={5}
+                  value={firstConfirmPassword}
+                  onChange={(e) => setFirstConfirmPassword(e.target.value)}
+                  placeholder="Repita sua senha definitiva"
+                  className="w-full pl-9 pr-3 py-2.5 bg-neutral-800 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingFirstPassword}
+              className="w-full py-2.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+            >
+              {savingFirstPassword ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <span>Salvar Senha Definitiva e Entrar</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="pt-3 border-t border-neutral-800 flex items-center justify-between text-[11px] text-neutral-400">
+            <span className="truncate">{user.email}</span>
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="flex items-center gap-1 text-neutral-400 hover:text-red-400 transition-colors cursor-pointer shrink-0 ml-2"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sair</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const renderActiveView = () => {

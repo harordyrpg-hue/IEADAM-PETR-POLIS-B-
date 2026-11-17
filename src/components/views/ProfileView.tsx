@@ -412,8 +412,8 @@ export const ProfileView: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Card: Cargo / Role Details */}
-        <div className="lg:col-span-2">
+        {/* Right Card: Cargo / Role Details + Segurança */}
+        <div className="lg:col-span-2 space-y-5">
           <div className="p-5 sm:p-6 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
               <div className="flex items-center gap-2">
@@ -480,6 +480,37 @@ export const ProfileView: React.FC = () => {
                 )}
               </ul>
             </div>
+          </div>
+
+          {/* Segurança e Senha de Login */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-2.5">
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-neutral-800">
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-400" />
+                <h3 className="text-sm font-bold text-neutral-100">
+                  Senha Definitiva de Acesso
+                </h3>
+              </div>
+              {user.passwordSetOnce ? (
+                <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  Definida no 1º acesso
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                  Aguardando definição
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-neutral-400 leading-relaxed">
+              {user.passwordSetOnce
+                ? 'Sua senha definitiva já foi cadastrada uma única vez após o primeiro acesso e permanece ativa para seus próximos logins. Caso precise redefinir para a senha provisória 12345, solicite ao Super Administrador.'
+                : 'A senha definitiva deve ser escolhida apenas uma vez na tela de primeiro acesso.'}
+            </p>
+            {user.passwordUpdatedAt && (
+              <p className="text-[11px] text-neutral-500 font-mono">
+                Definida em: {formatDate(user.passwordUpdatedAt)}
+              </p>
+            )}
           </div>
         </div>
       </div>
