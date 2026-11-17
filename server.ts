@@ -821,6 +821,38 @@ app.post('/api/db/batch', async (req, res) => {
   }
 });
 
+app.post('/api/db/:col/mirror', async (req, res) => {
+  const { col } = req.params;
+  if (!ALLOWED_COLLECTIONS.has(col) || col === 'users' || col === 'admins') {
+    return res.status(400).json({ error: `Coleção não espelhável: ${col}` });
+  }
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (items.length === 0) {
+    return res.json({ success: true, merged: 0 });
+  }
+
+  try {
+    let merged = 0;
+    await localStore.withLock((db) => {
+      for (const item of items) {
+        const id = item?.id || item?.firestoreDocId;
+        if (!id) continue;
+        const existing = db[col][id];
+        if (existing?.localOnly) {
+          const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+          const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
+          if (existingTime >= incomingTime) continue;
+        }
+        db[col][id] = { ...item, id };
+        merged++;
+      }
+    });
+    res.json({ success: true, merged });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Erro ao espelhar registros no servidor.' });
+  }
+});
+
 // ==========================================
 // ATOMIC ATTENDANCE TRANSACTIONS & ROSTER
 // ==========================================

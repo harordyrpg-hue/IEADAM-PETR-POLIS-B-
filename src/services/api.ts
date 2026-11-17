@@ -162,10 +162,10 @@ export function onFirestoreQuotaAlert(cb: (message: string) => void): () => void
 function notifyQuotaIfNeeded(error: unknown) {
   if (!isQuotaError(error)) return;
   const now = Date.now();
-  if (now - lastQuotaAlertAt < 8000) return;
+  if (now - lastQuotaAlertAt < 12000) return;
   lastQuotaAlertAt = now;
   const msg =
-    'Cota diária do Cloud Firestore excedida (RESOURCE_EXHAUSTED). Algumas leituras ou gravações podem falhar até a renovação diária ou upgrade de cota no Firebase.';
+    'Cota diária do Firestore atingida: seus envios, arquivos e alterações continuam sendo salvos diretamente no aplicativo.';
   quotaErrorListeners.forEach((cb) => {
     try {
       cb(msg);
@@ -226,18 +226,306 @@ function translateAuthError(error: any): string {
 }
 
 // ==========================================
-// FIRESTORE COLLECTION HELPERS
+// CLIENT READ-THROUGH CACHE (REDUCES FIRESTORE READS & QUOTA IMPACT)
+// ==========================================
+const READ_CACHE_TTL_MS = 180_000; // 3 minutes fresh cache
+const memoryReadCache = new Map<string, { ts: number; data: any }>();
+
+function getCachedEntry<T>(key: string, allowStale = false): T | null {
+  const mem = memoryReadCache.get(key);
+  if (mem && (allowStale || Date.now() - mem.ts < READ_CACHE_TTL_MS)) {
+    return mem.data as T;
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`ptb_cache_${key}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.ts === 'number' && 'data' in parsed) {
+          if (allowStale || Date.now() - parsed.ts < READ_CACHE_TTL_MS) {
+            memoryReadCache.set(key, parsed);
+            return parsed.data as T;
+          }
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function setCachedEntry<T>(key: string, data: T): void {
+  const entry = { ts: Date.now(), data };
+  memoryReadCache.set(key, entry);
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`ptb_cache_${key}`, JSON.stringify(entry));
+    }
+  } catch {}
+}
+
+function invalidateCachedEntry(key: string): void {
+  memoryReadCache.delete(key);
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(`ptb_cache_${key}`);
+    }
+  } catch {}
+}
+
+// ==========================================
+// BUILT-IN APP SERVER FALLBACK & MIRROR SYNC (/api/db + SSE)
+// ==========================================
+const MIRRORED_COLLECTIONS = new Set([
+  'files',
+  'folders',
+  'events',
+  'shares',
+  'activities',
+  'settings',
+  'church_settings',
+  'church_announcements',
+  'church_events',
+  'church_articles',
+  'church_albums',
+  'church_downloads',
+  'team_tasks',
+  'team_notes',
+  'financial_records',
+  'financial_bills',
+  'public_events',
+  'event_registrations',
+  'attendance_departments',
+  'attendance_members',
+  'attendance_calls',
+]);
+
+async function fetchServerCollection<T>(col: string): Promise<T[]> {
+  if (!MIRRORED_COLLECTIONS.has(col)) return [];
+  try {
+    const res = await fetch(`/api/db/${encodeURIComponent(col)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data?.items) ? (data.items as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function fetchServerDoc<T>(col: string, id: string): Promise<T | null> {
+  if (!MIRRORED_COLLECTIONS.has(col)) return null;
+  try {
+    const res = await fetch(`/api/db/${encodeURIComponent(col)}/${encodeURIComponent(id)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data?.item as T) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function putServerDoc(col: string, id: string, data: any, merge = false): Promise<void> {
+  if (!MIRRORED_COLLECTIONS.has(col)) return;
+  try {
+    await fetch(`/api/db/${encodeURIComponent(col)}/${encodeURIComponent(id)}?merge=${merge ? 'true' : 'false'}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  } catch {}
+}
+
+async function patchServerDoc(col: string, id: string, updates: any): Promise<void> {
+  if (!MIRRORED_COLLECTIONS.has(col)) return;
+  try {
+    const res = await fetch(`/api/db/${encodeURIComponent(col)}/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (res.status === 404) {
+      await putServerDoc(col, id, { ...updates, id }, true);
+    }
+  } catch {}
+}
+
+async function deleteServerDoc(col: string, id: string): Promise<void> {
+  if (!MIRRORED_COLLECTIONS.has(col)) return;
+  try {
+    await fetch(`/api/db/${encodeURIComponent(col)}/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  } catch {}
+}
+
+async function batchServerOps(
+  ops: { type: 'set' | 'update' | 'delete'; col: string; id: string; data?: any; merge?: boolean }[]
+): Promise<void> {
+  const mirroredOps = ops.filter((op) => MIRRORED_COLLECTIONS.has(op.col));
+  if (mirroredOps.length === 0) return;
+  try {
+    await fetch('/api/db/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ops: mirroredOps }),
+    });
+  } catch {}
+}
+
+function mirrorServerCollection(col: string, items: any[]): void {
+  if (!MIRRORED_COLLECTIONS.has(col) || items.length === 0) return;
+  fetch(`/api/db/${encodeURIComponent(col)}/mirror`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  }).catch(() => {});
+}
+
+// In-session delete tombstones so items permanently deleted during a Firestore quota window stay hidden
+const deletedLocalIds = new Map<string, Set<string>>();
+
+function markDeletedLocalId(col: string, id: string) {
+  if (!col || !id) return;
+  let set = deletedLocalIds.get(col);
+  if (!set) {
+    set = new Set();
+    deletedLocalIds.set(col, set);
+  }
+  set.add(id);
+}
+
+function unmarkDeletedLocalId(col: string, id: string) {
+  deletedLocalIds.get(col)?.delete(id);
+}
+
+function mergeFirestoreAndLocal<T>(col: string, firestoreItems: T[], serverItems: any[]): T[] {
+  const deletedSet = deletedLocalIds.get(col);
+  const map = new Map<string, any>();
+  for (const item of firestoreItems as any[]) {
+    const key = item?.id || item?.firestoreDocId;
+    if (!key || deletedSet?.has(key)) continue;
+    map.set(key, item);
+  }
+  for (const srv of serverItems) {
+    const key = srv?.id || srv?.firestoreDocId;
+    if (!key || deletedSet?.has(key)) continue;
+    const existing = map.get(key);
+    if (!existing) {
+      if (srv.localOnly) {
+        map.set(key, srv);
+      }
+    } else if (srv.localOnly) {
+      const srvTime = new Date(srv.updatedAt || srv.createdAt || 0).getTime();
+      const fbTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+      if (srvTime >= fbTime) {
+        map.set(key, srv);
+      }
+    }
+  }
+  return Array.from(map.values()) as T[];
+}
+
+// Shared SSE EventSource hub so all collections sync in real time even during Firestore quota limits
+let sharedEventSource: EventSource | null = null;
+const sseColListeners = new Map<string, Set<() => void>>();
+
+function ensureSseConnection() {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+  if (sharedEventSource) return;
+  try {
+    sharedEventSource = new EventSource('/api/realtime');
+    sharedEventSource.onmessage = (event) => {
+      try {
+        const parsed = JSON.parse(event.data || '{}');
+        const cols: string[] = Array.isArray(parsed.collections) ? parsed.collections : [];
+        for (const col of cols) {
+          const listeners = sseColListeners.get(col);
+          if (listeners) {
+            listeners.forEach((cb) => {
+              try {
+                cb();
+              } catch {}
+            });
+          }
+        }
+      } catch {}
+    };
+    sharedEventSource.onerror = () => {
+      // Browser EventSource reconnects automatically
+    };
+  } catch {}
+}
+
+function registerSseCollectionListener(col: string, cb: () => void): () => void {
+  ensureSseConnection();
+  let set = sseColListeners.get(col);
+  if (!set) {
+    set = new Set();
+    sseColListeners.set(col, set);
+  }
+  set.add(cb);
+  return () => {
+    set?.delete(cb);
+  };
+}
+
+// ==========================================
+// FIRESTORE COLLECTION HELPERS (WITH SERVER FALLBACK)
 // ==========================================
 async function listCol<T>(col: string): Promise<T[]> {
   try {
     const snap = await getDocs(collection(db, col));
-    return snap.docs.map((d) => ({
+    const fbItems = snap.docs.map((d) => ({
       ...(d.data() as any),
       id: (d.data() as any)?.id || d.id,
       firestoreDocId: d.id,
     })) as T[];
+    if (MIRRORED_COLLECTIONS.has(col)) {
+      const serverItems = await fetchServerCollection<any>(col);
+      mirrorServerCollection(col, fbItems as any[]);
+      return mergeFirestoreAndLocal<T>(col, fbItems, serverItems);
+    }
+    return fbItems;
   } catch (error) {
+    if (isQuotaError(error) && MIRRORED_COLLECTIONS.has(col)) {
+      notifyQuotaIfNeeded(error);
+      return await fetchServerCollection<T>(col);
+    }
     notifyQuotaIfNeeded(error);
+    handleFirestoreError(error, OperationType.LIST, col);
+  }
+}
+
+async function listColCached<T>(col: string, cacheKey: string): Promise<T[]> {
+  const fresh = getCachedEntry<T[]>(cacheKey, false);
+  if (fresh) return fresh;
+  try {
+    const snap = await getDocs(collection(db, col));
+    const fbItems = snap.docs.map((d) => ({
+      ...(d.data() as any),
+      id: (d.data() as any)?.id || d.id,
+      firestoreDocId: d.id,
+    })) as T[];
+    let finalItems = fbItems;
+    if (MIRRORED_COLLECTIONS.has(col)) {
+      const serverItems = await fetchServerCollection<any>(col);
+      mirrorServerCollection(col, fbItems as any[]);
+      finalItems = mergeFirestoreAndLocal<T>(col, fbItems, serverItems);
+    }
+    setCachedEntry(cacheKey, finalItems);
+    return finalItems;
+  } catch (error) {
+    if (isQuotaError(error)) {
+      notifyQuotaIfNeeded(error);
+      if (MIRRORED_COLLECTIONS.has(col)) {
+        const serverItems = await fetchServerCollection<T>(col);
+        if (serverItems.length > 0) {
+          setCachedEntry(cacheKey, serverItems);
+          return serverItems;
+        }
+      }
+      const stale = getCachedEntry<T[]>(cacheKey, true);
+      return stale || [];
+    }
     handleFirestoreError(error, OperationType.LIST, col);
   }
 }
@@ -246,44 +534,130 @@ async function getDocById<T>(col: string, id: string): Promise<T | null> {
   try {
     const refDoc = doc(db, col, id);
     const snap = await getDoc(refDoc);
-    if (!snap.exists()) return null;
+    if (!snap.exists()) {
+      if (MIRRORED_COLLECTIONS.has(col)) {
+        const srv = await fetchServerDoc<any>(col, id);
+        if (srv?.localOnly) return srv as T;
+      }
+      return null;
+    }
     const data = snap.data() as any;
-    return {
+    const result = {
       ...data,
       id: data?.id || snap.id,
       firestoreDocId: snap.id,
     } as T;
+    if (MIRRORED_COLLECTIONS.has(col)) {
+      putServerDoc(col, id, result, true).catch(() => {});
+    }
+    return result;
   } catch (error) {
+    if (isQuotaError(error) && MIRRORED_COLLECTIONS.has(col)) {
+      notifyQuotaIfNeeded(error);
+      return await fetchServerDoc<T>(col, id);
+    }
     notifyQuotaIfNeeded(error);
     handleFirestoreError(error, OperationType.GET, `${col}/${id}`);
   }
 }
 
-async function setDocById<T>(col: string, id: string, data: T, merge = false): Promise<T> {
+async function getDocByIdCached<T>(col: string, id: string, cacheKey: string): Promise<T | null> {
+  const fresh = getCachedEntry<T | null>(cacheKey, false);
+  if (fresh !== null) return fresh;
   try {
-    const clean = removeUndefinedValues(data);
-    await setDoc(doc(db, col, id), clean as any, { merge });
-    return { ...(clean as any), id: (clean as any)?.id || id } as T;
+    const refDoc = doc(db, col, id);
+    const snap = await getDoc(refDoc);
+    if (!snap.exists()) {
+      if (MIRRORED_COLLECTIONS.has(col)) {
+        const srv = await fetchServerDoc<any>(col, id);
+        if (srv?.localOnly) {
+          setCachedEntry(cacheKey, srv);
+          return srv as T;
+        }
+      }
+      return null;
+    }
+    const data = snap.data() as any;
+    const result = {
+      ...data,
+      id: data?.id || snap.id,
+      firestoreDocId: snap.id,
+    } as T;
+    if (MIRRORED_COLLECTIONS.has(col)) {
+      putServerDoc(col, id, result, true).catch(() => {});
+    }
+    setCachedEntry(cacheKey, result);
+    return result;
   } catch (error) {
+    if (isQuotaError(error)) {
+      notifyQuotaIfNeeded(error);
+      if (MIRRORED_COLLECTIONS.has(col)) {
+        const srv = await fetchServerDoc<T>(col, id);
+        if (srv) {
+          setCachedEntry(cacheKey, srv);
+          return srv;
+        }
+      }
+      return getCachedEntry<T>(cacheKey, true);
+    }
+    handleFirestoreError(error, OperationType.GET, `${col}/${id}`);
+  }
+}
+
+async function setDocById<T>(col: string, id: string, data: T, merge = false): Promise<T> {
+  const clean = removeUndefinedValues(data);
+  const result = { ...(clean as any), id: (clean as any)?.id || id } as T;
+  unmarkDeletedLocalId(col, id);
+  try {
+    await setDoc(doc(db, col, id), clean as any, { merge });
+    if (MIRRORED_COLLECTIONS.has(col)) {
+      await putServerDoc(col, id, { ...result, localOnly: false }, merge);
+    }
+    return result;
+  } catch (error) {
+    if (isQuotaError(error) && MIRRORED_COLLECTIONS.has(col)) {
+      notifyQuotaIfNeeded(error);
+      const localRecord = { ...result, localOnly: true } as T;
+      await putServerDoc(col, id, localRecord, merge);
+      return localRecord;
+    }
     notifyQuotaIfNeeded(error);
     handleFirestoreError(error, OperationType.WRITE, `${col}/${id}`);
   }
 }
 
 async function updateDocById(col: string, id: string, updates: Record<string, any>): Promise<void> {
+  const clean = removeUndefinedValues(updates);
   try {
-    const clean = removeUndefinedValues(updates);
     await updateDoc(doc(db, col, id), clean as any);
+    if (MIRRORED_COLLECTIONS.has(col)) {
+      await patchServerDoc(col, id, { ...clean, localOnly: false });
+    }
   } catch (error) {
+    if (isQuotaError(error) && MIRRORED_COLLECTIONS.has(col)) {
+      notifyQuotaIfNeeded(error);
+      await patchServerDoc(col, id, { ...clean, localOnly: true });
+      return;
+    }
     notifyQuotaIfNeeded(error);
     handleFirestoreError(error, OperationType.UPDATE, `${col}/${id}`);
   }
 }
 
 async function deleteDocById(col: string, id: string): Promise<void> {
+  markDeletedLocalId(col, id);
   try {
     await deleteDoc(doc(db, col, id));
+    if (MIRRORED_COLLECTIONS.has(col)) {
+      await deleteServerDoc(col, id);
+    }
+    unmarkDeletedLocalId(col, id);
   } catch (error) {
+    if (isQuotaError(error) && MIRRORED_COLLECTIONS.has(col)) {
+      notifyQuotaIfNeeded(error);
+      await deleteServerDoc(col, id);
+      return;
+    }
     notifyQuotaIfNeeded(error);
     handleFirestoreError(error, OperationType.DELETE, `${col}/${id}`);
   }
@@ -294,6 +668,10 @@ async function batchWrite(
 ): Promise<void> {
   if (ops.length === 0) return;
   const CHUNK_LIMIT = 400;
+  for (const op of ops) {
+    if (op.type === 'delete') markDeletedLocalId(op.col, op.id);
+    else if (op.type === 'set') unmarkDeletedLocalId(op.col, op.id);
+  }
   try {
     for (let i = 0; i < ops.length; i += CHUNK_LIMIT) {
       const slice = ops.slice(i, i + CHUNK_LIMIT);
@@ -312,7 +690,28 @@ async function batchWrite(
       }
       await batch.commit();
     }
+    for (const op of ops) {
+      if (op.type === 'delete') unmarkDeletedLocalId(op.col, op.id);
+    }
+    await batchServerOps(
+      ops.map((op) =>
+        op.type === 'delete'
+          ? op
+          : { ...op, data: { ...removeUndefinedValues(op.data || {}), localOnly: false } }
+      )
+    );
   } catch (error) {
+    if (isQuotaError(error) && ops.some((o) => MIRRORED_COLLECTIONS.has(o.col))) {
+      notifyQuotaIfNeeded(error);
+      await batchServerOps(
+        ops.map((op) =>
+          op.type === 'delete'
+            ? op
+            : { ...op, data: { ...removeUndefinedValues(op.data || {}), localOnly: true } }
+        )
+      );
+      return;
+    }
     notifyQuotaIfNeeded(error);
     handleFirestoreError(error, OperationType.WRITE, 'batchWrite');
   }
@@ -322,9 +721,48 @@ function subscribeCollection<T>(
   col: string,
   transform: (items: T[]) => void
 ): () => void {
-  const unsub = onSnapshot(
+  let latestFirestoreItems: T[] | null = null;
+  let latestServerItems: any[] = [];
+  let hasServerSnapshot = false;
+
+  const filterServerOnly = (items: any[]): T[] => {
+    const deletedSet = deletedLocalIds.get(col);
+    if (!deletedSet || deletedSet.size === 0) return items as T[];
+    return items.filter((item) => {
+      const key = item?.id || item?.firestoreDocId;
+      return !key || !deletedSet.has(key);
+    }) as T[];
+  };
+
+  const emitCombined = () => {
+    if (latestFirestoreItems !== null) {
+      transform(mergeFirestoreAndLocal<T>(col, latestFirestoreItems, latestServerItems));
+    } else if (hasServerSnapshot || latestServerItems.length > 0) {
+      transform(filterServerOnly(latestServerItems));
+    }
+  };
+
+  if (MIRRORED_COLLECTIONS.has(col)) {
+    fetchServerCollection<any>(col).then((srvItems) => {
+      latestServerItems = srvItems;
+      if (srvItems.length > 0) {
+        hasServerSnapshot = true;
+      }
+      emitCombined();
+    });
+  }
+
+  const unsubSse = MIRRORED_COLLECTIONS.has(col)
+    ? registerSseCollectionListener(col, async () => {
+        latestServerItems = await fetchServerCollection<any>(col);
+        hasServerSnapshot = true;
+        emitCombined();
+      })
+    : () => {};
+
+  const unsubFb = onSnapshot(
     collection(db, col),
-    (snapshot) => {
+    async (snapshot) => {
       const items = snapshot.docs.map((d) => {
         const data = d.data() as any;
         return {
@@ -333,14 +771,34 @@ function subscribeCollection<T>(
           firestoreDocId: d.id,
         } as T;
       });
-      transform(items);
+      latestFirestoreItems = items;
+      if (MIRRORED_COLLECTIONS.has(col)) {
+        mirrorServerCollection(col, items as any[]);
+        if (latestServerItems.length === 0) {
+          latestServerItems = await fetchServerCollection<any>(col);
+        }
+      }
+      emitCombined();
     },
-    (error) => {
+    async (error) => {
       notifyQuotaIfNeeded(error);
-      console.error(`Firestore onSnapshot error on ${col}:`, error);
+      if (isQuotaError(error)) {
+        console.warn(`Firestore onSnapshot quota fallback on ${col}:`, error?.message || error);
+        if (MIRRORED_COLLECTIONS.has(col)) {
+          latestServerItems = await fetchServerCollection<any>(col);
+          hasServerSnapshot = true;
+          emitCombined();
+        }
+      } else {
+        console.error(`Firestore onSnapshot error on ${col}:`, error);
+      }
     }
   );
-  return unsub;
+
+  return () => {
+    unsubSse();
+    unsubFb();
+  };
 }
 
 // ==========================================
@@ -497,6 +955,10 @@ async function uploadToFirebaseStorage(
   mimeType: string,
   onProgress?: (percent: number, speedText?: string) => void
 ): Promise<string> {
+  if (!auth.currentUser) {
+    return Promise.reject(new Error('Sessão Firebase Auth inativa; usando envio direto para o servidor.'));
+  }
+
   return new Promise((resolve, reject) => {
     const storageRef = ref(storage, storagePath);
     const task = uploadBytesResumable(storageRef, blob, {
@@ -1942,6 +2404,7 @@ export const api = {
     };
 
     await setDocById('files', fileId, newRecord);
+    invalidateCachedEntry('files_snapshot');
 
     await api.addActivity({
       userId: currentUser.uid,
@@ -1958,25 +2421,27 @@ export const api = {
 
   subscribeAllFiles(callback: (files: FileRecord[]) => void): () => void {
     return subscribeCollection<FileRecord>('files', (items) => {
-      callback(
-        items.map((f) => ({
-          ...f,
-          id: f.id,
-          storageKey: f.storagePath,
-          userName: f.ownerName,
-        }))
-      );
+      const mapped = items.map((f) => ({
+        ...f,
+        id: f.id,
+        storageKey: f.storagePath,
+        userName: f.ownerName,
+      }));
+      setCachedEntry('files_snapshot', mapped);
+      callback(mapped);
     });
   },
 
   subscribeAllFolders(callback: (folders: Folder[]) => void): () => void {
     return subscribeCollection<Folder>('folders', (items) => {
+      setCachedEntry('folders_snapshot', items);
       callback(items);
     });
   },
 
   subscribeAllEvents(callback: (events: ChurchEvent[]) => void): () => void {
     return subscribeCollection<ChurchEvent>('events', (items) => {
+      setCachedEntry('events_snapshot', items);
       callback(items);
     });
   },
@@ -2062,6 +2527,7 @@ export const api = {
       ...updates,
       updatedAt: new Date().toISOString(),
     });
+    invalidateCachedEntry('files_snapshot');
     const updated = await getDocById<FileRecord>('files', id);
     if (!updated) throw new Error('Arquivo não encontrado');
     return {
@@ -2084,6 +2550,7 @@ export const api = {
       }
       await deleteDocById('file_data', id).catch(() => {});
       await deleteDocById('files', id);
+      invalidateCachedEntry('files_snapshot');
       await api.addActivity({
         userId: currentUser.uid,
         userName: currentUser.displayName,
@@ -2099,6 +2566,7 @@ export const api = {
         trashedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
+      invalidateCachedEntry('files_snapshot');
       await api.addActivity({
         userId: currentUser.uid,
         userName: currentUser.displayName,
@@ -2118,6 +2586,7 @@ export const api = {
       trashedAt: null,
       updatedAt: new Date().toISOString(),
     });
+    invalidateCachedEntry('files_snapshot');
 
     if (file?.folderId) {
       const folder = await getDocById<Folder>('folders', file.folderId).catch(() => null);
@@ -2127,6 +2596,7 @@ export const api = {
           trashedAt: null,
           updatedAt: new Date().toISOString(),
         }).catch(() => {});
+        invalidateCachedEntry('folders_snapshot');
       }
     }
   },
@@ -2146,7 +2616,7 @@ export const api = {
   // ==========================================
   async getFolders(inTrash = false): Promise<Folder[]> {
     try {
-      const list = await listCol<Folder>('folders');
+      const list = await listColCached<Folder>('folders', 'folders_snapshot');
       return list.filter((f) => (inTrash ? f.inTrash === true : !f.inTrash));
     } catch (error) {
       console.warn('Could not list folders:', error);
@@ -2170,6 +2640,7 @@ export const api = {
     };
 
     await setDocById('folders', folderId, folder);
+    invalidateCachedEntry('folders_snapshot');
     await api.addActivity({
       userId: currentUser.uid,
       userName: currentUser.displayName,
@@ -2187,6 +2658,7 @@ export const api = {
       ...updates,
       updatedAt: new Date().toISOString(),
     });
+    invalidateCachedEntry('folders_snapshot');
   },
 
   async deleteFolder(id: string, permanent: boolean = false): Promise<void> {
@@ -2194,8 +2666,8 @@ export const api = {
     const folder = await getDocById<Folder>('folders', id).catch(() => null);
     const folderName = folder?.name || 'Pasta';
 
-    const allFiles = await listCol<FileRecord>('files');
-    const allFolders = await listCol<Folder>('folders');
+    const allFiles = await listColCached<FileRecord>('files', 'files_snapshot');
+    const allFolders = await listColCached<Folder>('folders', 'folders_snapshot');
     const childFiles = allFiles.filter((f) => f.folderId === id);
     const childFolders = allFolders.filter((f) => f.parentId === id);
 
@@ -2206,6 +2678,8 @@ export const api = {
         { type: 'delete', col: 'folders', id },
       ];
       await batchWrite(ops);
+      invalidateCachedEntry('folders_snapshot');
+      invalidateCachedEntry('files_snapshot');
       await api.addActivity({
         userId: currentUser.uid,
         userName: currentUser.displayName,
@@ -2233,6 +2707,8 @@ export const api = {
         })),
       ];
       await batchWrite(ops);
+      invalidateCachedEntry('folders_snapshot');
+      invalidateCachedEntry('files_snapshot');
       await api.addActivity({
         userId: currentUser.uid,
         userName: currentUser.displayName,
@@ -2251,7 +2727,7 @@ export const api = {
     const folderName = folder?.name || 'Pasta';
     const now = new Date().toISOString();
 
-    const allFiles = await listCol<FileRecord>('files');
+    const allFiles = await listColCached<FileRecord>('files', 'files_snapshot');
     const childFiles = allFiles.filter((f) => f.folderId === id);
 
     const ops: { type: 'update'; col: string; id: string; data: any }[] = [
@@ -2277,6 +2753,8 @@ export const api = {
     }
 
     await batchWrite(ops);
+    invalidateCachedEntry('folders_snapshot');
+    invalidateCachedEntry('files_snapshot');
     await api.addActivity({
       userId: currentUser.uid,
       userName: currentUser.displayName,
@@ -2294,8 +2772,8 @@ export const api = {
   async getEvents(): Promise<ChurchEvent[]> {
     try {
       const [events, files] = await Promise.all([
-        listCol<ChurchEvent>('events'),
-        listCol<FileRecord>('files'),
+        listColCached<ChurchEvent>('events', 'events_snapshot'),
+        listColCached<FileRecord>('files', 'files_snapshot'),
       ]);
       const allFiles = files.filter((f) => !f.inTrash);
 
@@ -2348,6 +2826,7 @@ export const api = {
     };
 
     await setDocById('events', eventId, newEvent);
+    invalidateCachedEntry('events_snapshot');
     await api.addActivity({
       userId: currentUser.uid,
       userName: currentUser.displayName,
@@ -2365,17 +2844,19 @@ export const api = {
       ...updates,
       updatedAt: new Date().toISOString(),
     });
+    invalidateCachedEntry('events_snapshot');
   },
 
   async deleteEvent(id: string): Promise<void> {
     await deleteDocById('events', id);
+    invalidateCachedEntry('events_snapshot');
   },
 
   // ==========================================
   // 6. SHARES
   // ==========================================
   async getShares(): Promise<ShareLink[]> {
-    return await listCol<ShareLink>('shares');
+    return await listColCached<ShareLink>('shares', 'shares_snapshot');
   },
 
   async createShare(data: {
@@ -2441,9 +2922,11 @@ export const api = {
   // ==========================================
   async getActivities(): Promise<Activity[]> {
     try {
-      const list = await listCol<Activity>('activities');
-      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      return list.slice(0, 50);
+      const list = await listColCached<Activity>('activities', 'activities_recent');
+      const sorted = [...list].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      return sorted.slice(0, 50);
     } catch (error) {
       console.warn('Could not list activities:', error);
       return [];
@@ -2459,6 +2942,7 @@ export const api = {
     };
     try {
       await setDocById('activities', actId, newAct);
+      invalidateCachedEntry('activities_recent');
     } catch (error) {
       console.warn('Could not record activity:', error);
     }
@@ -2477,7 +2961,7 @@ export const api = {
     };
 
     try {
-      const existing = await getDocById<any>('settings', 'system');
+      const existing = await getDocByIdCached<any>('settings', 'system', 'settings_system');
       const baseData = existing ? { ...defaultData, ...existing } : defaultData;
 
       return {
@@ -2515,16 +2999,21 @@ export const api = {
       },
       true
     );
+    invalidateCachedEntry('settings_system');
   },
 
-  async getStorageStats(): Promise<StorageStats> {
+  async getStorageStats(liveSnapshot?: {
+    files?: FileRecord[];
+    folders?: Folder[];
+    events?: ChurchEvent[];
+  }): Promise<StorageStats> {
     try {
       const [allFiles, folders, events, users, shares, activities, settings] = await Promise.all([
-        listCol<FileRecord>('files').catch(() => []),
-        listCol<Folder>('folders').catch(() => []),
-        listCol<ChurchEvent>('events').catch(() => []),
-        listCol<User>('users').catch(() => []),
-        listCol<ShareLink>('shares').catch(() => []),
+        liveSnapshot?.files ? Promise.resolve(liveSnapshot.files) : listColCached<FileRecord>('files', 'files_snapshot'),
+        liveSnapshot?.folders ? Promise.resolve(liveSnapshot.folders) : listColCached<Folder>('folders', 'folders_snapshot'),
+        liveSnapshot?.events ? Promise.resolve(liveSnapshot.events) : listColCached<ChurchEvent>('events', 'events_snapshot'),
+        listColCached<User>('users', 'users_snapshot').catch(() => []),
+        listColCached<ShareLink>('shares', 'shares_snapshot').catch(() => []),
         api.getActivities().catch(() => []),
         api.getSettings().catch(() => ({
           totalQuotaBytes: 2 * 1024 * 1024 * 1024 * 1024,
@@ -2951,7 +3440,7 @@ export const api = {
 
   async getChurchProfile(): Promise<ChurchProfile> {
     try {
-      const existing = await getDocById<ChurchProfile>('church_settings', 'profile');
+      const existing = await getDocByIdCached<ChurchProfile>('church_settings', 'profile', 'church_profile');
       if (existing) return existing;
     } catch {}
     return api.getDefaultChurchProfile();
@@ -2964,12 +3453,14 @@ export const api = {
       updatedAt: new Date().toISOString(),
       updatedBy: effective.displayName || 'Administrador',
     };
-    return await setDocById('church_settings', 'profile', updated as ChurchProfile, true);
+    const saved = await setDocById('church_settings', 'profile', updated as ChurchProfile, true);
+    invalidateCachedEntry('church_profile');
+    return saved;
   },
 
   async getChurchAnnouncements(publishedOnly: boolean = false): Promise<ChurchAnnouncement[]> {
     try {
-      let list = await listCol<ChurchAnnouncement>('church_announcements');
+      let list = [...(await listColCached<ChurchAnnouncement>('church_announcements', 'church_announcements'))];
       if (publishedOnly) {
         list = list.filter((a) => a.status === 'published');
       }
@@ -2992,7 +3483,9 @@ export const api = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    return await setDocById('church_announcements', newId, announcement);
+    const created = await setDocById('church_announcements', newId, announcement);
+    invalidateCachedEntry('church_announcements');
+    return created;
   },
 
   async updateChurchAnnouncement(id: string, updates: Partial<ChurchAnnouncement>): Promise<void> {
@@ -3000,15 +3493,17 @@ export const api = {
       ...updates,
       updatedAt: new Date().toISOString(),
     });
+    invalidateCachedEntry('church_announcements');
   },
 
   async deleteChurchAnnouncement(id: string): Promise<void> {
     await deleteDocById('church_announcements', id);
+    invalidateCachedEntry('church_announcements');
   },
 
   async getChurchPublicEvents(publishedOnly: boolean = false): Promise<ChurchPublicEvent[]> {
     try {
-      let list = await listCol<ChurchPublicEvent>('church_events');
+      let list = [...(await listColCached<ChurchPublicEvent>('church_events', 'church_events'))];
       if (publishedOnly) {
         list = list.filter((e) => e.status === 'published');
       }
@@ -3027,7 +3522,9 @@ export const api = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    return await setDocById('church_events', newId, event);
+    const created = await setDocById('church_events', newId, event);
+    invalidateCachedEntry('church_events');
+    return created;
   },
 
   async updateChurchPublicEvent(id: string, updates: Partial<ChurchPublicEvent>): Promise<void> {
@@ -3035,15 +3532,17 @@ export const api = {
       ...updates,
       updatedAt: new Date().toISOString(),
     });
+    invalidateCachedEntry('church_events');
   },
 
   async deleteChurchPublicEvent(id: string): Promise<void> {
     await deleteDocById('church_events', id);
+    invalidateCachedEntry('church_events');
   },
 
   async getChurchArticles(publishedOnly: boolean = false): Promise<ChurchArticle[]> {
     try {
-      let list = await listCol<ChurchArticle>('church_articles');
+      let list = [...(await listColCached<ChurchArticle>('church_articles', 'church_articles'))];
       if (publishedOnly) {
         list = list.filter((a) => a.status === 'published');
       }
@@ -3066,7 +3565,9 @@ export const api = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    return await setDocById('church_articles', newId, article);
+    const created = await setDocById('church_articles', newId, article);
+    invalidateCachedEntry('church_articles');
+    return created;
   },
 
   async updateChurchArticle(id: string, updates: Partial<ChurchArticle>): Promise<void> {
@@ -3074,15 +3575,17 @@ export const api = {
       ...updates,
       updatedAt: new Date().toISOString(),
     });
+    invalidateCachedEntry('church_articles');
   },
 
   async deleteChurchArticle(id: string): Promise<void> {
     await deleteDocById('church_articles', id);
+    invalidateCachedEntry('church_articles');
   },
 
   async getChurchAlbums(publishedOnly: boolean = false): Promise<ChurchAlbum[]> {
     try {
-      let list = await listCol<ChurchAlbum>('church_albums');
+      let list = [...(await listColCached<ChurchAlbum>('church_albums', 'church_albums'))];
       if (publishedOnly) {
         list = list.filter((a) => a.status === 'published');
       }
@@ -3101,7 +3604,9 @@ export const api = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    return await setDocById('church_albums', newId, album);
+    const created = await setDocById('church_albums', newId, album);
+    invalidateCachedEntry('church_albums');
+    return created;
   },
 
   async updateChurchAlbum(id: string, updates: Partial<ChurchAlbum>): Promise<void> {
@@ -3109,15 +3614,17 @@ export const api = {
       ...updates,
       updatedAt: new Date().toISOString(),
     });
+    invalidateCachedEntry('church_albums');
   },
 
   async deleteChurchAlbum(id: string): Promise<void> {
     await deleteDocById('church_albums', id);
+    invalidateCachedEntry('church_albums');
   },
 
   async getChurchDownloads(publishedOnly: boolean = false): Promise<ChurchDownload[]> {
     try {
-      let list = await listCol<ChurchDownload>('church_downloads');
+      let list = [...(await listColCached<ChurchDownload>('church_downloads', 'church_downloads'))];
       if (publishedOnly) {
         list = list.filter((d) => d.status === 'published');
       }
@@ -3137,7 +3644,9 @@ export const api = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    return await setDocById('church_downloads', newId, downloadItem);
+    const created = await setDocById('church_downloads', newId, downloadItem);
+    invalidateCachedEntry('church_downloads');
+    return created;
   },
 
   async updateChurchDownload(id: string, updates: Partial<ChurchDownload>): Promise<void> {
@@ -3145,10 +3654,12 @@ export const api = {
       ...updates,
       updatedAt: new Date().toISOString(),
     });
+    invalidateCachedEntry('church_downloads');
   },
 
   async deleteChurchDownload(id: string): Promise<void> {
     await deleteDocById('church_downloads', id);
+    invalidateCachedEntry('church_downloads');
   },
 
   async incrementChurchDownloadCount(id: string): Promise<void> {

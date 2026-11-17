@@ -54,10 +54,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNewFolderClick }
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [taskFilter, setTaskFilter] = useState<'all' | 'mine'>('all');
 
-  useEffect(() => {
-    refreshStats();
-  }, [refreshStats]);
-
   const usedBytes = storageStats?.totalBytesUsed || 0;
   const quotaBytes = storageStats?.totalQuota || 2 * 1024 * 1024 * 1024 * 1024;
   const availableBytes = storageStats?.availableBytes || Math.max(0, quotaBytes - usedBytes);

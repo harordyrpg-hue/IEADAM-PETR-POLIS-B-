@@ -316,7 +316,7 @@ export const UploadModal: React.FC = () => {
                 <span>Fila de Transferência ({queue.length})</span>
                 {hasCompleted && (
                   <button
-                    onClick={() => setQueue(queue.filter((i) => i.status !== 'completed'))}
+                    onClick={() => updateQueueState((prev) => prev.filter((i) => i.status !== 'completed'))}
                     className="text-amber-400 hover:underline text-[11px]"
                   >
                     Limpar concluídos

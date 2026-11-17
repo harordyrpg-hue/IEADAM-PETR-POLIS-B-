@@ -235,9 +235,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [notify]
   );
 
+  const allFilesRef = React.useRef<FileRecord[]>([]);
+  const foldersRef = React.useRef<Folder[]>([]);
+  const rawEventsRef = React.useRef<ChurchEvent[]>([]);
+  allFilesRef.current = allFiles;
+  foldersRef.current = folders;
+  rawEventsRef.current = rawEvents;
+
   const refreshStats = useCallback(async () => {
     try {
-      const stats = await api.getStorageStats();
+      const stats = await api.getStorageStats(
+        allFilesRef.current.length > 0 || foldersRef.current.length > 0 || rawEventsRef.current.length > 0
+          ? {
+              files: allFilesRef.current,
+              folders: foldersRef.current,
+              events: rawEventsRef.current,
+            }
+          : undefined
+      );
       setStorageStats(stats);
     } catch (err) {
       console.warn('Storage stats refresh deferred:', err);
@@ -333,7 +348,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             try {
               localStorage.setItem('ptb_session_user', JSON.stringify(sessionUser));
             } catch {}
-            await Promise.all([refreshStats(), refreshFolders(), refreshEvents()]);
           }
         } catch (err) {
           console.warn('Falha ao atualizar perfil no Firebase:', err);

@@ -111,12 +111,13 @@ export function handleFirestoreError(
     operationType,
     path,
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
   if (isQuotaError(error)) {
+    console.warn('Firestore Quota Exceeded: ', JSON.stringify(errInfo));
     throw new Error(
-      'Cota diária gratuita do Firestore excedida (RESOURCE_EXHAUSTED). Tente novamente mais tarde ou atualize o plano no Firebase Console.'
+      'Cota diária gratuita do Firestore excedida (RESOURCE_EXHAUSTED). Tente novamente amanhã ou faça upgrade no Firebase Console.'
     );
   }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 
