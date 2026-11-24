@@ -2,8 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
+  BatteryFull,
+  Bell,
+  BookOpen,
   Building,
   Calendar,
+  Camera,
   CheckCheck,
   CheckCircle2,
   ChevronRight,
@@ -11,15 +15,21 @@ import {
   Download,
   Droplets,
   Home,
+  Image as ImageIcon,
   Lock,
   MapPin,
+  MessageCircle,
+  Music,
   Phone,
   RotateCcw,
+  Settings,
   ShieldCheck,
+  Signal,
   Sparkles,
   User,
   UserPlus,
   Users,
+  Wifi,
 } from 'lucide-react';
 import { BaptismFormSettings, BaptismRegistration } from '../../types.js';
 import { api } from '../../services/api.js';
@@ -125,6 +135,7 @@ interface ChatLine {
 }
 
 type FormStep = 'form' | 'animation' | 'confirmed';
+type PhonePhase = 'homescreen' | 'notification' | 'chat';
 
 export const PublicBaptismPage: React.FC = () => {
   const [settings, setSettings] = useState<BaptismFormSettings | null>(null);
@@ -147,7 +158,8 @@ export const PublicBaptismPage: React.FC = () => {
   const [finishError, setFinishError] = useState<string | null>(null);
   const [submittedRecord, setSubmittedRecord] = useState<BaptismRegistration | null>(null);
 
-  // Animação de águas + Chat estilo app de mensagens (executado APÓS clicar em "Enviar Inscrição")
+  // Animação da tela de celular + notificação + app de mensagens (executado APÓS "Enviar Inscrição")
+  const [phonePhase, setPhonePhase] = useState<PhonePhase>('homescreen');
   const [visibleCount, setVisibleCount] = useState(0);
   const [chatPlaybackSeed, setChatPlaybackSeed] = useState(0);
   const [chatTimeLabel] = useState(() =>
@@ -185,17 +197,31 @@ export const PublicBaptismPage: React.FC = () => {
     };
   }, []);
 
-  // Sequential messaging-app playback when entering step === 'animation'
+  // Show smartphone home screen briefly, then drop in "Mensagem de um amigo" notification
   useEffect(() => {
     if (step !== 'animation') return;
+    setPhonePhase('homescreen');
+    setVisibleCount(0);
 
-    setVisibleCount(1);
+    const notifTimer = window.setTimeout(() => {
+      setPhonePhase('notification');
+    }, 1300);
+
+    return () => window.clearTimeout(notifTimer);
+  }, [step, chatPlaybackSeed]);
+
+  // Sequential messaging-app playback with slower, comfortable reading pace after tapping "Abrir Mensagem"
+  useEffect(() => {
+    if (step !== 'animation' || phonePhase !== 'chat') return;
+
+    setVisibleCount(0);
     const timers: number[] = [];
-    const delays = [950, 1950, 3000, 4050, 5050];
+    // Delays cumulativos em ms: leitura confortável e cadência natural de digitação
+    const delays = [600, 3200, 6400, 10400, 15200, 19200];
 
     delays.forEach((delay, idx) => {
       const t = window.setTimeout(() => {
-        setVisibleCount(idx + 2);
+        setVisibleCount(idx + 1);
       }, delay);
       timers.push(t);
     });
@@ -203,17 +229,17 @@ export const PublicBaptismPage: React.FC = () => {
     return () => {
       timers.forEach((t) => window.clearTimeout(t));
     };
-  }, [step, chatPlaybackSeed]);
+  }, [step, phonePhase]);
 
-  // Keep latest message scrolled into view inside the chat window
+  // Keep latest message scrolled into view inside the phone chat viewport
   useEffect(() => {
-    if (step === 'animation' && chatScrollRef.current) {
+    if (step === 'animation' && phonePhase === 'chat' && chatScrollRef.current) {
       chatScrollRef.current.scrollTo({
         top: chatScrollRef.current.scrollHeight,
         behavior: 'smooth',
       });
     }
-  }, [visibleCount, step]);
+  }, [visibleCount, step, phonePhase]);
 
   const numericAge = Number(age);
   const isMinor = Boolean(age !== '' && !Number.isNaN(numericAge) && numericAge < 18);
@@ -238,46 +264,48 @@ export const PublicBaptismPage: React.FC = () => {
     setFinishError(null);
     setSubmittedRecord(null);
     setVisibleCount(0);
+    setPhonePhase('homescreen');
     setStep('form');
   };
 
-  const candidateDisplayName = fullName.trim() || 'candidato(a)';
+  const candidateFirstName = fullName.trim().split(/\s+/)[0] || 'amigo(a)';
+  const candidateDisplayName = fullName.trim() || 'Candidato(a)';
   const chatMessages: ChatLine[] = [
     {
       id: 1,
       sender: 'espirito',
       speaker: 'Espírito Santo',
-      text: `Olá, ${candidateDisplayName} qual é a boa?`,
+      text: `Olá, ${candidateFirstName}! Qual é a boa? 😁`,
     },
     {
       id: 2,
       sender: 'candidato',
-      speaker: fullName.trim() ? fullName.trim() : 'Candidato',
-      text: 'Irei me batizar nas águas, estou muito feliz, finalmente chegou a hora',
+      speaker: candidateFirstName,
+      text: 'Tenho uma novidade! Vou me batizar nas águas!',
     },
     {
       id: 3,
       sender: 'espirito',
       speaker: 'Espírito Santo',
-      text: 'Que alegria, estou muito orgulhoso de você, pode ter certeza que é a melhor decisão',
+      text: 'Que daora! ❤️ Estou muito feliz com essa notícia incrível! Quando será?',
     },
     {
       id: 4,
       sender: 'candidato',
-      speaker: fullName.trim() ? fullName.trim() : 'Candidato',
-      text: 'Será no dia 06 de Dezembro, na Congregação Canaã',
+      speaker: candidateFirstName,
+      text: 'Será no dia 06 de dezembro, na Congregação Canaã. Você é meu convidado de honra! Quero ter você ao meu lado durante todo esse momento especial. 😁',
     },
     {
       id: 5,
       sender: 'espirito',
       speaker: 'Espírito Santo',
-      text: 'Show! Estarei lá para te acompanhar',
+      text: 'Pode deixar! Estarei com você o tempo todo, nunca sairei do seu lado. Você vai nascer de novo e viver uma nova vida com Deus! ❤️',
     },
     {
       id: 6,
       sender: 'candidato',
-      speaker: fullName.trim() ? fullName.trim() : 'Candidato',
-      text: 'Você é convidado de honra! 😁',
+      speaker: candidateFirstName,
+      text: 'Te vejo lá, meu melhor amigo! ❤️',
     },
   ];
 
@@ -454,189 +482,330 @@ export const PublicBaptismPage: React.FC = () => {
   }
 
   // ==========================================
-  // 3. TELA DA ANIMAÇÃO DE ÁGUAS + APP DE MENSAGENS (DEPOIS DE ENVIAR INSCRIÇÃO)
+  // 3. TELA DA ANIMAÇÃO DE CELULAR + NOTIFICAÇÃO + APP DE MENSAGENS
   // ==========================================
   if (step === 'animation') {
-    const isTypingNext = visibleCount > 0 && visibleCount < chatMessages.length;
+    const isTypingNext = phonePhase === 'chat' && visibleCount < chatMessages.length;
     const nextSenderIsSpirit = chatMessages[visibleCount]?.sender === 'espirito';
-    const chatFinished = visibleCount >= chatMessages.length;
+    const chatFinished = phonePhase === 'chat' && visibleCount >= chatMessages.length;
+
+    const phoneApps = [
+      { id: 'biblia', name: 'Bíblia', icon: BookOpen, bg: 'bg-sky-500/20 text-sky-300 border-sky-400/30' },
+      { id: 'fotos', name: 'Fotos', icon: ImageIcon, bg: 'bg-rose-500/20 text-rose-300 border-rose-400/30' },
+      { id: 'louvor', name: 'Louvor', icon: Music, bg: 'bg-violet-500/20 text-violet-300 border-violet-400/30' },
+      { id: 'agenda', name: 'Agenda', icon: Calendar, bg: 'bg-amber-500/20 text-amber-300 border-amber-400/30' },
+      { id: 'camera', name: 'Câmera', icon: Camera, bg: 'bg-neutral-800 text-neutral-200 border-neutral-700' },
+      { id: 'igreja', name: 'Igreja', icon: Building, bg: 'bg-indigo-500/20 text-indigo-300 border-indigo-400/30' },
+      { id: 'ajustes', name: 'Ajustes', icon: Settings, bg: 'bg-neutral-800 text-neutral-300 border-neutral-700' },
+      {
+        id: 'mensagens',
+        name: 'Mensagens',
+        icon: MessageCircle,
+        bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40',
+        hasUnread: phonePhase === 'notification',
+      },
+    ];
 
     return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex items-center justify-center relative overflow-hidden">
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-8 px-4 sm:px-6 flex items-center justify-center relative overflow-hidden">
         {/* Ambient Water Animation across the screen */}
         <WaterAnimationBackdrop fullHeight />
 
-        <div className="relative z-10 w-full max-w-xl bg-neutral-900/95 backdrop-blur-md border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
-          <div className="h-2.5 w-full bg-gradient-to-r from-sky-400 via-cyan-400 to-amber-400" />
-
-          {/* Top Water Theme Banner */}
-          <div className="px-5 sm:px-7 py-5 bg-gradient-to-br from-sky-950/70 via-neutral-900 to-neutral-950 border-b border-neutral-800 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-11 h-11 rounded-2xl bg-sky-500/20 border border-sky-400/40 text-sky-300 flex items-center justify-center shrink-0">
-                <Droplets className="w-5 h-5" />
+        <div className="relative z-10 w-full max-w-md space-y-5 flex flex-col items-center">
+          {/* Top Title & Replay Pill */}
+          <div className="w-full flex items-center justify-between gap-3 px-1">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-sky-500/20 border border-sky-400/40 text-sky-300 flex items-center justify-center shrink-0">
+                <Droplets className="w-4 h-4" />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-400 uppercase tracking-wider">
-                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 shrink-0" />
                   <span className="truncate">Batismo nas Águas</span>
                 </div>
-                <h1 className="text-base sm:text-lg font-bold text-neutral-100 truncate">
+                <p className="text-xs font-semibold text-neutral-200 truncate">
                   {candidateDisplayName}
-                </h1>
+                </p>
               </div>
             </div>
 
             <button
               type="button"
               onClick={() => setChatPlaybackSeed((prev) => prev + 1)}
-              className="inline-flex items-center gap-1.5 px-3 min-h-[34px] rounded-xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-[11px] font-semibold text-neutral-200 cursor-pointer shrink-0 transition-colors"
-              title="Reproduzir mensagens novamente"
+              className="inline-flex items-center gap-1.5 px-3 min-h-[34px] rounded-xl bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-700 text-[11px] font-semibold text-neutral-200 cursor-pointer shrink-0 transition-colors"
+              title="Rever animação do celular"
             >
               <RotateCcw className="w-3.5 h-3.5 text-sky-300" />
               <span>Rever</span>
             </button>
           </div>
 
-          <div className="p-4 sm:p-6 space-y-5">
-            {/* Messaging App Window */}
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 overflow-hidden shadow-inner">
-              {/* Messaging App Top Contact Bar */}
-              <div className="px-4 py-3 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="relative w-9 h-9 rounded-full bg-gradient-to-br from-sky-400 to-cyan-500 text-neutral-950 font-extrabold text-xs flex items-center justify-center shrink-0 shadow-sm">
-                    ES
-                    <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-neutral-900" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs sm:text-sm font-bold text-neutral-100 truncate">
-                      Espírito Santo
-                    </p>
-                    <p className="text-[11px] text-emerald-400 font-medium truncate">
-                      {isTypingNext && nextSenderIsSpirit
-                        ? 'digitando...'
-                        : 'online agora'}
-                    </p>
-                  </div>
+          {/* SMARTPHONE FRAME */}
+          <div className="w-full max-w-[360px] rounded-[2.5rem] p-2.5 bg-neutral-900 border-[4px] border-neutral-700/80 shadow-[0_24px_60px_rgba(0,0,0,0.75)]">
+            <div className="relative rounded-[2rem] bg-neutral-950 border border-neutral-800 overflow-hidden flex flex-col min-h-[540px]">
+              {/* Smartphone Status Bar & Dynamic Notch */}
+              <div className="relative px-5 pt-3 pb-2 bg-neutral-950/95 flex items-center justify-between text-[11px] font-mono tabular-nums text-neutral-200 z-20 shrink-0">
+                <span>{chatTimeLabel}</span>
+                <div className="w-20 h-4 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
+                  <span className="w-2 h-2 rounded-full bg-neutral-700" />
                 </div>
-
-                <span className="text-[10px] font-mono tabular-nums text-neutral-500 shrink-0">
-                  Hoje · {chatTimeLabel}
-                </span>
+                <div className="flex items-center gap-1.5 text-neutral-300">
+                  <Signal className="w-3 h-3" />
+                  <Wifi className="w-3 h-3" />
+                  <BatteryFull className="w-3.5 h-3.5 text-emerald-400" />
+                </div>
               </div>
 
-              {/* Chat Conversation Thread */}
-              <div
-                ref={chatScrollRef}
-                className="relative p-4 space-y-3 min-h-[310px] max-h-[390px] overflow-y-auto bg-[radial-gradient(ellipse_at_top,_rgba(14,165,233,0.08),_transparent_70%)]"
-              >
-                {chatMessages.slice(0, visibleCount).map((msg) => {
-                  const isSpirit = msg.sender === 'espirito';
-                  return (
-                    <div
-                      key={msg.id}
-                      className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${
-                        isSpirit ? 'items-start' : 'items-end'
-                      }`}
-                    >
-                      <span
-                        className={`text-[10px] font-bold mb-1 px-1.5 ${
-                          isSpirit ? 'text-sky-300' : 'text-amber-300'
-                        }`}
-                      >
-                        {msg.speaker}
-                      </span>
-                      <div
-                        className={`max-w-[88%] sm:max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs sm:text-[13px] leading-relaxed shadow-sm ${
-                          isSpirit
-                            ? 'bg-neutral-900 border border-sky-500/30 text-neutral-100 rounded-tl-sm'
-                            : 'bg-amber-400 text-neutral-950 font-semibold rounded-tr-sm'
-                        }`}
-                      >
-                        <p>{msg.text}</p>
-                        <div
-                          className={`mt-1 flex items-center justify-end gap-1 text-[10px] font-mono tabular-nums ${
-                            isSpirit ? 'text-neutral-500' : 'text-neutral-900/70'
-                          }`}
-                        >
-                          <span>{chatTimeLabel}</span>
-                          {!isSpirit && <CheckCheck className="w-3.5 h-3.5 text-sky-800" />}
+              {/* PHASE A & B: PHONE HOME SCREEN WITH ICONS + NOTIFICATION */}
+              {phonePhase !== 'chat' ? (
+                <div className="relative flex-1 flex flex-col justify-between p-5 bg-gradient-to-b from-sky-950/70 via-neutral-950 to-neutral-950 overflow-hidden">
+                  {/* Subtle animated water glow behind phone icons */}
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute -bottom-16 -left-10 -right-10 h-44 rounded-full bg-sky-500/10 blur-2xl"
+                  />
+
+                  {/* Incoming Push Notification Banner ("Mensagem de um amigo") */}
+                  {phonePhase === 'notification' ? (
+                    <div className="animate-in slide-in-from-top-5 fade-in duration-300 rounded-2xl bg-neutral-900/95 backdrop-blur-md border border-sky-400/50 p-3.5 shadow-2xl space-y-2.5 z-20">
+                      <div className="flex items-start gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-500 text-neutral-950 flex items-center justify-center shrink-0 shadow-md animate-bounce">
+                          <Bell className="w-4 h-4 stroke-[2.5]" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                              Nova Notificação
+                            </span>
+                            <span className="text-[10px] text-neutral-400">agora</span>
+                          </div>
+                          <p className="text-xs font-bold text-neutral-100 mt-0.5">
+                            Mensagem de um amigo
+                          </p>
+                          <p className="text-[11px] text-neutral-300 mt-0.5">
+                            Alguém especial acabou de te mandar uma mensagem...
+                          </p>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
 
-                {isTypingNext && (
-                  <div
-                    className={`flex flex-col ${
-                      nextSenderIsSpirit ? 'items-start' : 'items-end'
-                    }`}
-                  >
-                    <span className="text-[10px] text-neutral-500 mb-1 px-1.5">
-                      {nextSenderIsSpirit ? 'Espírito Santo' : candidateDisplayName}
-                    </span>
-                    <div
-                      className={`px-3.5 py-2.5 rounded-2xl border flex items-center gap-1.5 ${
-                        nextSenderIsSpirit
-                          ? 'bg-neutral-900 border-sky-500/25 rounded-tl-sm'
-                          : 'bg-amber-400/20 border-amber-400/35 rounded-tr-sm'
-                      }`}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce" />
-                      <span
-                        className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce"
-                        style={{ animationDelay: '0.15s' }}
-                      />
-                      <span
-                        className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce"
-                        style={{ animationDelay: '0.3s' }}
-                      />
+                      <button
+                        type="button"
+                        onClick={() => setPhonePhase('chat')}
+                        className="w-full min-h-[38px] px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition-transform active:scale-95 cursor-pointer"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>Abrir Mensagem</span>
+                      </button>
+                    </div>
+                  ) : (
+                    /* Lock/Home Clock Display while waiting for notification */
+                    <div className="pt-4 text-center space-y-1 animate-in fade-in duration-300">
+                      <div className="text-4xl font-bold font-mono tabular-nums tracking-tight text-neutral-100">
+                        {chatTimeLabel}
+                      </div>
+                      <p className="text-[11px] text-sky-300/80 font-medium">
+                        IEADAM Petrópolis B · Batismo nas Águas
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Phone App Icons Grid */}
+                  <div className="relative z-10 py-4">
+                    <div className="grid grid-cols-4 gap-3.5">
+                      {phoneApps.map((app) => {
+                        const Icon = app.icon;
+                        const clickable = app.id === 'mensagens' && phonePhase === 'notification';
+                        return (
+                          <button
+                            key={app.id}
+                            type="button"
+                            onClick={() => {
+                              if (clickable) setPhonePhase('chat');
+                            }}
+                            disabled={!clickable}
+                            className={`flex flex-col items-center gap-1.5 ${
+                              clickable ? 'cursor-pointer group' : 'cursor-default'
+                            }`}
+                          >
+                            <div
+                              className={`relative w-12 h-12 rounded-2xl border flex items-center justify-center transition-transform ${
+                                app.bg
+                              } ${clickable ? 'group-hover:scale-105 ring-2 ring-amber-400/70' : ''}`}
+                            >
+                              <Icon className="w-5 h-5" />
+                              {app.hasUnread && (
+                                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow">
+                                  1
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-neutral-300 font-medium truncate max-w-full">
+                              {app.name}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
-                )}
-              </div>
+
+                  {/* Phone Home Indicator Bar */}
+                  <div className="flex justify-center pt-1">
+                    <div className="w-28 h-1 rounded-full bg-neutral-700" />
+                  </div>
+                </div>
+              ) : (
+                /* PHASE C: MESSAGING APP OPENED */
+                <div className="flex-1 flex flex-col bg-neutral-950 animate-in fade-in duration-300">
+                  {/* Messaging App Header */}
+                  <div className="px-4 py-3 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between gap-2 shrink-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="relative w-9 h-9 rounded-full bg-gradient-to-br from-sky-400 to-cyan-500 text-neutral-950 font-extrabold text-xs flex items-center justify-center shrink-0 shadow-sm">
+                        ES
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-neutral-900" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-neutral-100 truncate">
+                          Espírito Santo
+                        </p>
+                        <p className="text-[10px] text-emerald-400 font-medium truncate">
+                          {isTypingNext && nextSenderIsSpirit
+                            ? 'digitando...'
+                            : 'online agora'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="text-[10px] font-mono tabular-nums text-neutral-500 shrink-0">
+                      Hoje
+                    </span>
+                  </div>
+
+                  {/* Chat Messages Feed */}
+                  <div
+                    ref={chatScrollRef}
+                    className="flex-1 p-3.5 space-y-3 overflow-y-auto max-h-[395px] bg-[radial-gradient(ellipse_at_top,_rgba(14,165,233,0.1),_transparent_75%)]"
+                  >
+                    {chatMessages.slice(0, visibleCount).map((msg) => {
+                      const isSpirit = msg.sender === 'espirito';
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${
+                            isSpirit ? 'items-start' : 'items-end'
+                          }`}
+                        >
+                          <span
+                            className={`text-[10px] font-bold mb-1 px-1 ${
+                              isSpirit ? 'text-sky-300' : 'text-amber-300'
+                            }`}
+                          >
+                            {msg.speaker}
+                          </span>
+                          <div
+                            className={`max-w-[88%] px-3 py-2 rounded-2xl text-xs leading-relaxed shadow-sm ${
+                              isSpirit
+                                ? 'bg-neutral-900 border border-sky-500/35 text-neutral-100 rounded-tl-sm'
+                                : 'bg-amber-400 text-neutral-950 font-semibold rounded-tr-sm'
+                            }`}
+                          >
+                            <p>{msg.text}</p>
+                            <div
+                              className={`mt-1 flex items-center justify-end gap-1 text-[10px] font-mono tabular-nums ${
+                                isSpirit ? 'text-neutral-500' : 'text-neutral-900/70'
+                              }`}
+                            >
+                              <span>{chatTimeLabel}</span>
+                              {!isSpirit && <CheckCheck className="w-3.5 h-3.5 text-sky-800" />}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {isTypingNext && (
+                      <div
+                        className={`flex flex-col ${
+                          nextSenderIsSpirit ? 'items-start' : 'items-end'
+                        }`}
+                      >
+                        <span className="text-[10px] text-neutral-500 mb-1 px-1">
+                          {nextSenderIsSpirit ? 'Espírito Santo' : candidateFirstName}
+                        </span>
+                        <div
+                          className={`px-3.5 py-2.5 rounded-2xl border flex items-center gap-1.5 ${
+                            nextSenderIsSpirit
+                              ? 'bg-neutral-900 border-sky-500/25 rounded-tl-sm'
+                              : 'bg-amber-400/20 border-amber-400/35 rounded-tr-sm'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce" />
+                          <span
+                            className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce"
+                            style={{ animationDelay: '0.15s' }}
+                          />
+                          <span
+                            className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce"
+                            style={{ animationDelay: '0.3s' }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Fake Chat Input Bar at Bottom of Phone */}
+                  <div className="px-3 py-2.5 bg-neutral-900 border-t border-neutral-800 flex items-center gap-2 shrink-0">
+                    <div className="flex-1 px-3 py-1.5 rounded-full bg-neutral-950 border border-neutral-800 text-[11px] text-neutral-500 truncate">
+                      {chatFinished
+                        ? 'Conversa concluída — clique em Finalizar abaixo'
+                        : 'Mensagem chegando...'}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
+          </div>
 
-            {finishError && (
-              <div className="p-3 bg-red-500/15 border border-red-500/30 rounded-xl flex items-start gap-2 text-xs text-red-300">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                <span>{finishError}</span>
-              </div>
-            )}
-
-            {/* Action Buttons Below the Animation & Chat */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-1">
-              <button
-                type="button"
-                disabled={submitting}
-                onClick={() => {
-                  setStep('form');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
-                className="py-3 px-4 rounded-2xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>Revisar Dados</span>
-              </button>
-
-              <button
-                type="button"
-                disabled={submitting || !chatFinished}
-                onClick={handleFinalizeRegistration}
-                className="flex-1 py-3.5 px-5 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-2xl text-xs sm:text-sm shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer touch-manipulation"
-              >
-                {submitting ? (
-                  <span>Finalizando e salvando...</span>
-                ) : !chatFinished ? (
-                  <span>Aguarde a mensagem final...</span>
-                ) : (
-                  <>
-                    <span>Finalizar</span>
-                    <ChevronRight className="w-4 h-4 stroke-[2.5]" />
-                  </>
-                )}
-              </button>
+          {finishError && (
+            <div className="w-full p-3 bg-red-500/15 border border-red-500/30 rounded-xl flex items-start gap-2 text-xs text-red-300">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <span>{finishError}</span>
             </div>
+          )}
+
+          {/* Action Buttons Below the Smartphone Animation */}
+          <div className="w-full flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => {
+                setStep('form');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="py-3 px-4 rounded-2xl bg-neutral-900/95 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Revisar Dados</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={submitting || !chatFinished}
+              onClick={handleFinalizeRegistration}
+              className="flex-1 py-3.5 px-5 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-2xl text-xs sm:text-sm shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer touch-manipulation"
+            >
+              {submitting ? (
+                <span>Finalizando e salvando...</span>
+              ) : phonePhase !== 'chat' ? (
+                <span>Toque em &quot;Abrir Mensagem&quot; no celular</span>
+              ) : !chatFinished ? (
+                <span>Aguarde as mensagens...</span>
+              ) : (
+                <>
+                  <span>Finalizar</span>
+                  <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                </>
+              )}
+            </button>
           </div>
         </div>
       </div>
