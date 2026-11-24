@@ -737,10 +737,17 @@ export interface BaptismRegistration {
   protocolNumber: string;
   // Dados do Candidato(a) — preenchidos no formulário público
   fullName: string;
+  cpf?: string;
   birthDate: string;
   age: string;
   gender: 'Masc.' | 'Fem.' | '';
+  naturalidade?: string;
+  maritalStatus?: string;
+  spouseName?: string;
+  motherName?: string;
+  fatherName?: string;
   phone: string;
+  cep?: string;
   address?: string;
   congregation: string;
   guardianName?: string;
@@ -752,7 +759,7 @@ export interface BaptismRegistration {
   conversionDate?: string;
   previouslyBaptized?: 'sim' | 'nao' | '';
   recommendingPastor?: string;
-  // Uso Exclusivo da Secretaria
+  // Registro da Secretaria
   baptismDate?: string;
   receivedBy?: string;
   secretaryNotes?: string;

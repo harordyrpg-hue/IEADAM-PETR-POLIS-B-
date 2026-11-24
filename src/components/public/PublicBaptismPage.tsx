@@ -12,8 +12,10 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  CreditCard,
   Download,
   Droplets,
+  Heart,
   Home,
   Image as ImageIcon,
   Lock,
@@ -34,6 +36,19 @@ import {
 import { BaptismFormSettings, BaptismRegistration } from '../../types.js';
 import { api } from '../../services/api.js';
 import { exportSingleBaptismFichaPDF } from '../../utils/baptismPdf.js';
+
+function formatCPF(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 11);
+  return digits
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+}
+
+function formatCEP(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  return digits.replace(/^(\d{5})(\d)/, '$1-$2');
+}
 
 function computeAgeFromBirthDate(birthDateStr: string): string {
   if (!birthDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(birthDateStr)) return '';
@@ -144,10 +159,17 @@ export const PublicBaptismPage: React.FC = () => {
 
   // Dados Pessoais (sem Dados Eclesiásticos no envio público — preenchidos depois pela Secretaria)
   const [fullName, setFullName] = useState('');
+  const [cpf, setCpf] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState<'Masc.' | 'Fem.' | ''>('');
+  const [naturalidade, setNaturalidade] = useState('');
+  const [maritalStatus, setMaritalStatus] = useState('');
+  const [spouseName, setSpouseName] = useState('');
+  const [motherName, setMotherName] = useState('');
+  const [fatherName, setFatherName] = useState('');
   const [phone, setPhone] = useState('');
+  const [cep, setCep] = useState('');
   const [address, setAddress] = useState('');
   const [congregation, setCongregation] = useState('IEADAM Petrópolis B');
   const [guardianName, setGuardianName] = useState('');
@@ -265,10 +287,17 @@ export const PublicBaptismPage: React.FC = () => {
 
   const resetForm = () => {
     setFullName('');
+    setCpf('');
     setBirthDate('');
     setAge('');
     setGender('');
+    setNaturalidade('');
+    setMaritalStatus('');
+    setSpouseName('');
+    setMotherName('');
+    setFatherName('');
     setPhone('');
+    setCep('');
     setAddress('');
     setCongregation('IEADAM Petrópolis B');
     setGuardianName('');
@@ -332,6 +361,11 @@ export const PublicBaptismPage: React.FC = () => {
       setFormError('Por favor, informe seu Nome Completo.');
       return;
     }
+    const cpfDigits = cpf.replace(/\D/g, '');
+    if (cpfDigits.length !== 11) {
+      setFormError('Por favor, informe um CPF válido com 11 dígitos.');
+      return;
+    }
     if (!birthDate.trim()) {
       setFormError('Por favor, informe sua Data de Nascimento.');
       return;
@@ -344,12 +378,33 @@ export const PublicBaptismPage: React.FC = () => {
       setFormError('Por favor, selecione o Sexo (Masc. ou Fem.).');
       return;
     }
+    if (!naturalidade.trim()) {
+      setFormError('Por favor, informe sua Naturalidade (cidade/estado de nascimento).');
+      return;
+    }
+    if (!maritalStatus.trim()) {
+      setFormError('Por favor, selecione seu Estado Civil.');
+      return;
+    }
+    if (maritalStatus === 'Casado(a)' && !spouseName.trim()) {
+      setFormError('Por favor, informe o Nome do Cônjuge.');
+      return;
+    }
+    if (!motherName.trim()) {
+      setFormError('Por favor, informe o Nome da Mãe.');
+      return;
+    }
     if (!phone.trim()) {
       setFormError('Por favor, informe seu Telefone / WhatsApp.');
       return;
     }
+    const cepDigits = cep.replace(/\D/g, '');
+    if (cepDigits.length !== 8) {
+      setFormError('Por favor, informe um CEP válido com 8 dígitos.');
+      return;
+    }
     if (!address.trim()) {
-      setFormError('Por favor, informe seu Endereço.');
+      setFormError('Por favor, informe seu Endereço completo.');
       return;
     }
     if (!congregation.trim()) {
@@ -383,10 +438,17 @@ export const PublicBaptismPage: React.FC = () => {
       setSubmitting(true);
       const created = await api.submitPublicBaptismRegistration({
         fullName,
+        cpf,
         birthDate,
         age,
         gender,
+        naturalidade,
+        maritalStatus,
+        spouseName: maritalStatus === 'Casado(a)' ? spouseName : '',
+        motherName,
+        fatherName,
         phone,
+        cep,
         address,
         congregation,
         guardianName,
@@ -412,8 +474,11 @@ export const PublicBaptismPage: React.FC = () => {
 
   const churchTitle = settings?.churchTitle || 'IEADAM Petrópolis B · PT-B Mídia';
   const formTitle = settings?.formTitle || 'Inscrição — Batismo nas Águas';
+  const rawSubtitle = settings?.subtitle || '';
   const subtitle =
-    settings?.subtitle || 'Ficha oficial da Secretaria · Somente dados pessoais essenciais';
+    !rawSubtitle || /exclusivo\s+da\s+secretaria/i.test(rawSubtitle)
+      ? 'Ficha oficial de inscrição para o Batismo nas Águas'
+      : rawSubtitle;
 
   // ==========================================
   // 0. LOADING SCREEN (Padrão PT-B Mídia)
@@ -857,7 +922,7 @@ export const PublicBaptismPage: React.FC = () => {
                   {submittedRecord.fullName}
                 </h1>
                 <p className="text-xs text-neutral-300 mt-1.5 leading-relaxed max-w-md mx-auto">
-                  Sua inscrição foi finalizada e salva automaticamente na lista da Secretaria. A equipe completará os dados eclesiásticos e entrará em contato!
+                  Sua inscrição foi finalizada e enviada automaticamente para a direção da igreja e Secretaria. Em breve a equipe entrará em contato!
                 </p>
               </div>
             </div>
@@ -874,6 +939,15 @@ export const PublicBaptismPage: React.FC = () => {
             </div>
 
             <div className="p-4 bg-neutral-950/80 border border-neutral-800 rounded-2xl text-left space-y-2 text-xs">
+              {submittedRecord.cpf && (
+                <div className="flex items-center gap-2 text-neutral-200">
+                  <CreditCard className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    <strong>CPF:</strong>{' '}
+                    <span className="font-mono">{submittedRecord.cpf}</span>
+                  </span>
+                </div>
+              )}
               <div className="flex items-center gap-2 text-neutral-200">
                 <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>
@@ -882,6 +956,34 @@ export const PublicBaptismPage: React.FC = () => {
                   {submittedRecord.gender})
                 </span>
               </div>
+              {submittedRecord.naturalidade && (
+                <div className="flex items-center gap-2 text-neutral-200">
+                  <MapPin className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Naturalidade:</strong> {submittedRecord.naturalidade}
+                  </span>
+                </div>
+              )}
+              {submittedRecord.maritalStatus && (
+                <div className="flex items-center gap-2 text-neutral-200">
+                  <Heart className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Estado Civil:</strong> {submittedRecord.maritalStatus}
+                    {submittedRecord.maritalStatus === 'Casado(a)' && submittedRecord.spouseName
+                      ? ` · Cônjuge: ${submittedRecord.spouseName}`
+                      : ''}
+                  </span>
+                </div>
+              )}
+              {submittedRecord.motherName && (
+                <div className="flex items-start gap-2 text-neutral-300">
+                  <Users className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Filiação:</strong> Mãe: {submittedRecord.motherName}
+                    {submittedRecord.fatherName ? ` · Pai: ${submittedRecord.fatherName}` : ''}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center gap-2 text-neutral-200">
                 <Phone className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>
@@ -889,11 +991,13 @@ export const PublicBaptismPage: React.FC = () => {
                   <span className="font-mono">{submittedRecord.phone}</span>
                 </span>
               </div>
-              {submittedRecord.address && (
+              {(submittedRecord.cep || submittedRecord.address) && (
                 <div className="flex items-start gap-2 text-neutral-300">
                   <Home className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <span>
-                    <strong>Endereço:</strong> {submittedRecord.address}
+                    <strong>Endereço:</strong>{' '}
+                    {submittedRecord.cep ? `CEP ${submittedRecord.cep} — ` : ''}
+                    {submittedRecord.address}
                   </span>
                 </div>
               )}
@@ -1001,14 +1105,14 @@ export const PublicBaptismPage: React.FC = () => {
             </div>
           )}
 
-          {/* Security / Instructions notice matching rules card */}
+          {/* Orientation Box */}
           <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-1.5">
             <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
               <ShieldCheck className="w-4 h-4 shrink-0" />
-              <span>Orientação da Secretaria</span>
+              <span>Orientação de Preenchimento</span>
             </div>
             <p className="text-xs text-neutral-300 leading-relaxed">
-              Solicitamos apenas seus dados essenciais (sem CPF, RG, filiação, tipo sanguíneo ou dados financeiros). As informações eclesiásticas serão registradas posteriormente pela Secretaria.
+              Preencha todo o formulário com atenção e dados corretos (apenas o Nome do Pai é opcional, e o Nome do Responsável caso seja menor de 18 anos). Todas as informações preenchidas serão enviadas diretamente para a direção da igreja para validação e organização do batismo.
             </p>
           </div>
 
@@ -1019,26 +1123,47 @@ export const PublicBaptismPage: React.FC = () => {
                 Dados do Candidato(a)
               </h2>
               <p className="text-xs text-neutral-400 mb-4">
-                Preencha seus dados pessoais abaixo e clique em Enviar Inscrição.
+                Preencha todos os campos abaixo e clique em Enviar Inscrição.
               </p>
             </div>
 
-            {/* Nome Completo */}
-            <div>
-              <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
-                Nome Completo *
-              </label>
-              <div className="relative">
-                <User className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  required
-                  maxLength={180}
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Seu nome completo"
-                  className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
-                />
+            {/* Nome Completo & CPF */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+              <div className="sm:col-span-7">
+                <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
+                  Nome Completo *
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    maxLength={180}
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Seu nome completo"
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="sm:col-span-5">
+                <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
+                  CPF *
+                </label>
+                <div className="relative">
+                  <CreditCard className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    required
+                    maxLength={14}
+                    value={cpf}
+                    onChange={(e) => setCpf(formatCPF(e.target.value))}
+                    placeholder="000.000.000-00"
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs font-mono tabular-nums"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1100,6 +1225,114 @@ export const PublicBaptismPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Naturalidade & Estado Civil */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
+                  Naturalidade *
+                </label>
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    maxLength={120}
+                    value={naturalidade}
+                    onChange={(e) => setNaturalidade(e.target.value)}
+                    placeholder="Cidade / UF de nascimento (ex: Manaus / AM)"
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
+                  Estado Civil *
+                </label>
+                <div className="relative">
+                  <Heart className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <select
+                    required
+                    value={maritalStatus}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setMaritalStatus(next);
+                      if (next !== 'Casado(a)') {
+                        setSpouseName('');
+                      }
+                    }}
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
+                  >
+                    <option value="">Selecione...</option>
+                    <option value="Solteiro(a)">Solteiro(a)</option>
+                    <option value="Casado(a)">Casado(a)</option>
+                    <option value="Divorciado(a)">Divorciado(a)</option>
+                    <option value="Viúvo(a)">Viúvo(a)</option>
+                    <option value="Separado(a)">Separado(a)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Nome do Cônjuge (condicional para Casado(a)) */}
+            {maritalStatus === 'Casado(a)' && (
+              <div className="p-3.5 rounded-2xl bg-amber-500/5 border border-amber-500/30">
+                <label className="block text-[11px] font-semibold text-amber-300 uppercase tracking-wider mb-1">
+                  Nome do Cônjuge *
+                </label>
+                <div className="relative">
+                  <Heart className="w-4 h-4 text-amber-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    maxLength={180}
+                    value={spouseName}
+                    onChange={(e) => setSpouseName(e.target.value)}
+                    placeholder="Nome completo do(a) esposo(a)"
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-amber-500/40 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Filiação: Nome da Mãe (obrigatório) & Nome do Pai (opcional) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
+                  Nome da Mãe *
+                </label>
+                <div className="relative">
+                  <Users className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    maxLength={180}
+                    value={motherName}
+                    onChange={(e) => setMotherName(e.target.value)}
+                    placeholder="Nome completo da mãe"
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
+                  Nome do Pai <span className="text-neutral-400 normal-case font-normal">(opcional)</span>
+                </label>
+                <div className="relative">
+                  <Users className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    maxLength={180}
+                    value={fatherName}
+                    onChange={(e) => setFatherName(e.target.value)}
+                    placeholder="Nome completo do pai (não obrigatório)"
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* Telefone / WhatsApp & Congregação / Núcleo */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -1140,22 +1373,43 @@ export const PublicBaptismPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Endereço do Candidato */}
-            <div>
-              <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
-                Endereço *
-              </label>
-              <div className="relative">
-                <Home className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  required
-                  maxLength={280}
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Rua, número, bairro..."
-                  className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
-                />
+            {/* CEP & Endereço do Candidato */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+              <div className="sm:col-span-4">
+                <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
+                  CEP *
+                </label>
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    required
+                    maxLength={9}
+                    value={cep}
+                    onChange={(e) => setCep(formatCEP(e.target.value))}
+                    placeholder="00000-000"
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs font-mono tabular-nums"
+                  />
+                </div>
+              </div>
+
+              <div className="sm:col-span-8">
+                <label className="block text-[11px] font-semibold text-neutral-300 uppercase tracking-wider mb-1">
+                  Endereço *
+                </label>
+                <div className="relative">
+                  <Home className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    maxLength={280}
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Rua, número, complemento, bairro..."
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
+                  />
+                </div>
               </div>
             </div>
 

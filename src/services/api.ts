@@ -5293,7 +5293,7 @@ export const api = {
       status: 'aberto',
       churchTitle: 'IGREJA EVANGÉLICA ASSEMBLEIA DE DEUS NO AMAZONAS',
       formTitle: 'Ficha de Inscrição - Batismo nas Águas',
-      subtitle: 'Uso exclusivo da Secretaria - Somente informações essenciais',
+      subtitle: 'Ficha oficial de inscrição para o Batismo nas Águas',
       nextBaptismDate: '',
       baptismLocation: 'IEADAM Petrópolis B',
       pausedMessage:
@@ -5306,6 +5306,13 @@ export const api = {
 
   async getBaptismFormSettings(): Promise<BaptismFormSettings> {
     const defaults = api.getDefaultBaptismSettings();
+    const normalizeSubtitle = (s: BaptismFormSettings): BaptismFormSettings => ({
+      ...s,
+      subtitle:
+        !s.subtitle || /uso exclusivo da secretaria/i.test(s.subtitle)
+          ? defaults.subtitle
+          : s.subtitle,
+    });
     const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T | null> =>
       Promise.race([
         promise,
@@ -5322,11 +5329,11 @@ export const api = {
 
       const existing = await withTimeout(fbPromise, 2500);
       if (existing) {
-        return { ...defaults, ...existing };
+        return normalizeSubtitle({ ...defaults, ...existing });
       }
 
       const srv = await withTimeout(serverPromise, 1500);
-      return srv ? { ...defaults, ...srv } : defaults;
+      return srv ? normalizeSubtitle({ ...defaults, ...srv }) : defaults;
     } catch {
       return defaults;
     }
@@ -5336,7 +5343,15 @@ export const api = {
     const defaults = api.getDefaultBaptismSettings();
     return subscribeCollection<BaptismFormSettings>('baptism_settings', (items) => {
       const found = items.find((i) => i.id === 'default') || items[0];
-      callback(found ? { ...defaults, ...found } : defaults);
+      if (!found) {
+        callback(defaults);
+        return;
+      }
+      const merged = { ...defaults, ...found };
+      if (!merged.subtitle || /uso exclusivo da secretaria/i.test(merged.subtitle)) {
+        merged.subtitle = defaults.subtitle;
+      }
+      callback(merged);
     });
   },
 
@@ -5409,10 +5424,17 @@ export const api = {
 
   async submitPublicBaptismRegistration(input: {
     fullName: string;
+    cpf?: string;
     birthDate: string;
     age: string;
     gender: 'Masc.' | 'Fem.';
+    naturalidade?: string;
+    maritalStatus?: string;
+    spouseName?: string;
+    motherName?: string;
+    fatherName?: string;
     phone: string;
+    cep?: string;
     address?: string;
     congregation: string;
     guardianName?: string;
@@ -5440,10 +5462,17 @@ export const api = {
       id,
       protocolNumber,
       fullName: input.fullName.trim(),
+      cpf: input.cpf?.trim() || '',
       birthDate: input.birthDate.trim(),
       age: String(input.age || '').trim(),
       gender: input.gender,
+      naturalidade: input.naturalidade?.trim() || '',
+      maritalStatus: input.maritalStatus?.trim() || '',
+      spouseName: input.spouseName?.trim() || '',
+      motherName: input.motherName?.trim() || '',
+      fatherName: input.fatherName?.trim() || '',
       phone: input.phone.trim(),
+      cep: input.cep?.trim() || '',
       address: input.address?.trim() || '',
       congregation: input.congregation.trim(),
       guardianName: input.guardianName?.trim() || '',

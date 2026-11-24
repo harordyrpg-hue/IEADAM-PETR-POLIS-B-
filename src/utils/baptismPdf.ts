@@ -89,8 +89,11 @@ export function drawBaptismFichaPage(
   const churchTitle =
     settings?.churchTitle || 'IEADAM PETRÓPOLIS B · PT-B MÍDIA';
   const formTitle = settings?.formTitle || 'Ficha de Inscrição - Batismo nas Águas';
+  const rawSubtitle = settings?.subtitle || '';
   const subtitle =
-    settings?.subtitle || 'Uso exclusivo da Secretaria - Somente informações essenciais';
+    !rawSubtitle || /uso exclusivo da secretaria/i.test(rawSubtitle)
+      ? 'Ficha oficial de inscrição para o Batismo nas Águas'
+      : rawSubtitle;
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9.5);
@@ -126,40 +129,46 @@ export function drawBaptismFichaPage(
   // =====================================
   // 1. DADOS DO CANDIDATO(A)
   // =====================================
-  let y = 39;
+  let y = 37;
   drawSectionHeading(doc, 'DADOS DO CANDIDATO(A)', margin, y, contentW);
-  y += 7;
+  y += 6.5;
 
-  // Nome Completo
-  drawLabeledBox(doc, 'Nome Completo:', reg.fullName || '', margin, y, contentW, 9.5);
-  y += 15;
+  const boxH = 8;
+  const rowStep = 13;
+  const gap = 5;
+  const halfW = (contentW - gap) / 2;
 
-  // Data de Nascimento | Idade | Sexo
-  const birthW = 58;
-  const ageW = 30;
-  const gap = 6;
-  const genderW = contentW - birthW - ageW - gap * 2;
+  // Row 1: Nome Completo
+  drawLabeledBox(doc, 'Nome Completo:', reg.fullName || '', margin, y, contentW, boxH);
+  y += rowStep;
+
+  // Row 2: CPF | Data de Nascimento | Idade | Sexo
+  const cpfW = 50;
+  const birthW = 44;
+  const ageW = 24;
+  const genderW = contentW - cpfW - birthW - ageW - gap * 3;
+  drawLabeledBox(doc, 'CPF:', reg.cpf || '', margin, y, cpfW, boxH);
   drawLabeledBox(
     doc,
     'Data de Nascimento:',
     formatDateBR(reg.birthDate),
-    margin,
+    margin + cpfW + gap,
     y,
     birthW,
-    9.5
+    boxH
   );
   drawLabeledBox(
     doc,
     'Idade:',
     reg.age ? `${reg.age} anos` : '',
-    margin + birthW + gap,
+    margin + cpfW + birthW + gap * 2,
     y,
     ageW,
-    9.5
+    boxH
   );
-  const sexLabel = `Sexo:  (${reg.gender === 'Masc.' ? 'X' : ' '}) Masc.   (${
+  const sexLabel = `Sexo: (${reg.gender === 'Masc.' ? 'X' : ' '})M (${
     reg.gender === 'Fem.' ? 'X' : ' '
-  }) Fem.`;
+  })F`;
   drawLabeledBox(
     doc,
     sexLabel,
@@ -168,32 +177,82 @@ export function drawBaptismFichaPage(
       : reg.gender === 'Fem.'
         ? 'Feminino'
         : '',
-    margin + birthW + ageW + gap * 2,
+    margin + cpfW + birthW + ageW + gap * 3,
     y,
     genderW,
-    9.5
+    boxH
   );
-  y += 15;
+  y += rowStep;
 
-  // Telefone / WhatsApp | Congregação / Núcleo
-  const halfW = (contentW - gap) / 2;
-  drawLabeledBox(doc, 'Telefone / WhatsApp:', reg.phone || '', margin, y, halfW, 9.5);
+  // Row 3: Naturalidade | Estado Civil | Nome do Cônjuge (se casado)
+  const natW = 54;
+  const maritalW = 38;
+  const spouseW = contentW - natW - maritalW - gap * 2;
+  drawLabeledBox(doc, 'Naturalidade:', reg.naturalidade || '', margin, y, natW, boxH);
+  drawLabeledBox(
+    doc,
+    'Estado Civil:',
+    reg.maritalStatus || '',
+    margin + natW + gap,
+    y,
+    maritalW,
+    boxH
+  );
+  drawLabeledBox(
+    doc,
+    'Nome do Cônjuge (se casado):',
+    reg.spouseName || '',
+    margin + natW + maritalW + gap * 2,
+    y,
+    spouseW,
+    boxH
+  );
+  y += rowStep;
+
+  // Row 4: Nome da Mãe | Nome do Pai (opcional)
+  drawLabeledBox(doc, 'Nome da Mãe:', reg.motherName || '', margin, y, halfW, boxH);
+  drawLabeledBox(
+    doc,
+    'Nome do Pai (opcional):',
+    reg.fatherName || '',
+    margin + halfW + gap,
+    y,
+    halfW,
+    boxH
+  );
+  y += rowStep;
+
+  // Row 5: Telefone / WhatsApp | Congregação / Núcleo
+  const phoneW = 52;
+  const congW = contentW - phoneW - gap;
+  drawLabeledBox(doc, 'Telefone / WhatsApp:', reg.phone || '', margin, y, phoneW, boxH);
   drawLabeledBox(
     doc,
     'Congregação / Núcleo:',
     reg.congregation || '',
-    margin + halfW + gap,
+    margin + phoneW + gap,
     y,
-    halfW,
-    9.5
+    congW,
+    boxH
   );
-  y += 15;
+  y += rowStep;
 
-  // Endereço do Candidato
-  drawLabeledBox(doc, 'Endereço:', reg.address || '', margin, y, contentW, 9.5);
-  y += 15;
+  // Row 6: CEP | Endereço
+  const cepW = 36;
+  const addrW = contentW - cepW - gap;
+  drawLabeledBox(doc, 'CEP:', reg.cep || '', margin, y, cepW, boxH);
+  drawLabeledBox(
+    doc,
+    'Endereço:',
+    reg.address || '',
+    margin + cepW + gap,
+    y,
+    addrW,
+    boxH
+  );
+  y += rowStep;
 
-  // Nome do Responsável (se menor)
+  // Row 7: Nome do Responsável (se menor)
   drawLabeledBox(
     doc,
     'Nome do Responsável (se menor de 18 anos):',
@@ -201,15 +260,15 @@ export function drawBaptismFichaPage(
     margin,
     y,
     contentW,
-    9.5
+    boxH
   );
-  y += 17;
+  y += 14.5;
 
   // =====================================
   // 2. DADOS ECLESIÁSTICOS
   // =====================================
   drawSectionHeading(doc, 'DADOS ECLESIÁSTICOS', margin, y, contentW);
-  y += 7;
+  y += 6.5;
 
   drawLabeledBox(
     doc,
@@ -218,7 +277,7 @@ export function drawBaptismFichaPage(
     margin,
     y,
     halfW,
-    9.5
+    boxH
   );
   const prevLabel = `Já foi batizado antes?  (${
     reg.previouslyBaptized === 'sim' ? 'X' : ' '
@@ -234,9 +293,9 @@ export function drawBaptismFichaPage(
     margin + halfW + gap,
     y,
     halfW,
-    9.5
+    boxH
   );
-  y += 15;
+  y += rowStep;
 
   drawLabeledBox(
     doc,
@@ -245,31 +304,31 @@ export function drawBaptismFichaPage(
     margin,
     y,
     contentW,
-    9.5
+    boxH
   );
-  y += 17;
+  y += 14.5;
 
   // =====================================
   // 3. DECLARAÇÃO
   // =====================================
   drawSectionHeading(doc, 'DECLARAÇÃO', margin, y, contentW);
-  y += 7;
+  y += 6.5;
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
+  doc.setFontSize(8.8);
   doc.setTextColor(31, 41, 55);
   const declText =
     'Declaro que desejo me batizar nas águas, conforme minha fé e decisão pessoal, e estou ciente das orientações da igreja sobre o batismo.';
   const declLines = doc.splitTextToSize(declText, contentW);
   doc.text(declLines, margin, y);
-  y += declLines.length * 4.3 + 4.5;
+  y += declLines.length * 4.1 + 3.5;
 
   const declCity = reg.declarationCity || 'Manaus / AM';
   const declDate = reg.declarationDate ? formatDateBR(reg.declarationDate) : '___ / ___ / _______';
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
+  doc.setFontSize(8.8);
   doc.text(`${declCity}, ${declDate}`, margin, y);
-  y += 14;
+  y += 12;
 
   // Assinaturas
   const sigW = (contentW - 14) / 2;
@@ -278,19 +337,19 @@ export function drawBaptismFichaPage(
   doc.line(margin, y, margin + sigW, y);
   doc.line(margin + sigW + 14, y, margin + sigW * 2 + 14, y);
 
-  doc.setFontSize(8);
+  doc.setFontSize(7.8);
   doc.setTextColor(51, 65, 85);
-  doc.text('Assinatura do Candidato(a)', margin + sigW / 2, y + 4.5, { align: 'center' });
-  doc.text('Assinatura do Responsável (se menor)', margin + sigW + 14 + sigW / 2, y + 4.5, {
+  doc.text('Assinatura do Candidato(a)', margin + sigW / 2, y + 4.2, { align: 'center' });
+  doc.text('Assinatura do Responsável (se menor)', margin + sigW + 14 + sigW / 2, y + 4.2, {
     align: 'center',
   });
-  y += 12;
+  y += 10.5;
 
   // =====================================
-  // 4. USO EXCLUSIVO DA SECRETARIA
+  // 4. REGISTRO DA SECRETARIA
   // =====================================
-  drawSectionHeading(doc, 'USO EXCLUSIVO DA SECRETARIA', margin, y, contentW);
-  y += 7;
+  drawSectionHeading(doc, 'REGISTRO DA SECRETARIA', margin, y, contentW);
+  y += 6.5;
 
   const bapDateW = 58;
   const recByW = contentW - bapDateW - gap;
@@ -301,7 +360,7 @@ export function drawBaptismFichaPage(
     margin,
     y,
     bapDateW,
-    9.5
+    boxH
   );
   drawLabeledBox(
     doc,
@@ -310,9 +369,9 @@ export function drawBaptismFichaPage(
     margin + bapDateW + gap,
     y,
     recByW,
-    9.5
+    boxH
   );
-  y += 15.5;
+  y += rowStep + 0.5;
 
   drawLabeledBox(
     doc,
@@ -321,7 +380,7 @@ export function drawBaptismFichaPage(
     margin,
     y,
     contentW,
-    22,
+    18,
     true
   );
 
@@ -330,14 +389,14 @@ export function drawBaptismFichaPage(
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
   doc.text(
-    'Nota de segurança: Sem CPF, RG, filiação, tipo sanguíneo ou dados financeiros.',
+    'Documento oficial da Direção e Secretaria — IEADAM Petrópolis B',
     margin,
-    pageH - 12
+    pageH - 10
   );
   doc.text(
     `Ficha ${pageIndex + 1} de ${totalPages} · Gerado em ${new Date().toLocaleDateString('pt-BR')}`,
     pageW - margin,
-    pageH - 12,
+    pageH - 10,
     { align: 'right' }
   );
 }

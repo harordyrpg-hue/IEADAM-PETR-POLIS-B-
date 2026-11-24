@@ -77,6 +77,19 @@ function formatDateBR(val?: string): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : val;
 }
 
+function formatCPF(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 11);
+  return digits
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+}
+
+function formatCEP(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  return digits.replace(/^(\d{5})(\d)/, '$1-$2');
+}
+
 export const BaptismView: React.FC = () => {
   const { user, notify, requestConfirm } = useApp();
 
@@ -108,10 +121,17 @@ export const BaptismView: React.FC = () => {
 
   // Form fields in modal (Personal + Ecclesiastical + Secretary)
   const [fFullName, setFFullName] = useState('');
+  const [fCpf, setFCpf] = useState('');
   const [fBirthDate, setFBirthDate] = useState('');
   const [fAge, setFAge] = useState('');
   const [fGender, setFGender] = useState<'Masc.' | 'Fem.' | ''>('');
+  const [fNaturalidade, setFNaturalidade] = useState('');
+  const [fMaritalStatus, setFMaritalStatus] = useState('');
+  const [fSpouseName, setFSpouseName] = useState('');
+  const [fMotherName, setFMotherName] = useState('');
+  const [fFatherName, setFFatherName] = useState('');
   const [fPhone, setFPhone] = useState('');
+  const [fCep, setFCep] = useState('');
   const [fAddress, setFAddress] = useState('');
   const [fCongregation, setFCongregation] = useState('IEADAM Petrópolis B');
   const [fGuardianName, setFGuardianName] = useState('');
@@ -204,6 +224,9 @@ export const BaptismView: React.FC = () => {
       return (
         r.fullName.toLowerCase().includes(q) ||
         (r.protocolNumber || '').toLowerCase().includes(q) ||
+        (r.cpf || '').toLowerCase().includes(q) ||
+        (r.naturalidade || '').toLowerCase().includes(q) ||
+        (r.cep || '').toLowerCase().includes(q) ||
         (r.phone || '').toLowerCase().includes(q) ||
         (r.address || '').toLowerCase().includes(q) ||
         (r.congregation || '').toLowerCase().includes(q) ||
@@ -268,10 +291,17 @@ export const BaptismView: React.FC = () => {
     setIsNewManualOpen(false);
     setEditingReg(reg);
     setFFullName(reg.fullName || '');
+    setFCpf(reg.cpf || '');
     setFBirthDate(reg.birthDate || '');
     setFAge(reg.age || '');
     setFGender(reg.gender || '');
+    setFNaturalidade(reg.naturalidade || '');
+    setFMaritalStatus(reg.maritalStatus || '');
+    setFSpouseName(reg.spouseName || '');
+    setFMotherName(reg.motherName || '');
+    setFFatherName(reg.fatherName || '');
     setFPhone(reg.phone || '');
+    setFCep(reg.cep || '');
     setFAddress(reg.address || '');
     setFCongregation(reg.congregation || 'IEADAM Petrópolis B');
     setFGuardianName(reg.guardianName || '');
@@ -288,10 +318,17 @@ export const BaptismView: React.FC = () => {
     setEditingReg(null);
     setIsNewManualOpen(true);
     setFFullName('');
+    setFCpf('');
     setFBirthDate('');
     setFAge('');
     setFGender('Masc.');
+    setFNaturalidade('');
+    setFMaritalStatus('');
+    setFSpouseName('');
+    setFMotherName('');
+    setFFatherName('');
     setFPhone('');
+    setFCep('');
     setFAddress('');
     setFCongregation('IEADAM Petrópolis B');
     setFGuardianName('');
@@ -312,13 +349,21 @@ export const BaptismView: React.FC = () => {
     }
     try {
       setSavingReg(true);
+      const effectiveSpouse = fMaritalStatus === 'Casado(a)' ? fSpouseName.trim() : '';
       if (isNewManualOpen) {
         const created = await api.submitPublicBaptismRegistration({
           fullName: fFullName,
+          cpf: fCpf,
           birthDate: fBirthDate || new Date().toISOString().slice(0, 10),
           age: fAge,
           gender: (fGender || 'Masc.') as 'Masc.' | 'Fem.',
+          naturalidade: fNaturalidade,
+          maritalStatus: fMaritalStatus,
+          spouseName: effectiveSpouse,
+          motherName: fMotherName,
+          fatherName: fFatherName,
           phone: fPhone,
+          cep: fCep,
           address: fAddress,
           congregation: fCongregation || 'IEADAM Petrópolis B',
           guardianName: fGuardianName,
@@ -341,10 +386,17 @@ export const BaptismView: React.FC = () => {
       } else if (editingReg) {
         await api.updateBaptismRegistration(editingReg.id, {
           fullName: fFullName.trim(),
+          cpf: fCpf.trim(),
           birthDate: fBirthDate.trim(),
           age: fAge.trim(),
           gender: fGender,
+          naturalidade: fNaturalidade.trim(),
+          maritalStatus: fMaritalStatus.trim(),
+          spouseName: effectiveSpouse,
+          motherName: fMotherName.trim(),
+          fatherName: fFatherName.trim(),
           phone: fPhone.trim(),
+          cep: fCep.trim(),
           address: fAddress.trim(),
           congregation: fCongregation.trim(),
           guardianName: fGuardianName.trim(),
@@ -742,6 +794,12 @@ export const BaptismView: React.FC = () => {
 
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-neutral-400">
                         <span className="font-mono text-amber-400/90">{reg.protocolNumber}</span>
+                        {reg.cpf && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-mono">CPF {reg.cpf}</span>
+                          </>
+                        )}
                         <span aria-hidden="true">·</span>
                         <span>
                           {reg.age ? `${reg.age} anos` : formatDateBR(reg.birthDate)}
@@ -752,14 +810,23 @@ export const BaptismView: React.FC = () => {
                             <span>{reg.gender}</span>
                           </>
                         )}
+                        {reg.maritalStatus && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>{reg.maritalStatus}</span>
+                          </>
+                        )}
                         <span aria-hidden="true">·</span>
                         <span className="font-mono">{reg.phone}</span>
                         <span aria-hidden="true">·</span>
                         <span>{reg.congregation}</span>
-                        {reg.address && (
+                        {(reg.cep || reg.address) && (
                           <>
                             <span aria-hidden="true">·</span>
-                            <span className="truncate max-w-xs">{reg.address}</span>
+                            <span className="truncate max-w-xs">
+                              {reg.cep ? `${reg.cep} · ` : ''}
+                              {reg.address}
+                            </span>
                           </>
                         )}
                         {missingEcclesiastical ? (
@@ -1085,7 +1152,7 @@ export const BaptismView: React.FC = () => {
                     : `Ficha Completa · ${editingReg?.protocolNumber}`}
                 </h3>
                 <p className="text-[11px] text-neutral-400 mt-0.5">
-                  Preencha os Dados Eclesiásticos, Uso Exclusivo da Secretaria e exporte ou envie para a Ficha de Membros.
+                  Preencha os Dados Eclesiásticos, Registro da Secretaria e exporte ou envie para a Ficha de Membros.
                 </p>
               </div>
               <button
@@ -1107,7 +1174,7 @@ export const BaptismView: React.FC = () => {
                   1. Dados do Candidato(a)
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                  <div className="sm:col-span-12 space-y-1">
+                  <div className="sm:col-span-8 space-y-1">
                     <label className="text-xs font-semibold text-neutral-200">Nome Completo *</label>
                     <input
                       type="text"
@@ -1115,6 +1182,18 @@ export const BaptismView: React.FC = () => {
                       value={fFullName}
                       onChange={(e) => setFFullName(e.target.value)}
                       className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-4 space-y-1">
+                    <label className="text-xs font-semibold text-neutral-200">CPF</label>
+                    <input
+                      type="text"
+                      maxLength={14}
+                      value={fCpf}
+                      onChange={(e) => setFCpf(formatCPF(e.target.value))}
+                      placeholder="000.000.000-00"
+                      className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 font-mono focus:outline-none focus:border-amber-400"
                     />
                   </div>
 
@@ -1152,6 +1231,72 @@ export const BaptismView: React.FC = () => {
                   </div>
 
                   <div className="sm:col-span-6 space-y-1">
+                    <label className="text-xs font-semibold text-neutral-200">Naturalidade</label>
+                    <input
+                      type="text"
+                      value={fNaturalidade}
+                      onChange={(e) => setFNaturalidade(e.target.value)}
+                      placeholder="Ex: Manaus / AM"
+                      className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-6 space-y-1">
+                    <label className="text-xs font-semibold text-neutral-200">Estado Civil</label>
+                    <select
+                      value={fMaritalStatus}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setFMaritalStatus(next);
+                        if (next !== 'Casado(a)') setFSpouseName('');
+                      }}
+                      className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                    >
+                      <option value="">Selecione</option>
+                      <option value="Solteiro(a)">Solteiro(a)</option>
+                      <option value="Casado(a)">Casado(a)</option>
+                      <option value="Divorciado(a)">Divorciado(a)</option>
+                      <option value="Viúvo(a)">Viúvo(a)</option>
+                      <option value="Separado(a)">Separado(a)</option>
+                    </select>
+                  </div>
+
+                  {fMaritalStatus === 'Casado(a)' && (
+                    <div className="sm:col-span-12 space-y-1">
+                      <label className="text-xs font-semibold text-amber-300">Nome do Cônjuge</label>
+                      <input
+                        type="text"
+                        value={fSpouseName}
+                        onChange={(e) => setFSpouseName(e.target.value)}
+                        placeholder="Nome completo do(a) esposo(a)"
+                        className="w-full px-3 py-2 bg-neutral-950 border border-amber-500/40 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+                  )}
+
+                  <div className="sm:col-span-6 space-y-1">
+                    <label className="text-xs font-semibold text-neutral-200">Nome da Mãe</label>
+                    <input
+                      type="text"
+                      value={fMotherName}
+                      onChange={(e) => setFMotherName(e.target.value)}
+                      className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-6 space-y-1">
+                    <label className="text-xs font-semibold text-neutral-200">
+                      Nome do Pai <span className="text-neutral-400 font-normal">(opcional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={fFatherName}
+                      onChange={(e) => setFFatherName(e.target.value)}
+                      className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-6 space-y-1">
                     <label className="text-xs font-semibold text-neutral-200">Telefone / WhatsApp</label>
                     <input
                       type="text"
@@ -1171,7 +1316,19 @@ export const BaptismView: React.FC = () => {
                     />
                   </div>
 
-                  <div className="sm:col-span-12 space-y-1">
+                  <div className="sm:col-span-4 space-y-1">
+                    <label className="text-xs font-semibold text-neutral-200">CEP</label>
+                    <input
+                      type="text"
+                      maxLength={9}
+                      value={fCep}
+                      onChange={(e) => setFCep(formatCEP(e.target.value))}
+                      placeholder="00000-000"
+                      className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 font-mono focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-8 space-y-1">
                     <label className="text-xs font-semibold text-neutral-200">Endereço</label>
                     <input
                       type="text"
@@ -1244,10 +1401,10 @@ export const BaptismView: React.FC = () => {
                 </div>
               </div>
 
-              {/* 3. Uso Exclusivo da Secretaria */}
+              {/* 3. Registro da Secretaria */}
               <div className="space-y-3">
                 <h4 className="text-[11px] font-bold uppercase tracking-wider text-amber-400 border-b border-neutral-800 pb-1.5">
-                  3. Uso Exclusivo da Secretaria
+                  3. Registro da Secretaria
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="space-y-1">
@@ -1377,10 +1534,17 @@ export const BaptismView: React.FC = () => {
                             {
                               ...editingReg,
                               fullName: fFullName,
+                              cpf: fCpf,
                               birthDate: fBirthDate,
                               age: fAge,
                               gender: fGender,
+                              naturalidade: fNaturalidade,
+                              maritalStatus: fMaritalStatus,
+                              spouseName: fMaritalStatus === 'Casado(a)' ? fSpouseName : '',
+                              motherName: fMotherName,
+                              fatherName: fFatherName,
                               phone: fPhone,
+                              cep: fCep,
                               address: fAddress,
                               congregation: fCongregation,
                               guardianName: fGuardianName,
