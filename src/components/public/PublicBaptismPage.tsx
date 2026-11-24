@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
+  ArrowLeft,
   Building,
   Calendar,
+  CheckCheck,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -42,46 +44,48 @@ function formatDateBR(dateStr?: string | null): string {
   return dateStr;
 }
 
-const WaterAnimationBackdrop: React.FC<{ compact?: boolean }> = ({ compact = false }) => (
+const WaterAnimationBackdrop: React.FC<{ fullHeight?: boolean }> = ({
+  fullHeight = false,
+}) => (
   <div
     aria-hidden="true"
     className="pointer-events-none absolute inset-0 overflow-hidden select-none"
   >
-    {/* Subtle glowing water depth */}
-    <div className="absolute inset-0 bg-gradient-to-b from-sky-950/35 via-cyan-950/20 to-sky-900/35" />
+    {/* Deep baptism water gradient glow */}
+    <div className="absolute inset-0 bg-gradient-to-b from-sky-950/40 via-cyan-950/25 to-sky-900/45" />
 
-    {/* Floating droplets */}
+    {/* Rising water droplets */}
     <div
-      className="animate-water-droplet absolute bottom-6 left-[12%] w-2 h-2 rounded-full bg-sky-300/60"
+      className="animate-water-droplet absolute bottom-10 left-[10%] w-2 h-2 rounded-full bg-sky-300/65"
       style={{ animationDelay: '0s' }}
     />
     <div
-      className="animate-water-droplet absolute bottom-10 left-[32%] w-1.5 h-1.5 rounded-full bg-cyan-200/50"
-      style={{ animationDelay: '1.1s' }}
+      className="animate-water-droplet absolute bottom-16 left-[24%] w-1.5 h-1.5 rounded-full bg-cyan-200/55"
+      style={{ animationDelay: '0.9s' }}
     />
     <div
-      className="animate-water-droplet absolute bottom-5 left-[58%] w-2.5 h-2.5 rounded-full bg-sky-400/45"
-      style={{ animationDelay: '0.6s' }}
+      className="animate-water-droplet absolute bottom-8 left-[45%] w-2.5 h-2.5 rounded-full bg-sky-400/50"
+      style={{ animationDelay: '1.6s' }}
     />
     <div
-      className="animate-water-droplet absolute bottom-8 left-[78%] w-1.5 h-1.5 rounded-full bg-cyan-300/60"
-      style={{ animationDelay: '2.1s' }}
+      className="animate-water-droplet absolute bottom-14 left-[68%] w-1.5 h-1.5 rounded-full bg-cyan-300/60"
+      style={{ animationDelay: '0.5s' }}
     />
     <div
-      className="animate-water-droplet absolute bottom-4 left-[90%] w-2 h-2 rounded-full bg-sky-200/50"
-      style={{ animationDelay: '1.7s' }}
+      className="animate-water-droplet absolute bottom-6 left-[85%] w-2 h-2 rounded-full bg-sky-200/55"
+      style={{ animationDelay: '2.2s' }}
     />
 
-    {/* Layered Animated SVG Waves at the bottom */}
+    {/* Multi-layer flowing SVG waves */}
     <div
       className={`absolute bottom-0 left-0 right-0 ${
-        compact ? 'h-16' : 'h-24 sm:h-28'
+        fullHeight ? 'h-28 sm:h-36' : 'h-16 sm:h-20'
       } overflow-hidden`}
     >
       <svg
         viewBox="0 0 1200 120"
         preserveAspectRatio="none"
-        className="animate-water-wave absolute bottom-0 left-0 w-[200%] h-full opacity-35"
+        className="animate-water-wave absolute bottom-0 left-0 w-[200%] h-full opacity-40"
       >
         <path
           d="M0,48 C150,92 300,8 450,52 C600,96 750,12 900,52 C1050,92 1150,24 1200,48 L1200,120 L0,120 Z"
@@ -91,7 +95,7 @@ const WaterAnimationBackdrop: React.FC<{ compact?: boolean }> = ({ compact = fal
       <svg
         viewBox="0 0 1200 120"
         preserveAspectRatio="none"
-        className="animate-water-wave-reverse absolute bottom-0 left-0 w-[200%] h-[82%] opacity-40"
+        className="animate-water-wave-reverse absolute bottom-0 left-0 w-[200%] h-[82%] opacity-45"
       >
         <path
           d="M0,64 C160,18 320,104 480,58 C640,12 800,100 960,56 C1080,22 1160,76 1200,64 L1200,120 L0,120 Z"
@@ -101,7 +105,7 @@ const WaterAnimationBackdrop: React.FC<{ compact?: boolean }> = ({ compact = fal
       <svg
         viewBox="0 0 1200 120"
         preserveAspectRatio="none"
-        className="animate-water-wave absolute bottom-0 left-0 w-[200%] h-[58%] opacity-30"
+        className="animate-water-wave absolute bottom-0 left-0 w-[200%] h-[58%] opacity-35"
         style={{ animationDuration: '8.5s' }}
       >
         <path
@@ -120,9 +124,12 @@ interface ChatLine {
   text: string;
 }
 
+type FormStep = 'form' | 'animation' | 'confirmed';
+
 export const PublicBaptismPage: React.FC = () => {
   const [settings, setSettings] = useState<BaptismFormSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [step, setStep] = useState<FormStep>('form');
 
   // Dados Pessoais (sem Dados Eclesiásticos no envio público — preenchidos depois pela Secretaria)
   const [fullName, setFullName] = useState('');
@@ -137,13 +144,16 @@ export const PublicBaptismPage: React.FC = () => {
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [finishError, setFinishError] = useState<string | null>(null);
   const [submittedRecord, setSubmittedRecord] = useState<BaptismRegistration | null>(null);
 
-  // Animação de águas + Chat interativo ao final do formulário
-  const chatSectionRef = useRef<HTMLDivElement | null>(null);
-  const [chatStarted, setChatStarted] = useState(false);
+  // Animação de águas + Chat estilo app de mensagens (executado APÓS clicar em "Enviar Inscrição")
   const [visibleCount, setVisibleCount] = useState(0);
   const [chatPlaybackSeed, setChatPlaybackSeed] = useState(0);
+  const [chatTimeLabel] = useState(() =>
+    new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  );
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -175,36 +185,14 @@ export const PublicBaptismPage: React.FC = () => {
     };
   }, []);
 
-  // Trigger sequential chat reveal when the end-of-form chat enters viewport
+  // Sequential messaging-app playback when entering step === 'animation'
   useEffect(() => {
-    const el = chatSectionRef.current;
-    if (!el || chatStarted) return;
+    if (step !== 'animation') return;
 
-    if (typeof IntersectionObserver === 'undefined') {
-      setChatStarted(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setChatStarted(true);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.15 }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [chatStarted, loading, settings?.status, submittedRecord]);
-
-  useEffect(() => {
-    if (!chatStarted) return;
     setVisibleCount(1);
-
     const timers: number[] = [];
-    const delays = [900, 1850, 2850, 3850, 4800];
+    const delays = [950, 1950, 3000, 4050, 5050];
+
     delays.forEach((delay, idx) => {
       const t = window.setTimeout(() => {
         setVisibleCount(idx + 2);
@@ -215,7 +203,17 @@ export const PublicBaptismPage: React.FC = () => {
     return () => {
       timers.forEach((t) => window.clearTimeout(t));
     };
-  }, [chatStarted, chatPlaybackSeed]);
+  }, [step, chatPlaybackSeed]);
+
+  // Keep latest message scrolled into view inside the chat window
+  useEffect(() => {
+    if (step === 'animation' && chatScrollRef.current) {
+      chatScrollRef.current.scrollTo({
+        top: chatScrollRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
+  }, [visibleCount, step]);
 
   const numericAge = Number(age);
   const isMinor = Boolean(age !== '' && !Number.isNaN(numericAge) && numericAge < 18);
@@ -237,14 +235,10 @@ export const PublicBaptismPage: React.FC = () => {
     setGuardianName('');
     setDeclarationAccepted(false);
     setFormError(null);
+    setFinishError(null);
     setSubmittedRecord(null);
     setVisibleCount(0);
-    setChatStarted(false);
-  };
-
-  const replayChat = () => {
-    setChatStarted(true);
-    setChatPlaybackSeed((prev) => prev + 1);
+    setStep('form');
   };
 
   const candidateDisplayName = fullName.trim() || 'candidato(a)';
@@ -287,9 +281,11 @@ export const PublicBaptismPage: React.FC = () => {
     },
   ];
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Passo 1 -> Validar formulário e abrir tela da animação + chat
+  const handleProceedToAnimation = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    setFinishError(null);
 
     if (!fullName.trim()) {
       setFormError('Por favor, informe seu Nome Completo.');
@@ -328,6 +324,16 @@ export const PublicBaptismPage: React.FC = () => {
       return;
     }
 
+    setVisibleCount(0);
+    setChatPlaybackSeed((prev) => prev + 1);
+    setStep('animation');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Passo 2 -> Clicar em Finalizar salva pro administrador automaticamente e encerra na confirmação
+  const handleFinalizeRegistration = async () => {
+    if (!gender) return;
+    setFinishError(null);
     try {
       setSubmitting(true);
       const created = await api.submitPublicBaptismRegistration({
@@ -344,16 +350,18 @@ export const PublicBaptismPage: React.FC = () => {
         declarationDate: new Date().toISOString().slice(0, 10),
       });
       setSubmittedRecord(created);
+      setStep('confirmed');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
-      setFormError(err?.message || 'Não foi possível enviar sua inscrição. Tente novamente.');
+      setFinishError(
+        err?.message || 'Não foi possível finalizar sua inscrição. Tente novamente.'
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const churchTitle =
-    settings?.churchTitle || 'IEADAM Petrópolis B · PT-B Mídia';
+  const churchTitle = settings?.churchTitle || 'IEADAM Petrópolis B · PT-B Mídia';
   const formTitle = settings?.formTitle || 'Inscrição — Batismo nas Águas';
   const subtitle =
     settings?.subtitle || 'Ficha oficial da Secretaria · Somente dados pessoais essenciais';
@@ -446,17 +454,206 @@ export const PublicBaptismPage: React.FC = () => {
   }
 
   // ==========================================
-  // 3. TELA DE CONFIRMAÇÃO FINAL (APÓS ENVIO)
+  // 3. TELA DA ANIMAÇÃO DE ÁGUAS + APP DE MENSAGENS (DEPOIS DE ENVIAR INSCRIÇÃO)
   // ==========================================
-  if (submittedRecord) {
+  if (step === 'animation') {
+    const isTypingNext = visibleCount > 0 && visibleCount < chatMessages.length;
+    const nextSenderIsSpirit = chatMessages[visibleCount]?.sender === 'espirito';
+    const chatFinished = visibleCount >= chatMessages.length;
+
+    return (
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex items-center justify-center relative overflow-hidden">
+        {/* Ambient Water Animation across the screen */}
+        <WaterAnimationBackdrop fullHeight />
+
+        <div className="relative z-10 w-full max-w-xl bg-neutral-900/95 backdrop-blur-md border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
+          <div className="h-2.5 w-full bg-gradient-to-r from-sky-400 via-cyan-400 to-amber-400" />
+
+          {/* Top Water Theme Banner */}
+          <div className="px-5 sm:px-7 py-5 bg-gradient-to-br from-sky-950/70 via-neutral-900 to-neutral-950 border-b border-neutral-800 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-11 h-11 rounded-2xl bg-sky-500/20 border border-sky-400/40 text-sky-300 flex items-center justify-center shrink-0">
+                <Droplets className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-400 uppercase tracking-wider">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Batismo nas Águas</span>
+                </div>
+                <h1 className="text-base sm:text-lg font-bold text-neutral-100 truncate">
+                  {candidateDisplayName}
+                </h1>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setChatPlaybackSeed((prev) => prev + 1)}
+              className="inline-flex items-center gap-1.5 px-3 min-h-[34px] rounded-xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-[11px] font-semibold text-neutral-200 cursor-pointer shrink-0 transition-colors"
+              title="Reproduzir mensagens novamente"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-sky-300" />
+              <span>Rever</span>
+            </button>
+          </div>
+
+          <div className="p-4 sm:p-6 space-y-5">
+            {/* Messaging App Window */}
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 overflow-hidden shadow-inner">
+              {/* Messaging App Top Contact Bar */}
+              <div className="px-4 py-3 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="relative w-9 h-9 rounded-full bg-gradient-to-br from-sky-400 to-cyan-500 text-neutral-950 font-extrabold text-xs flex items-center justify-center shrink-0 shadow-sm">
+                    ES
+                    <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-neutral-900" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-bold text-neutral-100 truncate">
+                      Espírito Santo
+                    </p>
+                    <p className="text-[11px] text-emerald-400 font-medium truncate">
+                      {isTypingNext && nextSenderIsSpirit
+                        ? 'digitando...'
+                        : 'online agora'}
+                    </p>
+                  </div>
+                </div>
+
+                <span className="text-[10px] font-mono tabular-nums text-neutral-500 shrink-0">
+                  Hoje · {chatTimeLabel}
+                </span>
+              </div>
+
+              {/* Chat Conversation Thread */}
+              <div
+                ref={chatScrollRef}
+                className="relative p-4 space-y-3 min-h-[310px] max-h-[390px] overflow-y-auto bg-[radial-gradient(ellipse_at_top,_rgba(14,165,233,0.08),_transparent_70%)]"
+              >
+                {chatMessages.slice(0, visibleCount).map((msg) => {
+                  const isSpirit = msg.sender === 'espirito';
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${
+                        isSpirit ? 'items-start' : 'items-end'
+                      }`}
+                    >
+                      <span
+                        className={`text-[10px] font-bold mb-1 px-1.5 ${
+                          isSpirit ? 'text-sky-300' : 'text-amber-300'
+                        }`}
+                      >
+                        {msg.speaker}
+                      </span>
+                      <div
+                        className={`max-w-[88%] sm:max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs sm:text-[13px] leading-relaxed shadow-sm ${
+                          isSpirit
+                            ? 'bg-neutral-900 border border-sky-500/30 text-neutral-100 rounded-tl-sm'
+                            : 'bg-amber-400 text-neutral-950 font-semibold rounded-tr-sm'
+                        }`}
+                      >
+                        <p>{msg.text}</p>
+                        <div
+                          className={`mt-1 flex items-center justify-end gap-1 text-[10px] font-mono tabular-nums ${
+                            isSpirit ? 'text-neutral-500' : 'text-neutral-900/70'
+                          }`}
+                        >
+                          <span>{chatTimeLabel}</span>
+                          {!isSpirit && <CheckCheck className="w-3.5 h-3.5 text-sky-800" />}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {isTypingNext && (
+                  <div
+                    className={`flex flex-col ${
+                      nextSenderIsSpirit ? 'items-start' : 'items-end'
+                    }`}
+                  >
+                    <span className="text-[10px] text-neutral-500 mb-1 px-1.5">
+                      {nextSenderIsSpirit ? 'Espírito Santo' : candidateDisplayName}
+                    </span>
+                    <div
+                      className={`px-3.5 py-2.5 rounded-2xl border flex items-center gap-1.5 ${
+                        nextSenderIsSpirit
+                          ? 'bg-neutral-900 border-sky-500/25 rounded-tl-sm'
+                          : 'bg-amber-400/20 border-amber-400/35 rounded-tr-sm'
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce" />
+                      <span
+                        className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce"
+                        style={{ animationDelay: '0.15s' }}
+                      />
+                      <span
+                        className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce"
+                        style={{ animationDelay: '0.3s' }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {finishError && (
+              <div className="p-3 bg-red-500/15 border border-red-500/30 rounded-xl flex items-start gap-2 text-xs text-red-300">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <span>{finishError}</span>
+              </div>
+            )}
+
+            {/* Action Buttons Below the Animation & Chat */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-1">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => {
+                  setStep('form');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="py-3 px-4 rounded-2xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Revisar Dados</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={submitting || !chatFinished}
+                onClick={handleFinalizeRegistration}
+                className="flex-1 py-3.5 px-5 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-2xl text-xs sm:text-sm shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer touch-manipulation"
+              >
+                {submitting ? (
+                  <span>Finalizando e salvando...</span>
+                ) : !chatFinished ? (
+                  <span>Aguarde a mensagem final...</span>
+                ) : (
+                  <>
+                    <span>Finalizar</span>
+                    <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // 4. TELA DE CONFIRMAÇÃO E ENCERRAMENTO DO FORMULÁRIO
+  // ==========================================
+  if (step === 'confirmed' && submittedRecord) {
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-100 py-8 sm:py-10 px-4 sm:px-6 flex items-center justify-center">
         <div className="w-full max-w-xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
           <div className="h-3 w-full bg-amber-400" />
 
-          {/* Celebratory Water Header Banner */}
           <div className="relative overflow-hidden border-b border-neutral-800 px-6 py-8 text-center">
-            <WaterAnimationBackdrop compact />
+            <WaterAnimationBackdrop />
             <div className="relative z-10 space-y-3">
               <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 mx-auto flex items-center justify-center shadow-lg">
                 <CheckCircle2 className="w-8 h-8" />
@@ -470,7 +667,7 @@ export const PublicBaptismPage: React.FC = () => {
                   {submittedRecord.fullName}
                 </h1>
                 <p className="text-xs text-neutral-300 mt-1.5 leading-relaxed max-w-md mx-auto">
-                  Sua ficha já foi salva automaticamente na lista da Secretaria. A liderança completará seus dados eclesiásticos e confirmará tudo com você!
+                  Sua inscrição foi finalizada e salva automaticamente na lista da Secretaria. A equipe completará os dados eclesiásticos e entrará em contato!
                 </p>
               </div>
             </div>
@@ -556,7 +753,7 @@ export const PublicBaptismPage: React.FC = () => {
   }
 
   // ==========================================
-  // 4. FORMULÁRIO PÚBLICO PADRÃO DO SITE
+  // 5. FORMULÁRIO PÚBLICO PADRÃO DO SITE (ETAPA 1)
   // ==========================================
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex flex-col items-center">
@@ -626,13 +823,13 @@ export const PublicBaptismPage: React.FC = () => {
           </div>
 
           {/* FORM */}
-          <form onSubmit={handleSubmit} className="space-y-4 pt-1">
+          <form onSubmit={handleProceedToAnimation} className="space-y-4 pt-1">
             <div className="border-t border-neutral-800 pt-4">
               <h2 className="text-base font-bold text-neutral-100 mb-1">
                 Dados do Candidato(a)
               </h2>
               <p className="text-xs text-neutral-400 mb-4">
-                Preencha seus dados pessoais abaixo para enviar sua ficha de inscrição à Secretaria.
+                Preencha seus dados pessoais abaixo e clique em Enviar Inscrição.
               </p>
             </div>
 
@@ -806,97 +1003,6 @@ export const PublicBaptismPage: React.FC = () => {
               </span>
             </label>
 
-            {/* ANIMAÇÃO DE ÁGUAS + CHAT DE CONVERSA NO FINAL DA INSCRIÇÃO */}
-            <div
-              ref={chatSectionRef}
-              className="relative rounded-2xl border border-sky-500/30 bg-neutral-950 overflow-hidden shadow-lg"
-            >
-              <WaterAnimationBackdrop />
-
-              <div className="relative z-10 p-4 sm:p-5 space-y-4">
-                <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-sky-400/20">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-400/35 text-sky-300 flex items-center justify-center shrink-0">
-                      <Droplets className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-neutral-100 flex items-center gap-1.5">
-                        <span className="truncate">Momento Especial do Batismo</span>
-                        <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      </div>
-                      <p className="text-[11px] text-sky-200/80 truncate">
-                        Conversa no caminho das águas
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={replayChat}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-neutral-900/85 hover:bg-neutral-800 border border-neutral-700/80 text-[11px] font-semibold text-neutral-300 cursor-pointer shrink-0 transition-colors"
-                    title="Reproduzir conversa novamente"
-                  >
-                    <RotateCcw className="w-3 h-3 text-sky-300" />
-                    <span>Rever</span>
-                  </button>
-                </div>
-
-                {/* Chat Messages */}
-                <div className="space-y-2.5 min-h-[210px]">
-                  {chatMessages.slice(0, visibleCount).map((msg) => {
-                    const isSpirit = msg.sender === 'espirito';
-                    return (
-                      <div
-                        key={msg.id}
-                        className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${
-                          isSpirit ? 'items-start' : 'items-end'
-                        }`}
-                      >
-                        <span
-                          className={`text-[10px] font-bold mb-1 px-1 ${
-                            isSpirit ? 'text-sky-300' : 'text-amber-300'
-                          }`}
-                        >
-                          {msg.speaker}
-                        </span>
-                        <div
-                          className={`max-w-[88%] sm:max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed shadow-sm ${
-                            isSpirit
-                              ? 'bg-neutral-900/95 border border-sky-400/35 text-neutral-100 rounded-tl-sm'
-                              : 'bg-amber-400 text-neutral-950 font-semibold rounded-tr-sm'
-                          }`}
-                        >
-                          {msg.text}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {chatStarted && visibleCount < chatMessages.length && (
-                    <div
-                      className={`flex ${
-                        chatMessages[visibleCount]?.sender === 'espirito'
-                          ? 'justify-start'
-                          : 'justify-end'
-                      }`}
-                    >
-                      <div className="px-3 py-2 rounded-2xl bg-neutral-900/85 border border-neutral-700/80 text-[11px] text-neutral-400 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce" />
-                        <span
-                          className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce"
-                          style={{ animationDelay: '0.15s' }}
-                        />
-                        <span
-                          className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce"
-                          style={{ animationDelay: '0.3s' }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
             {/* Inline Validation Feedback */}
             {formError && (
               <div className="p-3 bg-red-500/15 border border-red-500/30 rounded-xl flex items-start justify-between gap-2 text-xs text-red-300">
@@ -914,21 +1020,14 @@ export const PublicBaptismPage: React.FC = () => {
               </div>
             )}
 
-            {/* Submit Button — Confirmar inscrição */}
+            {/* Submit Button -> Enviar Inscrição (abre a tela da animação) */}
             <div className="pt-2">
               <button
                 type="submit"
-                disabled={submitting}
-                className="w-full py-3.5 px-4 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-2xl text-xs sm:text-sm shadow-xl transition-transform active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer touch-manipulation"
+                className="w-full py-3.5 px-4 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-2xl text-xs sm:text-sm shadow-xl transition-transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer touch-manipulation"
               >
-                {submitting ? (
-                  <span>Confirmando inscrição...</span>
-                ) : (
-                  <>
-                    <span>Confirmar Inscrição</span>
-                    <ChevronRight className="w-4 h-4 stroke-[2.5]" />
-                  </>
-                )}
+                <span>Enviar Inscrição</span>
+                <ChevronRight className="w-4 h-4 stroke-[2.5]" />
               </button>
             </div>
           </form>
