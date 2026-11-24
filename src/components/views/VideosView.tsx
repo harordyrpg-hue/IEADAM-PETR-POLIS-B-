@@ -106,7 +106,7 @@ export const VideosView: React.FC = () => {
               {/* Video Thumbnail */}
               <div className="relative aspect-video w-full overflow-hidden bg-black flex items-center justify-center">
                 <img
-                  src={video.thumbnailUrl || (video.downloadUrl && !video.downloadUrl.startsWith('chunked://') ? video.downloadUrl : '/assets/images/church_worship_stage_1790831714044.jpg')}
+                  src={video.thumbnailUrl || '/assets/images/church_worship_stage_1790831714044.jpg'}
                   alt=""
                   aria-hidden="true"
                   referrerPolicy="no-referrer"

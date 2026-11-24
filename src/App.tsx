@@ -36,11 +36,11 @@ import { SharedResourceView } from './components/views/SharedResourceView.js';
 import { ChurchAdminView } from './components/views/ChurchAdminView.js';
 import { StorageTransmissionView } from './components/views/StorageTransmissionView.js';
 import { ProfileView } from './components/views/ProfileView.js';
-import { FinancialView } from './components/views/FinancialView.js';
 import { PublicEventsAdminView } from './components/views/PublicEventsAdminView.js';
-import { AttendanceView } from './components/views/AttendanceView.js';
+import { SecretariatView } from './components/views/SecretariatView.js';
 import { PublicEventRegistrationPage } from './components/public/PublicEventRegistrationPage.js';
 import { PublicChurchPage } from './components/public/PublicChurchPage.js';
+import { PublicBaptismPage } from './components/public/PublicBaptismPage.js';
 import { LoginView } from './components/auth/LoginView.js';
 import { X, CheckCircle2, AlertCircle, Info, AlertTriangle, Lock, Eye, EyeOff, ArrowRight, RefreshCw, LogOut } from 'lucide-react';
 
@@ -401,12 +401,14 @@ const MainLayout: React.FC = () => {
         return <StorageTransmissionView />;
       case 'profile':
         return <ProfileView />;
+      case 'secretariat':
+        return <SecretariatView />;
       case 'finances':
-        return <FinancialView />;
+        return <SecretariatView initialSubTab="finances" />;
       case 'registrations':
         return <PublicEventsAdminView />;
       case 'attendance':
-        return <AttendanceView />;
+        return <SecretariatView initialSubTab="attendance" />;
       default:
         return (
           <DashboardView
@@ -538,6 +540,30 @@ const MainLayout: React.FC = () => {
   );
 };
 
+const checkIsBaptismRoute = () => {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname.toLowerCase();
+  const hash = window.location.hash.toLowerCase();
+  const searchParams = new URLSearchParams(window.location.search);
+
+  if (path === '/batismo' || path.startsWith('/batismo')) {
+    return true;
+  }
+  if (hash === '#batismo' || hash.startsWith('#batismo')) {
+    return true;
+  }
+  if (
+    searchParams.has('batismo') ||
+    searchParams.get('tab') === 'batismo' ||
+    searchParams.get('view') === 'batismo' ||
+    searchParams.get('page') === 'batismo'
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
 const checkIsChurchRoute = () => {
   if (typeof window === 'undefined') return false;
   const path = window.location.pathname.toLowerCase();
@@ -579,10 +605,12 @@ const checkIsChurchRoute = () => {
 };
 
 export default function App() {
+  const [isBaptismPage, setIsBaptismPage] = useState(checkIsBaptismRoute());
   const [isChurchPage, setIsChurchPage] = useState(checkIsChurchRoute());
 
   useEffect(() => {
     const handleRouteCheck = () => {
+      setIsBaptismPage(checkIsBaptismRoute());
       setIsChurchPage(checkIsChurchRoute());
     };
 
@@ -593,6 +621,10 @@ export default function App() {
       window.removeEventListener('hashchange', handleRouteCheck);
     };
   }, []);
+
+  if (isBaptismPage) {
+    return <PublicBaptismPage />;
+  }
 
   if (isChurchPage) {
     return <PublicChurchPage />;

@@ -141,5 +141,16 @@ service cloud.firestore {
       allow read: if true;
       allow write: if true;
     }
+
+    // 7. Secretariat - Baptism Form Settings & Public Registrations
+    match /baptism_settings/{docId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /baptism_registrations/{registrationId} {
+      allow read: if true;
+      allow write: if true;
+    }
   }
 }

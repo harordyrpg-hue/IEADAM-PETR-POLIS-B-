@@ -47,3 +47,59 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(150, 150, 150, 0.45);
 }
+
+@keyframes water-wave-slide {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes water-wave-slide-reverse {
+  0% {
+    transform: translate3d(-50%, 0, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes water-droplet-float {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.8);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.75;
+  }
+  85% {
+    opacity: 0.45;
+  }
+  100% {
+    transform: translate3d(0, -34px, 0) scale(1.15);
+    opacity: 0;
+  }
+}
+
+.animate-water-wave {
+  animation: water-wave-slide 11s linear infinite;
+}
+
+.animate-water-wave-reverse {
+  animation: water-wave-slide-reverse 15s linear infinite;
+}
+
+.animate-water-droplet {
+  animation: water-droplet-float 3.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-water-wave,
+  .animate-water-wave-reverse,
+  .animate-water-droplet {
+    animation: none;
+  }
+}
+

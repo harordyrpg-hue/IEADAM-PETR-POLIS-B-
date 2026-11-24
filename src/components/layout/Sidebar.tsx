@@ -24,9 +24,8 @@ import {
   Church,
   CalendarDays,
   User as UserIcon,
-  DollarSign,
   QrCode,
-  ClipboardCheck,
+  Briefcase,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { ViewTab } from '../../types.js';
@@ -89,16 +88,10 @@ export const Sidebar: React.FC = () => {
       title: 'Principal',
       items: [
         { id: 'dashboard', label: 'Início', icon: LayoutDashboard },
+        { id: 'secretariat', label: 'Secretaria', icon: Briefcase },
         { id: 'schedule', label: 'Agenda & Escalas', icon: CalendarDays, badge: pendingTasksCount },
-        { id: 'attendance', label: 'Chamada & QR', icon: ClipboardCheck },
         { id: 'registrations', label: 'Eventos & Inscrições', icon: QrCode },
         { id: 'files', label: 'Meus arquivos', icon: FolderOpen, badge: storageStats?.counts.totalFiles },
-        {
-          id: 'finances',
-          label: 'Financeiro',
-          icon: DollarSign,
-          financeAdminOnly: true,
-        },
         {
           id: 'storage',
           label: 'Armazenamento & Telão',
@@ -256,7 +249,10 @@ export const Sidebar: React.FC = () => {
                 </div>
                 {visibleItems.map((item) => {
                   const Icon = item.icon;
-                  const isActive = activeTab === item.id;
+                  const isActive =
+                    activeTab === item.id ||
+                    (item.id === 'secretariat' &&
+                      (activeTab === 'attendance' || activeTab === 'finances'));
 
                   return (
                     <button

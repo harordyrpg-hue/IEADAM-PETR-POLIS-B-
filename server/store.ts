@@ -27,6 +27,8 @@ export const ALLOWED_COLLECTIONS = new Set([
   'attendance_departments',
   'attendance_members',
   'attendance_calls',
+  'baptism_settings',
+  'baptism_registrations',
 ]);
 
 export interface StoredUserRecord {

@@ -8,6 +8,7 @@ import {
   getFirestore as getFbFirestore,
   collection as fbCollection,
   getDocs as fbGetDocs,
+  getDoc as fbGetDoc,
   doc as fbDoc,
   setDoc as fbSetDoc,
   deleteField as fbDeleteField,
@@ -20,6 +21,17 @@ import {
   sanitizeUser,
   StoredUserRecord,
 } from './server/store.js';
+import {
+  buildDriveOAuthUrl,
+  clearDriveTokenRecord,
+  createDriveResumableSession,
+  getDriveFileMetadata,
+  getPublicDriveStatus,
+  handleDriveOAuthCallback,
+  isAllowedLegacyFirebaseUrl,
+  streamDiskFileWithRange,
+  streamDriveFileToResponse,
+} from './server/drive.js';
 
 dotenv.config();
 
@@ -1123,6 +1135,336 @@ app.post('/api/attendance/qr-checkin', async (req, res) => {
   }
 });
 
+// ==========================================
+// GOOGLE DRIVE OAUTH, RESUMABLE UPLOAD & RANGE STREAMING
+// ==========================================
+function isCallerSuperAdmin(req: express.Request): { ok: boolean; uid: string; email: string } {
+  const uid = String(req.headers['x-ptb-uid'] || '').trim();
+  const email = String(req.headers['x-ptb-email'] || '').trim().toLowerCase();
+  if (!uid && !email) return { ok: false, uid: '', email: '' };
+  if (email && SUPER_ADMIN_EMAIL_SET.has(email)) {
+    return { ok: true, uid, email };
+  }
+  const snap = localStore.readSnapshot();
+  const matched = Object.values(snap.users || {}).find(
+    (u: any) =>
+      ((uid && (u.uid === uid || u.id === uid)) ||
+        (email && (u.email || '').toLowerCase().trim() === email)) &&
+      u.role === 'super_admin' &&
+      u.status !== 'blocked'
+  ) as any;
+  return { ok: Boolean(matched), uid, email };
+}
+
+function isCallerTeamMember(req: express.Request): { ok: boolean; uid: string; email: string } {
+  const uid = String(req.headers['x-ptb-uid'] || '').trim();
+  const email = String(req.headers['x-ptb-email'] || '').trim().toLowerCase();
+  if (!uid && !email) return { ok: false, uid: '', email: '' };
+  if (email && SUPER_ADMIN_EMAIL_SET.has(email)) {
+    return { ok: true, uid, email };
+  }
+  const snap = localStore.readSnapshot();
+  const matched = Object.values(snap.users || {}).find(
+    (u: any) =>
+      ((uid && (u.uid === uid || u.id === uid)) ||
+        (email && (u.email || '').toLowerCase().trim() === email)) &&
+      u.status !== 'blocked'
+  ) as any;
+  return { ok: Boolean(matched), uid, email };
+}
+
+function encodeInlineOrAttach(filename: string, inline: boolean): string {
+  const fallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'arquivo';
+  return `${inline ? 'inline' : 'attachment'}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(
+    filename
+  )}`;
+}
+
+async function streamRemoteFirebaseUrl(
+  targetUrl: string,
+  req: express.Request,
+  res: express.Response,
+  options: { inline: boolean; filename: string; mimeType?: string }
+) {
+  if (!isAllowedLegacyFirebaseUrl(targetUrl)) {
+    return res.status(400).json({ error: 'URL de origem não permitida.' });
+  }
+  const rangeHeader = req.headers.range;
+  const controller = new AbortController();
+  res.on('close', () => {
+    try {
+      controller.abort();
+    } catch {}
+  });
+
+  const upstreamRes = await fetch(targetUrl, {
+    headers: rangeHeader ? { Range: String(rangeHeader) } : {},
+    signal: controller.signal,
+  });
+
+  if (!upstreamRes.ok && upstreamRes.status !== 206) {
+    return res.status(upstreamRes.status).json({
+      error: `Falha ao ler origem legada (${upstreamRes.status}).`,
+    });
+  }
+
+  const contentType =
+    upstreamRes.headers.get('content-type') || options.mimeType || 'application/octet-stream';
+  const contentLength = upstreamRes.headers.get('content-length');
+  const contentRange = upstreamRes.headers.get('content-range');
+  const acceptRanges = upstreamRes.headers.get('accept-ranges') || 'bytes';
+
+  res.status(upstreamRes.status);
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Accept-Ranges', acceptRanges);
+  if (contentLength) res.setHeader('Content-Length', contentLength);
+  if (contentRange) res.setHeader('Content-Range', contentRange);
+  res.setHeader('Content-Disposition', encodeInlineOrAttach(options.filename, options.inline));
+
+  if (!upstreamRes.body) {
+    res.end();
+    return;
+  }
+  const { Readable } = await import('stream');
+  Readable.fromWeb(upstreamRes.body as any).pipe(res);
+}
+
+app.get('/api/drive/status', async (req, res) => {
+  try {
+    const status = await getPublicDriveStatus(req);
+    res.json(status);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Erro ao consultar status do Google Drive.' });
+  }
+});
+
+app.get('/api/drive/oauth/url', (req, res) => {
+  const caller = isCallerSuperAdmin(req);
+  if (!caller.ok) {
+    return res.status(403).json({
+      error: 'Apenas o Super Administrador pode conectar a conta do Google Drive.',
+    });
+  }
+  try {
+    const data = buildDriveOAuthUrl(req, { uid: caller.uid, email: caller.email });
+    res.json(data);
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Falha ao gerar URL OAuth do Google Drive.' });
+  }
+});
+
+const driveOAuthCallbackHandler: express.RequestHandler = async (req, res) => {
+  try {
+    const status = await handleDriveOAuthCallback(req);
+    const safePayload = JSON.stringify({
+      type: 'DRIVE_OAUTH_SUCCESS',
+      accountEmail: status.accountEmail,
+      accountName: status.accountName,
+      folderId: status.folderId,
+      folderName: status.folderName,
+    }).replace(/</g, '\\u003c');
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="pt-BR">
+  <head><meta charset="utf-8"><title>Google Drive Conectado</title></head>
+  <body style="font-family:system-ui,sans-serif;background:#0a0a0a;color:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
+    <div style="text-align:center;padding:24px;max-width:420px;">
+      <h2 style="margin:0 0 8px;color:#fbbf24;">Google Drive conectado com sucesso</h2>
+      <p style="font-size:14px;color:#a3a3a3;margin:0 0 16px;">Pasta configurada: <strong>PT-B Mídia</strong>. Esta janela fechará automaticamente.</p>
+      <script>
+        try {
+          if (window.opener) {
+            window.opener.postMessage(${safePayload}, '*');
+            setTimeout(function() { window.close(); }, 350);
+          } else {
+            window.location.href = '/';
+          }
+        } catch (e) {}
+      </script>
+    </div>
+  </body>
+</html>`);
+  } catch (err: any) {
+    const safeError = JSON.stringify({
+      type: 'DRIVE_OAUTH_ERROR',
+      error: err?.message || 'Falha na conexão com Google Drive.',
+    }).replace(/</g, '\\u003c');
+
+    res.status(400).setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="pt-BR">
+  <head><meta charset="utf-8"><title>Erro na conexão Google Drive</title></head>
+  <body style="font-family:system-ui,sans-serif;background:#0a0a0a;color:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
+    <div style="text-align:center;padding:24px;max-width:460px;">
+      <h2 style="margin:0 0 8px;color:#f87171;">Não foi possível conectar o Google Drive</h2>
+      <p style="font-size:13px;color:#d4d4d4;margin:0 0 16px;">${String(err?.message || 'Erro desconhecido').replace(/[<>&"]/g, '')}</p>
+      <script>
+        try {
+          if (window.opener) {
+            window.opener.postMessage(${safeError}, '*');
+          }
+        } catch (e) {}
+      </script>
+    </div>
+  </body>
+</html>`);
+  }
+};
+
+app.get(['/api/drive/oauth/callback', '/api/drive/oauth/callback/'], driveOAuthCallbackHandler);
+
+app.post('/api/drive/disconnect', async (req, res) => {
+  const caller = isCallerSuperAdmin(req);
+  if (!caller.ok) {
+    return res.status(403).json({
+      error: 'Apenas o Super Administrador pode desconectar o Google Drive.',
+    });
+  }
+  try {
+    await clearDriveTokenRecord();
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Erro ao desconectar Google Drive.' });
+  }
+});
+
+app.post('/api/drive/upload/session', async (req, res) => {
+  const caller = isCallerTeamMember(req);
+  if (!caller.ok) {
+    return res.status(401).json({ error: 'Autenticação necessária para iniciar upload no Drive.' });
+  }
+  const { name, mimeType, size, isThumbnail, ptbFileId } = req.body || {};
+  if (!name || typeof size !== 'number' || size < 0) {
+    return res.status(400).json({ error: 'Parâmetros inválidos para sessão de upload no Drive.' });
+  }
+  try {
+    const origin = req.headers.origin ? String(req.headers.origin) : undefined;
+    const session = await createDriveResumableSession({
+      name: String(name),
+      mimeType: String(mimeType || 'application/octet-stream'),
+      size,
+      origin,
+      isThumbnail: Boolean(isThumbnail),
+      ptbFileId: ptbFileId ? String(ptbFileId) : undefined,
+    });
+    res.json(session);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Erro ao criar sessão resumível no Google Drive.' });
+  }
+});
+
+// Optional chunk proxy strictly for small chunks (<= 4 MB) if browser direct PUT to Google Drive hits CORS restrictions
+app.put(
+  '/api/drive/upload/chunk-proxy',
+  express.raw({ type: '*/*', limit: '4mb' }),
+  async (req, res) => {
+    const caller = isCallerTeamMember(req);
+    if (!caller.ok) {
+      return res.status(401).json({ error: 'Autenticação necessária.' });
+    }
+    const sessionUri = String(req.headers['x-drive-session-uri'] || '').trim();
+    const contentRange = String(req.headers['x-content-range'] || '').trim();
+    const contentType = String(req.headers['x-upload-content-type'] || 'application/octet-stream');
+
+    let parsedSession: URL;
+    try {
+      parsedSession = new URL(sessionUri);
+    } catch {
+      return res.status(400).json({ error: 'Session URI inválida.' });
+    }
+    if (
+      parsedSession.protocol !== 'https:' ||
+      parsedSession.hostname.toLowerCase() !== 'www.googleapis.com' ||
+      !parsedSession.pathname.startsWith('/upload/drive/')
+    ) {
+      return res.status(400).json({ error: 'Destino de sessão não permitido.' });
+    }
+
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '');
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': contentType,
+        'Content-Length': String(buffer.length),
+      };
+      if (contentRange) {
+        headers['Content-Range'] = contentRange;
+      }
+      const upstream = await fetch(parsedSession.toString(), {
+        method: 'PUT',
+        headers,
+        body: buffer,
+      });
+      const text = await upstream.text();
+      res.status(upstream.status);
+      const rangeHeader = upstream.headers.get('range');
+      if (rangeHeader) res.setHeader('X-Drive-Range', rangeHeader);
+      if (text) {
+        try {
+          return res.json(JSON.parse(text));
+        } catch {
+          return res.send(text);
+        }
+      }
+      return res.end();
+    } catch (err: any) {
+      return res.status(502).json({ error: err?.message || 'Erro no envio de parte para o Drive.' });
+    }
+  }
+);
+
+app.get('/api/drive/files/:driveFileId/verify', async (req, res) => {
+  const caller = isCallerTeamMember(req);
+  if (!caller.ok) {
+    return res.status(401).json({ error: 'Autenticação necessária.' });
+  }
+  try {
+    const meta = await getDriveFileMetadata(req.params.driveFileId);
+    res.json(meta);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Erro ao verificar arquivo no Drive.' });
+  }
+});
+
+app.get('/api/drive/stream/:driveFileId', async (req, res) => {
+  const { driveFileId } = req.params;
+  if (!driveFileId) {
+    return res.status(400).json({ error: 'driveFileId inválido.' });
+  }
+  const inline = req.query.download !== '1';
+  const filename = String(req.query.name || driveFileId);
+  try {
+    await streamDriveFileToResponse(driveFileId, req, res, { inline, filename });
+  } catch (err: any) {
+    if (!res.headersSent) {
+      res.status(502).json({ error: err?.message || 'Erro ao transmitir do Google Drive.' });
+    }
+  }
+});
+
+app.get('/api/drive/proxy-legacy', async (req, res) => {
+  const caller = isCallerSuperAdmin(req);
+  if (!caller.ok) {
+    return res.status(403).json({
+      error: 'Apenas o Super Administrador pode ler arquivos legados para migração.',
+    });
+  }
+  const targetUrl = String(req.query.url || '').trim();
+  if (!isAllowedLegacyFirebaseUrl(targetUrl)) {
+    return res.status(400).json({ error: 'URL de origem legada não permitida.' });
+  }
+  try {
+    await streamRemoteFirebaseUrl(targetUrl, req, res, {
+      inline: true,
+      filename: 'legacy_asset',
+    });
+  } catch (err: any) {
+    if (!res.headersSent) {
+      res.status(502).json({ error: err?.message || 'Falha ao ler origem legada.' });
+    }
+  }
+});
+
 app.post('/api/church-downloads/:id/increment', async (req, res) => {
   const { id } = req.params;
   try {
@@ -1140,49 +1482,165 @@ app.post('/api/church-downloads/:id/increment', async (req, res) => {
   }
 });
 
-// Dedicated direct download endpoint with Content-Disposition attachment for mobile devices
-app.get('/api/download', (req, res) => {
-  const fileUrl = (req.query.url as string) || '';
-  const customName = (req.query.name as string) || '';
-
-  if (fileUrl.startsWith('/uploads/')) {
-    const fileName = path.basename(fileUrl);
-    const filePath = path.join(UPLOADS_DIR, fileName);
-    if (fs.existsSync(filePath)) {
-      return res.download(filePath, customName || fileName);
-    }
-  }
-
-  if (fileUrl) {
-    return res.redirect(fileUrl);
-  }
-  res.status(404).send('Arquivo não encontrado.');
-});
-
-// Fallback endpoint for /api/files/:id/download
-app.get('/api/files/:id/download', (req, res) => {
-  const { id } = req.params;
-  const customName = req.query.name as string;
-
+async function resolveFileDocForServing(id: string): Promise<any | null> {
   const snap = localStore.readSnapshot();
-  const fileDoc = snap.files[id];
-  if (fileDoc?.downloadUrl?.startsWith('/uploads/')) {
-    const diskPath = path.join(UPLOADS_DIR, path.basename(fileDoc.downloadUrl));
-    if (fs.existsSync(diskPath)) {
-      return res.download(diskPath, customName || fileDoc.name || path.basename(diskPath));
-    }
+  if (snap.files[id]) {
+    return snap.files[id];
   }
-
   try {
-    const files = fs.readdirSync(UPLOADS_DIR);
-    const match = files.find((f) => f.includes(id) || (customName && f.endsWith(customName)));
-    if (match) {
-      const filePath = path.join(UPLOADS_DIR, match);
-      return res.download(filePath, customName || match);
+    const db = getServerFirestore();
+    const docSnap = await fbGetDoc(fbDoc(db, 'files', id));
+    if (docSnap.exists()) {
+      return { id: docSnap.id, ...(docSnap.data() as any) };
     }
   } catch {}
+  return null;
+}
 
-  res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
+// Streaming + Range + Attachment Download endpoint (/api/download)
+app.get('/api/download', async (req, res) => {
+  const fileId = String(req.query.id || '').trim();
+  const driveFileIdParam = String(req.query.driveFileId || '').trim();
+  const fileUrl = String(req.query.url || '').trim();
+  const customName = String(req.query.name || '').trim();
+  const inline = req.query.inline === '1';
+
+  try {
+    if (driveFileIdParam) {
+      return await streamDriveFileToResponse(driveFileIdParam, req, res, {
+        inline,
+        filename: customName || driveFileIdParam,
+      });
+    }
+
+    if (fileId) {
+      const docRecord = await resolveFileDocForServing(fileId);
+      if (docRecord?.driveFileId) {
+        return await streamDriveFileToResponse(docRecord.driveFileId, req, res, {
+          inline,
+          filename: customName || docRecord.name || fileId,
+          mimeType: docRecord.driveMimeType || docRecord.mimeType,
+        });
+      }
+    }
+
+    if (fileUrl.includes('/api/files/') && fileUrl.includes('/download')) {
+      const match = fileUrl.match(/\/api\/files\/([^/?]+)\/download/);
+      if (match?.[1]) {
+        const docRecord = await resolveFileDocForServing(match[1]);
+        if (docRecord?.driveFileId) {
+          return await streamDriveFileToResponse(docRecord.driveFileId, req, res, {
+            inline,
+            filename: customName || docRecord.name || match[1],
+            mimeType: docRecord.driveMimeType || docRecord.mimeType,
+          });
+        }
+      }
+    }
+
+    if (fileUrl.startsWith('/api/drive/stream/')) {
+      const idPart = fileUrl.replace('/api/drive/stream/', '').split('?')[0];
+      if (idPart) {
+        return await streamDriveFileToResponse(idPart, req, res, {
+          inline,
+          filename: customName || idPart,
+        });
+      }
+    }
+
+    if (fileUrl.startsWith('/uploads/')) {
+      const diskPath = path.resolve(UPLOADS_DIR, path.basename(fileUrl));
+      if (diskPath.startsWith(UPLOADS_DIR + path.sep) && fs.existsSync(diskPath)) {
+        return streamDiskFileWithRange(diskPath, req, res, {
+          inline,
+          filename: customName || path.basename(diskPath),
+        });
+      }
+    }
+
+    if (isAllowedLegacyFirebaseUrl(fileUrl)) {
+      return await streamRemoteFirebaseUrl(fileUrl, req, res, {
+        inline,
+        filename: customName || 'arquivo_original',
+      });
+    }
+
+    if (fileUrl && /^https?:\/\//i.test(fileUrl)) {
+      return res.redirect(fileUrl);
+    }
+
+    return res.status(404).send('Arquivo não encontrado.');
+  } catch (err: any) {
+    if (!res.headersSent) {
+      return res.status(502).json({ error: err?.message || 'Erro ao baixar arquivo.' });
+    }
+  }
+});
+
+// Unified File Download & Range Streaming endpoint (/api/files/:id/download)
+app.get('/api/files/:id/download', async (req, res) => {
+  const { id } = req.params;
+  const customName = String(req.query.name || '').trim();
+  const inline =
+    req.query.download === '1'
+      ? false
+      : req.query.inline === '1' || Boolean(req.headers.range) || true;
+
+  try {
+    const fileDoc = await resolveFileDocForServing(id);
+
+    // 1. Se já migrado ou enviado ao Google Drive, faz streaming com Range direto do Drive
+    if (fileDoc?.driveFileId) {
+      return await streamDriveFileToResponse(fileDoc.driveFileId, req, res, {
+        inline,
+        filename: customName || fileDoc.name || id,
+        mimeType: fileDoc.driveMimeType || fileDoc.mimeType,
+      });
+    }
+
+    // 2. Enquanto não tiver driveFileId, serve pela origem antiga (/uploads ou Firebase Storage)
+    const legacySource = String(fileDoc?.legacyUrl || fileDoc?.downloadUrl || '');
+    if (legacySource.startsWith('/uploads/')) {
+      const diskPath = path.resolve(UPLOADS_DIR, path.basename(legacySource));
+      if (diskPath.startsWith(UPLOADS_DIR + path.sep) && fs.existsSync(diskPath)) {
+        return streamDiskFileWithRange(diskPath, req, res, {
+          inline,
+          filename: customName || fileDoc?.name || path.basename(diskPath),
+          mimeType: fileDoc?.mimeType,
+        });
+      }
+    }
+
+    if (isAllowedLegacyFirebaseUrl(legacySource)) {
+      return await streamRemoteFirebaseUrl(legacySource, req, res, {
+        inline,
+        filename: customName || fileDoc?.name || id,
+        mimeType: fileDoc?.mimeType,
+      });
+    }
+
+    // Fallback scan inside UPLOADS_DIR by ID
+    try {
+      const files = fs.readdirSync(UPLOADS_DIR);
+      const match = files.find((f) => f.includes(id) || (customName && f.endsWith(customName)));
+      if (match) {
+        const diskPath = path.resolve(UPLOADS_DIR, match);
+        if (diskPath.startsWith(UPLOADS_DIR + path.sep) && fs.existsSync(diskPath)) {
+          return streamDiskFileWithRange(diskPath, req, res, {
+            inline,
+            filename: customName || fileDoc?.name || match,
+            mimeType: fileDoc?.mimeType,
+          });
+        }
+      }
+    } catch {}
+
+    return res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
+  } catch (err: any) {
+    if (!res.headersSent) {
+      return res.status(502).json({ error: err?.message || 'Erro ao servir arquivo.' });
+    }
+  }
 });
 
 // Basic health check endpoint

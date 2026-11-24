@@ -41,10 +41,17 @@ export interface FileRecord {
   mimeType: string;
   size: number;
   type: MediaCategory;
-  storagePath: string; // Cloud Storage path
+  storagePath: string; // Cloud Storage or gdrive:// path
   storageKey?: string; // Compatibility alias
-  downloadUrl: string; // Cloud Storage download URL
+  downloadUrl: string; // Serving / download URL
   thumbnailUrl: string | null;
+  driveFileId?: string | null;
+  driveMimeType?: string | null;
+  driveSize?: number | null;
+  legacyUrl?: string | null;
+  legacyStoragePath?: string | null;
+  thumbnailDriveFileId?: string | null;
+  migratedToDriveAt?: string | null;
   folderId: string | null;
   eventId: string | null;
   ownerUid: string;
@@ -189,7 +196,8 @@ export type ViewTab =
   | 'profile'
   | 'finances'
   | 'registrations'
-  | 'attendance';
+  | 'attendance'
+  | 'secretariat';
 
 export interface ChurchLeadershipMember {
   id: string;
@@ -654,6 +662,14 @@ export interface AttendanceMember {
   congregation?: string;
   area?: string;
   notes?: string;
+  // Dados Eclesiásticos & Nascimento (editáveis na ficha de membros pelo administrador)
+  birthDate?: string;
+  gender?: 'Masc.' | 'Fem.' | '';
+  conversionDate?: string;
+  previouslyBaptized?: 'sim' | 'nao' | '';
+  baptismDate?: string;
+  recommendingPastor?: string;
+  baptismRegistrationId?: string;
   createdByUid: string;
   createdByName: string;
   createdAt: string;
@@ -693,3 +709,58 @@ export interface AttendanceCall {
   createdAt: string;
   updatedAt: string;
 }
+
+// ==========================================
+// SECRETARIA — BATISMO NAS ÁGUAS (FICHA PÚBLICA + PAINEL ADMIN)
+// ==========================================
+export type BaptismFormStatus = 'aberto' | 'pausado' | 'fechado';
+
+export type BaptismRegistrationStatus = 'pendente' | 'aprovado' | 'batizado' | 'arquivado';
+
+export interface BaptismFormSettings {
+  id: string; // 'default'
+  status: BaptismFormStatus;
+  churchTitle: string;
+  formTitle: string;
+  subtitle: string;
+  nextBaptismDate?: string;
+  baptismLocation?: string;
+  pausedMessage?: string;
+  closedMessage?: string;
+  updatedByUid?: string;
+  updatedByName?: string;
+  updatedAt: string;
+}
+
+export interface BaptismRegistration {
+  id: string;
+  protocolNumber: string;
+  // Dados do Candidato(a) — preenchidos no formulário público
+  fullName: string;
+  birthDate: string;
+  age: string;
+  gender: 'Masc.' | 'Fem.' | '';
+  phone: string;
+  address?: string;
+  congregation: string;
+  guardianName?: string;
+  // Declaração
+  declarationAccepted: boolean;
+  declarationCity?: string;
+  declarationDate?: string;
+  // Dados Eclesiásticos — preenchidos/editados depois pelo administrador (e na ficha de membros)
+  conversionDate?: string;
+  previouslyBaptized?: 'sim' | 'nao' | '';
+  recommendingPastor?: string;
+  // Uso Exclusivo da Secretaria
+  baptismDate?: string;
+  receivedBy?: string;
+  secretaryNotes?: string;
+  status: BaptismRegistrationStatus;
+  linkedMemberId?: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedByUid?: string;
+  updatedByName?: string;
+}
+

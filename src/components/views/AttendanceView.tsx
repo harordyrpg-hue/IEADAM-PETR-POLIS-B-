@@ -129,6 +129,12 @@ export const AttendanceView: React.FC = () => {
   const [newMemberEmail, setNewMemberEmail] = useState('');
   const [newMemberCongregation, setNewMemberCongregation] = useState('IEADAM Petrópolis B');
   const [newMemberArea, setNewMemberArea] = useState('');
+  const [newMemberBirthDate, setNewMemberBirthDate] = useState('');
+  const [newMemberGender, setNewMemberGender] = useState<'Masc.' | 'Fem.' | ''>('');
+  const [newMemberConversionDate, setNewMemberConversionDate] = useState('');
+  const [newMemberPreviouslyBaptized, setNewMemberPreviouslyBaptized] = useState<'sim' | 'nao' | ''>('');
+  const [newMemberBaptismDate, setNewMemberBaptismDate] = useState('');
+  const [newMemberRecommendingPastor, setNewMemberRecommendingPastor] = useState('');
   const [isSavingMember, setIsSavingMember] = useState(false);
 
   // Modals: Participants Selector
@@ -748,6 +754,12 @@ export const AttendanceView: React.FC = () => {
     setNewMemberEmail('');
     setNewMemberCongregation('IEADAM Petrópolis B');
     setNewMemberArea('');
+    setNewMemberBirthDate('');
+    setNewMemberGender('');
+    setNewMemberConversionDate('');
+    setNewMemberPreviouslyBaptized('');
+    setNewMemberBaptismDate('');
+    setNewMemberRecommendingPastor('');
     setIsMemberModalOpen(true);
   };
 
@@ -761,6 +773,12 @@ export const AttendanceView: React.FC = () => {
     setNewMemberEmail(member.email || '');
     setNewMemberCongregation(member.congregation || 'IEADAM Petrópolis B');
     setNewMemberArea(member.area || '');
+    setNewMemberBirthDate(member.birthDate || '');
+    setNewMemberGender(member.gender || '');
+    setNewMemberConversionDate(member.conversionDate || '');
+    setNewMemberPreviouslyBaptized(member.previouslyBaptized || '');
+    setNewMemberBaptismDate(member.baptismDate || '');
+    setNewMemberRecommendingPastor(member.recommendingPastor || '');
     setIsMemberModalOpen(true);
   };
 
@@ -782,6 +800,12 @@ export const AttendanceView: React.FC = () => {
           email: newMemberEmail,
           congregation: newMemberCongregation,
           area: newMemberArea,
+          birthDate: newMemberBirthDate,
+          gender: newMemberGender,
+          conversionDate: newMemberConversionDate,
+          previouslyBaptized: newMemberPreviouslyBaptized,
+          baptismDate: newMemberBaptismDate,
+          recommendingPastor: newMemberRecommendingPastor,
         });
         if (activeCall && activeCall.records[editingMemberId] && !isLockedByOther) {
           const targetDept = departments.find((d) => d.id === newMemberDeptId);
@@ -805,6 +829,12 @@ export const AttendanceView: React.FC = () => {
           email: newMemberEmail,
           congregation: newMemberCongregation,
           area: newMemberArea,
+          birthDate: newMemberBirthDate,
+          gender: newMemberGender,
+          conversionDate: newMemberConversionDate,
+          previouslyBaptized: newMemberPreviouslyBaptized,
+          baptismDate: newMemberBaptismDate,
+          recommendingPastor: newMemberRecommendingPastor,
         });
         if (activeCall && !isLockedByOther) {
           await api.saveAttendanceCall({
@@ -1653,6 +1683,22 @@ export const AttendanceView: React.FC = () => {
                                       <span className="font-mono">{member.phone}</span>
                                     </>
                                   )}
+                                  {member.recommendingPastor && (
+                                    <>
+                                      <span aria-hidden="true">·</span>
+                                      <span className="text-neutral-300">
+                                        Pastor: {member.recommendingPastor}
+                                      </span>
+                                    </>
+                                  )}
+                                  {member.baptismDate && (
+                                    <>
+                                      <span aria-hidden="true">·</span>
+                                      <span className="text-emerald-400/90">
+                                        Batismo: {formatAttendanceDateBR(member.baptismDate)}
+                                      </span>
+                                    </>
+                                  )}
                                 </div>
                               </div>
 
@@ -2421,6 +2467,95 @@ export const AttendanceView: React.FC = () => {
                     placeholder="Ex: Sede, Área 1..."
                     className="w-full px-3 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400"
                   />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-neutral-200">
+                    Data de Nascimento
+                  </label>
+                  <input
+                    type="date"
+                    value={newMemberBirthDate}
+                    onChange={(e) => setNewMemberBirthDate(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-neutral-200">
+                    Sexo
+                  </label>
+                  <select
+                    value={newMemberGender}
+                    onChange={(e) => setNewMemberGender(e.target.value as 'Masc.' | 'Fem.' | '')}
+                    className="w-full px-3 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="">Não informado</option>
+                    <option value="Masc.">Masculino</option>
+                    <option value="Fem.">Feminino</option>
+                  </select>
+                </div>
+
+                {/* DADOS ECLESIÁSTICOS NA FICHA DE MEMBROS */}
+                <div className="sm:col-span-2 pt-3 border-t border-neutral-800">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-amber-400 mb-3">
+                    Dados Eclesiásticos (Ficha de Membro)
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-neutral-200">
+                        Data da Decisão / Conversão
+                      </label>
+                      <input
+                        type="date"
+                        value={newMemberConversionDate}
+                        onChange={(e) => setNewMemberConversionDate(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-neutral-200">
+                        Data do Batismo nas Águas
+                      </label>
+                      <input
+                        type="date"
+                        value={newMemberBaptismDate}
+                        onChange={(e) => setNewMemberBaptismDate(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-neutral-200">
+                        Já foi batizado antes?
+                      </label>
+                      <select
+                        value={newMemberPreviouslyBaptized}
+                        onChange={(e) =>
+                          setNewMemberPreviouslyBaptized(e.target.value as 'sim' | 'nao' | '')
+                        }
+                        className="w-full px-3 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 focus:outline-none focus:border-amber-400"
+                      >
+                        <option value="">Não informado</option>
+                        <option value="sim">Sim</option>
+                        <option value="nao">Não</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-neutral-200">
+                        Pastor / Dirigente que indicou
+                      </label>
+                      <input
+                        type="text"
+                        value={newMemberRecommendingPastor}
+                        onChange={(e) => setNewMemberRecommendingPastor(e.target.value)}
+                        placeholder="Nome do Pastor ou Dirigente"
+                        className="w-full px-3 py-2.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 

@@ -80,8 +80,19 @@ import {
   AttendanceEntry,
   AttendanceCall,
   TeamTaskStatus,
+  BaptismFormSettings,
+  BaptismFormStatus,
+  BaptismRegistration,
+  BaptismRegistrationStatus,
 } from '../types.js';
 import { createFileThumbnail } from '../utils/thumbnail.js';
+import {
+  dataUrlToBlob,
+  estimateDataUrlBytes,
+  fetchDriveStatus,
+  MAX_INLINE_THUMBNAIL_BYTES,
+  uploadBlobToDriveResumable,
+} from './driveService.js';
 
 // ==========================================
 // UTILITY HELPERS
@@ -297,6 +308,8 @@ const MIRRORED_COLLECTIONS = new Set([
   'attendance_departments',
   'attendance_members',
   'attendance_calls',
+  'baptism_settings',
+  'baptism_registrations',
 ]);
 
 async function fetchServerCollection<T>(col: string): Promise<T[]> {
@@ -2337,32 +2350,87 @@ export const api = {
     let storagePath = `media/${fileId}_${safeFileName}`;
     let downloadUrl = '';
     let engineLabel = 'Firebase Storage';
+    let driveFileId: string | null = null;
+    let driveMimeType: string | null = null;
+    let driveSize: number | null = null;
+    let thumbnailDriveFileId: string | null = null;
+    let resolvedSize = file.size;
+    let resolvedMime = file.type || 'application/octet-stream';
+    let resolvedName = file.name;
 
+    let driveConnected = false;
     try {
-      downloadUrl = await uploadToFirebaseStorage(
+      const driveStatus = await fetchDriveStatus();
+      driveConnected = Boolean(driveStatus?.connected);
+    } catch {}
+
+    if (driveConnected) {
+      const driveRes = await uploadBlobToDriveResumable(
         file,
-        storagePath,
-        file.type || 'application/octet-stream',
+        {
+          name: file.name,
+          mimeType: resolvedMime,
+          ptbFileId: fileId,
+          caller: { uid: currentUser.uid, email: currentUser.email },
+        },
         onProgress
       );
-    } catch (storageErr) {
-      console.warn('Firebase Storage falhou (usando fallback local em partes):', storageErr);
-      const serverRes = await uploadBinaryToServerFallback(
-        file,
-        file.name,
-        file.type || 'application/octet-stream',
-        onProgress
-      );
-      downloadUrl = serverRes.downloadUrl;
-      storagePath = `/uploads/${serverRes.filename}`;
-      engineLabel = 'Servidor Fallback + Firestore';
+      driveFileId = driveRes.driveFileId;
+      driveMimeType = driveRes.mimeType || resolvedMime;
+      driveSize = driveRes.size ?? file.size;
+      resolvedSize = driveSize;
+      resolvedMime = driveMimeType;
+      resolvedName = driveRes.name || file.name;
+      storagePath = `gdrive://${driveFileId}`;
+      downloadUrl = `/api/files/${fileId}/download`;
+      engineLabel = 'Google Drive (PT-B Mídia)';
+    } else {
+      try {
+        downloadUrl = await uploadToFirebaseStorage(
+          file,
+          storagePath,
+          resolvedMime,
+          onProgress
+        );
+      } catch (storageErr) {
+        console.warn('Firebase Storage falhou (usando fallback local em partes):', storageErr);
+        const serverRes = await uploadBinaryToServerFallback(
+          file,
+          file.name,
+          resolvedMime,
+          onProgress
+        );
+        downloadUrl = serverRes.downloadUrl;
+        storagePath = `/uploads/${serverRes.filename}`;
+        engineLabel = 'Servidor Fallback + Firestore';
+      }
     }
 
     if (onProgress) onProgress(100, 'Concluído');
 
-    let finalThumb = generatedThumb;
+    let finalThumb: string | null = generatedThumb;
+    if (driveConnected && generatedThumb && generatedThumb.startsWith('data:')) {
+      if (estimateDataUrlBytes(generatedThumb) > MAX_INLINE_THUMBNAIL_BYTES) {
+        try {
+          const thumbBlob = dataUrlToBlob(generatedThumb, 'image/jpeg');
+          const thumbRes = await uploadBlobToDriveResumable(thumbBlob, {
+            name: `thumb_${fileId}.jpg`,
+            mimeType: thumbBlob.type || 'image/jpeg',
+            isThumbnail: true,
+            caller: { uid: currentUser.uid, email: currentUser.email },
+          });
+          thumbnailDriveFileId = thumbRes.driveFileId;
+          finalThumb = `/api/drive/stream/${thumbRes.driveFileId}`;
+        } catch (thumbErr) {
+          console.warn('Miniatura maior que 20KB não enviada ao Drive:', thumbErr);
+        }
+      }
+    }
+
     if (!finalThumb) {
-      if (downloadUrl.startsWith('data:image/')) {
+      if (driveFileId && (category === 'photo' || category === 'art')) {
+        finalThumb = `/api/files/${fileId}/download?inline=1`;
+      } else if (downloadUrl.startsWith('data:image/')) {
         finalThumb = downloadUrl;
       } else if (
         (downloadUrl.startsWith('http') || downloadUrl.startsWith('/uploads/')) &&
@@ -2374,16 +2442,25 @@ export const api = {
 
     const newRecord: FileRecord = {
       id: fileId,
-      name: file.name,
+      name: resolvedName,
       originalName: file.name,
       extension: ext,
-      mimeType: file.type || 'application/octet-stream',
-      size: file.size,
+      mimeType: resolvedMime,
+      size: resolvedSize,
       type: category,
       storagePath,
       storageKey: storagePath,
       downloadUrl,
       thumbnailUrl: finalThumb || null,
+      ...(driveFileId
+        ? {
+            driveFileId,
+            driveMimeType,
+            driveSize,
+            migratedToDriveAt: new Date().toISOString(),
+          }
+        : {}),
+      ...(thumbnailDriveFileId ? { thumbnailDriveFileId } : {}),
       folderId: options.folderId || null,
       eventId: options.eventId || null,
       ownerUid: currentUser.uid,
@@ -2543,7 +2620,12 @@ export const api = {
     if (!file) return;
 
     if (permanent) {
-      if (file.storagePath && !file.storagePath.startsWith('/uploads/')) {
+      if (
+        file.storagePath &&
+        !file.storagePath.startsWith('/uploads/') &&
+        !file.storagePath.startsWith('gdrive://') &&
+        !file.storagePath.startsWith('chunked://')
+      ) {
         try {
           await deleteObject(ref(storage, file.storagePath));
         } catch {}
@@ -3130,9 +3212,33 @@ export const api = {
   // ==========================================
   // 9. DOWNLOAD & MEDIA RESOLUTION HELPERS
   // ==========================================
+  async resolveChunkedBlob(chunkUri: string, fallbackMime = 'application/octet-stream'): Promise<Blob | null> {
+    return await resolveChunkedFirestoreBlob(chunkUri, fallbackMime);
+  },
+
   async resolveMediaUrl(file: FileRecord, preferOriginal: boolean = false): Promise<string | null> {
-    const primary = preferOriginal ? file.downloadUrl : file.thumbnailUrl;
-    const secondary = preferOriginal ? file.thumbnailUrl : file.downloadUrl;
+    if (!preferOriginal) {
+      if (file.thumbnailDriveFileId) {
+        return `/api/drive/stream/${encodeURIComponent(file.thumbnailDriveFileId)}`;
+      }
+      if (file.thumbnailUrl) {
+        return file.thumbnailUrl;
+      }
+      if (file.driveFileId) {
+        return `/api/files/${encodeURIComponent(file.id)}/download?inline=1`;
+      }
+    }
+
+    // Se já migrado ou enviado ao Drive, serve sempre pelo servidor com streaming e suporte a Range
+    if (preferOriginal && file.driveFileId) {
+      return `/api/files/${encodeURIComponent(file.id)}/download?inline=1`;
+    }
+
+    // Enquanto não tiver driveFileId, continua servindo pela origem antiga
+    const primary = preferOriginal
+      ? (file.legacyUrl || file.downloadUrl)
+      : (file.thumbnailUrl || file.legacyUrl || file.downloadUrl);
+    const secondary = preferOriginal ? file.thumbnailUrl : (file.legacyUrl || file.downloadUrl);
     const source = primary || secondary;
     if (!source) return null;
 
@@ -3151,7 +3257,9 @@ export const api = {
   },
 
   async resolveFileBlob(file: FileRecord): Promise<Blob | null> {
-    const url = file.downloadUrl || file.thumbnailUrl;
+    const url = file.driveFileId
+      ? `/api/files/${encodeURIComponent(file.id)}/download?inline=1`
+      : (file.legacyUrl || file.downloadUrl || file.thumbnailUrl);
     if (!url) return null;
 
     if (url.startsWith('chunked://')) {
@@ -3176,9 +3284,26 @@ export const api = {
   },
 
   async triggerDownload(urlOrRecord: string | FileRecord, customFilename?: string) {
-    let url = typeof urlOrRecord === 'string' ? urlOrRecord : urlOrRecord.downloadUrl;
+    let url = typeof urlOrRecord === 'string'
+      ? urlOrRecord
+      : (urlOrRecord.driveFileId
+          ? `/api/files/${encodeURIComponent(urlOrRecord.id)}/download`
+          : (urlOrRecord.legacyUrl || urlOrRecord.downloadUrl));
     let filename = customFilename || (typeof urlOrRecord === 'object' ? urlOrRecord.name : '');
     const mimeHint = typeof urlOrRecord === 'object' ? urlOrRecord.mimeType : undefined;
+
+    if (typeof urlOrRecord === 'object' && urlOrRecord.driveFileId) {
+      const streamDownloadUrl = `/api/files/${encodeURIComponent(
+        urlOrRecord.id
+      )}/download?download=1&name=${encodeURIComponent(filename || urlOrRecord.name || 'arquivo_original')}`;
+      const link = document.createElement('a');
+      link.href = streamDownloadUrl;
+      link.download = filename || urlOrRecord.name || 'arquivo_original';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => link.remove(), 1000);
+      return;
+    }
 
     if (url.startsWith('chunked://')) {
       const blob = await resolveChunkedFirestoreBlob(url, mimeHint);
@@ -3198,11 +3323,23 @@ export const api = {
     }
 
     if (url.includes('/api/files/') && url.includes('/download')) {
-      const match = url.match(/\/api\/files\/([^/]+)\/download/);
+      const match = url.match(/\/api\/files\/([^/?]+)\/download/);
       if (match && match[1]) {
         const record = await getDocById<FileRecord>('files', match[1]).catch(() => null);
+        if (record?.driveFileId) {
+          const streamUrl = `/api/files/${encodeURIComponent(
+            record.id
+          )}/download?download=1&name=${encodeURIComponent(filename || record.name || 'arquivo_original')}`;
+          const link = document.createElement('a');
+          link.href = streamUrl;
+          link.download = filename || record.name || 'arquivo_original';
+          document.body.appendChild(link);
+          link.click();
+          setTimeout(() => link.remove(), 1000);
+          return;
+        }
         if (record) {
-          url = record.downloadUrl || url;
+          url = record.legacyUrl || record.downloadUrl || url;
           if (!filename) filename = record.name;
         }
       }
@@ -4775,6 +4912,13 @@ export const api = {
       congregation?: string;
       area?: string;
       notes?: string;
+      birthDate?: string;
+      gender?: 'Masc.' | 'Fem.' | '';
+      conversionDate?: string;
+      previouslyBaptized?: 'sim' | 'nao' | '';
+      baptismDate?: string;
+      recommendingPastor?: string;
+      baptismRegistrationId?: string;
     }
   ): Promise<AttendanceMember> {
     const effective = api.getEffectiveUser();
@@ -4793,6 +4937,13 @@ export const api = {
       congregation: extra?.congregation?.trim() || 'IEADAM Petrópolis B',
       area: extra?.area?.trim() || undefined,
       notes: extra?.notes?.trim() || undefined,
+      birthDate: extra?.birthDate?.trim() || undefined,
+      gender: extra?.gender || undefined,
+      conversionDate: extra?.conversionDate?.trim() || undefined,
+      previouslyBaptized: extra?.previouslyBaptized || undefined,
+      baptismDate: extra?.baptismDate?.trim() || undefined,
+      recommendingPastor: extra?.recommendingPastor?.trim() || undefined,
+      baptismRegistrationId: extra?.baptismRegistrationId || undefined,
       createdByUid: effective.uid,
       createdByName: effective.displayName,
       createdAt: now,
@@ -4804,7 +4955,7 @@ export const api = {
       userId: effective.uid,
       userName: effective.displayName,
       action: 'create_attendance_member',
-      actionLabel: 'Adicionou Membro na Chamada',
+      actionLabel: 'Adicionou Membro na Ficha / Chamada',
       targetType: 'attendance',
       targetName: member.name,
       details: `Código: ${memberCode}`,
@@ -4823,6 +4974,13 @@ export const api = {
       congregation?: string;
       area?: string;
       notes?: string;
+      birthDate?: string;
+      gender?: 'Masc.' | 'Fem.' | '';
+      conversionDate?: string;
+      previouslyBaptized?: 'sim' | 'nao' | '';
+      baptismDate?: string;
+      recommendingPastor?: string;
+      baptismRegistrationId?: string;
     }
   ): Promise<void> {
     const effective = api.getEffectiveUser();
@@ -4836,13 +4994,22 @@ export const api = {
       congregation: updates.congregation?.trim() || 'IEADAM Petrópolis B',
       area: updates.area?.trim() || '',
       notes: updates.notes?.trim() || '',
+      birthDate: updates.birthDate?.trim() || '',
+      gender: updates.gender || '',
+      conversionDate: updates.conversionDate?.trim() || '',
+      previouslyBaptized: updates.previouslyBaptized || '',
+      baptismDate: updates.baptismDate?.trim() || '',
+      recommendingPastor: updates.recommendingPastor?.trim() || '',
+      ...(updates.baptismRegistrationId !== undefined
+        ? { baptismRegistrationId: updates.baptismRegistrationId }
+        : {}),
       updatedAt: now,
     });
     await api.addActivity({
       userId: effective.uid,
       userName: effective.displayName,
       action: 'update_attendance_member',
-      actionLabel: 'Editou Membro na Chamada',
+      actionLabel: 'Atualizou Ficha de Membro',
       targetType: 'attendance',
       targetName: updates.name.trim(),
       details: `Categoria ID: ${updates.departmentId}`,
@@ -5117,5 +5284,274 @@ export const api = {
 
   async deleteAttendanceCall(callId: string): Promise<void> {
     await deleteDocById('attendance_calls', callId);
+  },
+
+  // ==========================================
+  // SECRETARIA — BATISMO NAS ÁGUAS
+  // ==========================================
+  getDefaultBaptismSettings(): BaptismFormSettings {
+    return {
+      id: 'default',
+      status: 'aberto',
+      churchTitle: 'IGREJA EVANGÉLICA ASSEMBLEIA DE DEUS NO AMAZONAS',
+      formTitle: 'Ficha de Inscrição - Batismo nas Águas',
+      subtitle: 'Uso exclusivo da Secretaria - Somente informações essenciais',
+      nextBaptismDate: '',
+      baptismLocation: 'IEADAM Petrópolis B',
+      pausedMessage:
+        'As inscrições para o Batismo nas Águas estão temporariamente pausadas pela Secretaria. Aguarde a reabertura ou procure a equipe da igreja.',
+      closedMessage:
+        'As inscrições para este período de Batismo nas Águas foram encerradas pela Secretaria.',
+      updatedAt: new Date().toISOString(),
+    };
+  },
+
+  async getBaptismFormSettings(): Promise<BaptismFormSettings> {
+    const defaults = api.getDefaultBaptismSettings();
+    try {
+      const existing = await getDocById<BaptismFormSettings>('baptism_settings', 'default');
+      return existing ? { ...defaults, ...existing } : defaults;
+    } catch {
+      return defaults;
+    }
+  },
+
+  subscribeBaptismFormSettings(callback: (settings: BaptismFormSettings) => void): () => void {
+    const defaults = api.getDefaultBaptismSettings();
+    return subscribeCollection<BaptismFormSettings>('baptism_settings', (items) => {
+      const found = items.find((i) => i.id === 'default') || items[0];
+      callback(found ? { ...defaults, ...found } : defaults);
+    });
+  },
+
+  async updateBaptismFormSettings(
+    updates: Partial<BaptismFormSettings>
+  ): Promise<BaptismFormSettings> {
+    const effective = api.getEffectiveUser();
+    const current = await api.getBaptismFormSettings();
+    const next: BaptismFormSettings = {
+      ...current,
+      ...updates,
+      id: 'default',
+      updatedByUid: effective.uid,
+      updatedByName: effective.displayName,
+      updatedAt: new Date().toISOString(),
+    };
+    await setDocById('baptism_settings', 'default', next, true);
+    if (updates.status && updates.status !== current.status) {
+      await api.addActivity({
+        userId: effective.uid,
+        userName: effective.displayName,
+        action: 'baptism_form_status',
+        actionLabel: `Alterou formulário de Batismo para ${updates.status.toUpperCase()}`,
+        targetType: 'secretariat',
+        targetName: 'Batismo nas Águas',
+        details: `Status: ${updates.status}`,
+      });
+    }
+    return next;
+  },
+
+  async resetBaptismFormSettings(): Promise<BaptismFormSettings> {
+    const effective = api.getEffectiveUser();
+    const defaults: BaptismFormSettings = {
+      ...api.getDefaultBaptismSettings(),
+      updatedByUid: effective.uid,
+      updatedByName: effective.displayName,
+      updatedAt: new Date().toISOString(),
+    };
+    await setDocById('baptism_settings', 'default', defaults, true);
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'reset_baptism_form',
+      actionLabel: 'Resetou configurações do formulário de Batismo',
+      targetType: 'secretariat',
+      targetName: 'Batismo nas Águas',
+      details: 'Configurações restauradas para o padrão',
+    });
+    return defaults;
+  },
+
+  async clearAllBaptismRegistrations(): Promise<number> {
+    const effective = api.getEffectiveUser();
+    const existing = await listCol<BaptismRegistration>('baptism_registrations');
+    for (const item of existing) {
+      await deleteDocById('baptism_registrations', item.id);
+    }
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'clear_baptism_registrations',
+      actionLabel: `Limpou ${existing.length} ficha(s) do formulário de Batismo`,
+      targetType: 'secretariat',
+      targetName: 'Batismo nas Águas',
+      details: `${existing.length} registro(s) removido(s)`,
+    });
+    return existing.length;
+  },
+
+  async submitPublicBaptismRegistration(input: {
+    fullName: string;
+    birthDate: string;
+    age: string;
+    gender: 'Masc.' | 'Fem.';
+    phone: string;
+    address?: string;
+    congregation: string;
+    guardianName?: string;
+    declarationAccepted: boolean;
+    declarationCity?: string;
+    declarationDate?: string;
+    allowWhenClosedByAdmin?: boolean;
+  }): Promise<BaptismRegistration> {
+    const settings = await api.getBaptismFormSettings();
+    if (!input.allowWhenClosedByAdmin && settings.status !== 'aberto') {
+      throw new Error(
+        settings.status === 'pausado'
+          ? settings.pausedMessage || 'Formulário temporariamente pausado pela Secretaria.'
+          : settings.closedMessage || 'Inscrições para batismo encerradas no momento.'
+      );
+    }
+
+    const now = new Date().toISOString();
+    const year = new Date().getFullYear();
+    const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const id = `bat_${Date.now()}_${rand.toLowerCase()}`;
+    const protocolNumber = `BAT-${year}-${rand}`;
+
+    const record: BaptismRegistration = {
+      id,
+      protocolNumber,
+      fullName: input.fullName.trim(),
+      birthDate: input.birthDate.trim(),
+      age: String(input.age || '').trim(),
+      gender: input.gender,
+      phone: input.phone.trim(),
+      address: input.address?.trim() || '',
+      congregation: input.congregation.trim(),
+      guardianName: input.guardianName?.trim() || '',
+      declarationAccepted: Boolean(input.declarationAccepted),
+      declarationCity: input.declarationCity?.trim() || 'Manaus / AM',
+      declarationDate: input.declarationDate?.trim() || now.slice(0, 10),
+      conversionDate: '',
+      previouslyBaptized: '',
+      recommendingPastor: '',
+      baptismDate: settings.nextBaptismDate || '',
+      receivedBy: '',
+      secretaryNotes: '',
+      status: 'pendente',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await setDocById('baptism_registrations', id, record);
+    return record;
+  },
+
+  subscribeBaptismRegistrations(callback: (list: BaptismRegistration[]) => void): () => void {
+    return subscribeCollection<BaptismRegistration>('baptism_registrations', (items) => {
+      const sorted = [...items].sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      callback(sorted);
+    });
+  },
+
+  async updateBaptismRegistration(
+    id: string,
+    updates: Partial<BaptismRegistration>
+  ): Promise<void> {
+    const effective = api.getEffectiveUser();
+    await updateDocById('baptism_registrations', id, {
+      ...updates,
+      updatedByUid: effective.uid,
+      updatedByName: effective.displayName,
+      updatedAt: new Date().toISOString(),
+    });
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'update_baptism_registration',
+      actionLabel: 'Atualizou ficha de Batismo',
+      targetType: 'secretariat',
+      targetName: updates.fullName || id,
+      details: updates.status ? `Status: ${updates.status}` : 'Edição de secretaria/eclesiástica',
+    });
+  },
+
+  async deleteBaptismRegistration(id: string, candidateName?: string): Promise<void> {
+    const effective = api.getEffectiveUser();
+    await deleteDocById('baptism_registrations', id);
+    await api.addActivity({
+      userId: effective.uid,
+      userName: effective.displayName,
+      action: 'delete_baptism_registration',
+      actionLabel: 'Excluiu ficha de Batismo',
+      targetType: 'secretariat',
+      targetName: candidateName || id,
+      details: 'Ficha removida pela Secretaria',
+    });
+  },
+
+  async syncBaptismToAttendanceMember(
+    registration: BaptismRegistration,
+    targetDepartmentId?: string
+  ): Promise<AttendanceMember> {
+    const depts = await listCol<AttendanceDepartment>('attendance_departments');
+    let deptId = targetDepartmentId || depts[0]?.id;
+    if (!deptId) {
+      const createdDept = await api.createAttendanceDepartment('Membros Gerais', 'departamento');
+      deptId = createdDept.id;
+    }
+
+    const existingMembers = await listCol<AttendanceMember>('attendance_members');
+    const found =
+      (registration.linkedMemberId
+        ? existingMembers.find((m) => m.id === registration.linkedMemberId)
+        : undefined) ||
+      existingMembers.find((m) => m.baptismRegistrationId === registration.id);
+
+    if (found) {
+      await api.updateAttendanceMember(found.id, {
+        name: registration.fullName,
+        departmentId: targetDepartmentId || found.departmentId || deptId,
+        roleTitle: found.roleTitle || 'Membro',
+        phone: registration.phone || found.phone,
+        email: found.email,
+        congregation: registration.congregation || found.congregation || 'IEADAM Petrópolis B',
+        area: found.area,
+        notes: found.notes || registration.secretaryNotes,
+        birthDate: registration.birthDate || found.birthDate,
+        gender: registration.gender || found.gender,
+        conversionDate: registration.conversionDate || found.conversionDate,
+        previouslyBaptized: registration.previouslyBaptized || found.previouslyBaptized,
+        baptismDate: registration.baptismDate || found.baptismDate,
+        recommendingPastor: registration.recommendingPastor || found.recommendingPastor,
+        baptismRegistrationId: registration.id,
+      });
+      return { ...found, name: registration.fullName };
+    }
+
+    const createdMember = await api.createAttendanceMember(deptId, registration.fullName, {
+      roleTitle: 'Novo Membro',
+      phone: registration.phone,
+      congregation: registration.congregation || 'IEADAM Petrópolis B',
+      notes: registration.secretaryNotes || undefined,
+      birthDate: registration.birthDate,
+      gender: registration.gender,
+      conversionDate: registration.conversionDate,
+      previouslyBaptized: registration.previouslyBaptized,
+      baptismDate: registration.baptismDate,
+      recommendingPastor: registration.recommendingPastor,
+      baptismRegistrationId: registration.id,
+    });
+
+    await updateDocById('baptism_registrations', registration.id, {
+      linkedMemberId: createdMember.id,
+      updatedAt: new Date().toISOString(),
+    });
+
+    return createdMember;
   },
 };

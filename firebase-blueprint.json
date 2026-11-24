@@ -287,6 +287,13 @@
         "congregation": { "type": "string", "maxLength": 150 },
         "area": { "type": "string", "maxLength": 100 },
         "notes": { "type": "string", "maxLength": 500 },
+        "birthDate": { "type": "string", "maxLength": 30 },
+        "gender": { "type": "string", "maxLength": 20 },
+        "conversionDate": { "type": "string", "maxLength": 30 },
+        "previouslyBaptized": { "type": "string", "maxLength": 10 },
+        "baptismDate": { "type": "string", "maxLength": 30 },
+        "recommendingPastor": { "type": "string", "maxLength": 150 },
+        "baptismRegistrationId": { "type": "string", "maxLength": 128 },
         "createdByUid": { "type": "string", "maxLength": 128 },
         "createdByName": { "type": "string", "maxLength": 120 },
         "createdAt": { "type": "string", "format": "date-time" },
@@ -317,6 +324,55 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["date", "title", "includedMemberIds"]
+    },
+    "BaptismFormSettings": {
+      "title": "BaptismFormSettings",
+      "description": "Public baptism registration form availability and institutional header config",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["aberto", "pausado", "fechado"] },
+        "churchTitle": { "type": "string", "maxLength": 200 },
+        "formTitle": { "type": "string", "maxLength": 200 },
+        "subtitle": { "type": "string", "maxLength": 250 },
+        "nextBaptismDate": { "type": "string", "maxLength": 30 },
+        "baptismLocation": { "type": "string", "maxLength": 200 },
+        "pausedMessage": { "type": "string", "maxLength": 1000 },
+        "closedMessage": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["status", "churchTitle", "formTitle"]
+    },
+    "BaptismRegistration": {
+      "title": "BaptismRegistration",
+      "description": "Baptism candidate registration sheet with personal data, ecclesiastical fields, and secretary review",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "protocolNumber": { "type": "string", "maxLength": 64 },
+        "fullName": { "type": "string", "maxLength": 200 },
+        "birthDate": { "type": "string", "maxLength": 30 },
+        "age": { "type": "string", "maxLength": 20 },
+        "gender": { "type": "string", "maxLength": 20 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "address": { "type": "string", "maxLength": 300 },
+        "congregation": { "type": "string", "maxLength": 150 },
+        "guardianName": { "type": "string", "maxLength": 200 },
+        "declarationAccepted": { "type": "boolean" },
+        "declarationCity": { "type": "string", "maxLength": 100 },
+        "declarationDate": { "type": "string", "maxLength": 30 },
+        "conversionDate": { "type": "string", "maxLength": 30 },
+        "previouslyBaptized": { "type": "string", "maxLength": 10 },
+        "recommendingPastor": { "type": "string", "maxLength": 150 },
+        "baptismDate": { "type": "string", "maxLength": 30 },
+        "receivedBy": { "type": "string", "maxLength": 150 },
+        "secretaryNotes": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["pendente", "aprovado", "batizado", "arquivado"] },
+        "linkedMemberId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "birthDate", "gender", "phone", "congregation", "status"]
     }
   },
   "firestore": {
@@ -411,6 +467,14 @@
     "/attendance_calls/{callId}": {
       "schema": { "$ref": "#/entities/AttendanceCall" },
       "description": "Daily roll calls with included members, statuses, justifications, and marking user"
+    },
+    "/baptism_settings/{docId}": {
+      "schema": { "$ref": "#/entities/BaptismFormSettings" },
+      "description": "Status (aberto/pausado/fechado) and configuration of the public baptism registration form"
+    },
+    "/baptism_registrations/{registrationId}": {
+      "schema": { "$ref": "#/entities/BaptismRegistration" },
+      "description": "Baptism candidate registrations and secretary administrative records"
     }
   }
 }

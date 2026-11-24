@@ -10,6 +10,7 @@ import {
   Save,
   Database,
   Lock,
+  Download,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { SystemSettings } from '../../types.js';
@@ -17,7 +18,7 @@ import { formatBytes } from '../../utils/formatters.js';
 import { api } from '../../services/api.js';
 
 export const SettingsView: React.FC = () => {
-  const { notify, user } = useApp();
+  const { notify, user, setActiveTab } = useApp();
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -73,13 +74,26 @@ export const SettingsView: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
-      <div className="pb-4 border-b border-neutral-800">
-        <h1 className="text-xl font-bold text-neutral-100">
-          Configurações
-        </h1>
-        <p className="text-xs text-neutral-400 mt-0.5">
-          Parâmetros da central e infraestrutura Firebase Cloud.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800">
+        <div>
+          <h1 className="text-xl font-bold text-neutral-100">
+            Configurações
+          </h1>
+          <p className="text-xs text-neutral-400 mt-0.5">
+            Parâmetros da central e infraestrutura Firebase Cloud.
+          </p>
+        </div>
+
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('admin')}
+            className="inline-flex items-center gap-2 px-4 min-h-[40px] rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold text-xs transition-colors cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            <span>Exportar backup</span>
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
