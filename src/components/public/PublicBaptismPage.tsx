@@ -36,6 +36,7 @@ import {
 import { BaptismFormSettings, BaptismRegistration } from '../../types.js';
 import { api } from '../../services/api.js';
 import { exportSingleBaptismFichaPDF } from '../../utils/baptismPdf.js';
+import { PixelBaptismAnimation } from './PixelBaptismAnimation.js';
 
 function formatCPF(raw: string): string {
   const digits = raw.replace(/\D/g, '').slice(0, 11);
@@ -907,23 +908,30 @@ export const PublicBaptismPage: React.FC = () => {
         <div className="w-full max-w-xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
           <div className="h-3 w-full bg-amber-400" />
 
-          <div className="relative overflow-hidden border-b border-neutral-800 px-6 py-8 text-center">
+          <div className="relative overflow-hidden border-b border-neutral-800 px-5 sm:px-6 py-7 text-center">
             <WaterAnimationBackdrop />
-            <div className="relative z-10 space-y-3">
-              <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 mx-auto flex items-center justify-center shadow-lg">
-                <CheckCircle2 className="w-8 h-8" />
+            <div className="relative z-10 space-y-4">
+              <div className="flex items-center justify-center gap-2 text-emerald-400">
+                <CheckCircle2 className="w-5 h-5 shrink-0" />
+                <span className="text-xs font-bold tracking-wider uppercase">
+                  Inscrição Confirmada com Sucesso!
+                </span>
               </div>
 
               <div>
-                <span className="text-[11px] font-bold tracking-wider uppercase text-emerald-400">
-                  Inscrição Confirmada com Sucesso!
-                </span>
-                <h1 className="text-2xl font-bold text-neutral-100 mt-1">
+                <h1 className="text-2xl font-bold text-neutral-100">
                   {submittedRecord.fullName}
                 </h1>
                 <p className="text-xs text-neutral-300 mt-1.5 leading-relaxed max-w-md mx-auto">
                   Sua inscrição foi finalizada e enviada automaticamente para a direção da igreja e Secretaria. Em breve a equipe entrará em contato!
                 </p>
+              </div>
+
+              <div className="pt-1">
+                <PixelBaptismAnimation
+                  gender={submittedRecord.gender}
+                  candidateName={submittedRecord.fullName}
+                />
               </div>
             </div>
           </div>
