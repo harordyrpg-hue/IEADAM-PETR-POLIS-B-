@@ -4,6 +4,7 @@ import { useApp } from '../../context/AppContext.js';
 import { ShareLink } from '../../types.js';
 import { formatDate } from '../../utils/formatters.js';
 import { api } from '../../services/api.js';
+import { buildPublicUrl, copyTextSafely } from '../../utils/publicUrl.js';
 
 export const SharesView: React.FC = () => {
   const { notify } = useApp();
@@ -27,9 +28,9 @@ export const SharesView: React.FC = () => {
     loadShares();
   }, []);
 
-  const handleCopyLink = (token: string) => {
-    const url = `${window.location.origin}/#share=${token}`;
-    navigator.clipboard.writeText(url);
+  const handleCopyLink = async (token: string) => {
+    const url = buildPublicUrl(`/#share=${token}`);
+    await copyTextSafely(url);
     setCopiedToken(token);
     notify('Link seguro copiado!', 'success');
     setTimeout(() => setCopiedToken(null), 2000);

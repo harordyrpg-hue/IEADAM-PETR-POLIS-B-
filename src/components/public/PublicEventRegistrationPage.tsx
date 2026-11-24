@@ -77,14 +77,19 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
           setEvent(data);
 
           // Check if session has a pending registration for this event
-          const cachedRegJson = sessionStorage.getItem(`pending_reg_${eventId}`);
+          let cachedRegJson: string | null = null;
+          try {
+            cachedRegJson = sessionStorage.getItem(`pending_reg_${eventId}`);
+          } catch {}
           if (cachedRegJson) {
             try {
               const cachedReg = JSON.parse(cachedRegJson) as EventRegistration;
               if (cachedReg && cachedReg.id && cachedReg.eventId === eventId) {
                 if (cachedReg.isPaidEvent && cachedReg.paymentStatus === 'paid') {
                   setConfirmedRegistration(cachedReg);
-                  sessionStorage.removeItem(`pending_reg_${eventId}`);
+                  try {
+                    sessionStorage.removeItem(`pending_reg_${eventId}`);
+                  } catch {}
                 } else if (cachedReg.isPaidEvent && cachedReg.paymentStatus === 'waiting_confirmation') {
                   setPendingRegistration(cachedReg);
                 }
@@ -118,7 +123,9 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
         // Registration deleted by admin
         setPendingRegistration(null);
         setConfirmedRegistration(null);
-        sessionStorage.removeItem(`pending_reg_${eventId}`);
+        try {
+          sessionStorage.removeItem(`pending_reg_${eventId}`);
+        } catch {}
         return;
       }
 
@@ -127,19 +134,25 @@ export const PublicEventRegistrationPage: React.FC<PublicEventRegistrationPagePr
         if (updatedReg.paymentStatus === 'paid') {
           setConfirmedRegistration(updatedReg);
           setPendingRegistration(null);
-          sessionStorage.removeItem(`pending_reg_${eventId}`);
+          try {
+            sessionStorage.removeItem(`pending_reg_${eventId}`);
+          } catch {}
         } else {
           // Covers 'waiting_confirmation', 'rejected', 'expired' (including admin reversals from 'paid')
           setPendingRegistration(updatedReg);
           setConfirmedRegistration(null);
-          sessionStorage.setItem(`pending_reg_${eventId}`, JSON.stringify(updatedReg));
+          try {
+            sessionStorage.setItem(`pending_reg_${eventId}`, JSON.stringify(updatedReg));
+          } catch {}
         }
       } else {
         // For free events:
         if (updatedReg.status === 'confirmada' || updatedReg.paymentStatus === 'free') {
           setConfirmedRegistration(updatedReg);
           setPendingRegistration(null);
-          sessionStorage.removeItem(`pending_reg_${eventId}`);
+          try {
+            sessionStorage.removeItem(`pending_reg_${eventId}`);
+          } catch {}
         }
       }
     });

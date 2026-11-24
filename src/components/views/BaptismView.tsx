@@ -34,6 +34,11 @@ import {
   exportGeneralBaptismFichasPDF,
   exportSingleBaptismFichaPDF,
 } from '../../utils/baptismPdf.js';
+import {
+  buildPublicUrl,
+  copyTextSafely,
+  isRunningOnDevPreviewOrigin,
+} from '../../utils/publicUrl.js';
 
 const FORM_STATUS_META: Record<
   BaptismFormStatus,
@@ -130,8 +135,9 @@ export const BaptismView: React.FC = () => {
 
   const publicLink = useMemo(() => {
     if (typeof window === 'undefined') return '/?batismo=inscricao';
-    return `${window.location.origin}/?batismo=inscricao`;
+    return buildPublicUrl('/?batismo=inscricao');
   }, []);
+  const runningOnDevPreview = useMemo(() => isRunningOnDevPreviewOrigin(), []);
 
   useEffect(() => {
     let active = true;
@@ -234,18 +240,20 @@ export const BaptismView: React.FC = () => {
   };
 
   const handleCopyPublicLink = async () => {
-    try {
-      await navigator.clipboard.writeText(publicLink);
+    const copied = await copyTextSafely(publicLink);
+    if (copied) {
       setCopiedLink(true);
       notify('Link público do formulário de Batismo copiado!', 'success');
       setTimeout(() => setCopiedLink(false), 2500);
-    } catch {
+    } else {
       notify(`Copie o link: ${publicLink}`, 'info');
     }
   };
 
   const handleShareWhatsApp = () => {
-    const text = `Paz do Senhor! Preencha sua Ficha de Inscrição para o Batismo nas Águas pelo link oficial:\n${publicLink}`;
+    const text =
+      `Paz do Senhor! Preencha sua Ficha de Inscrição para o Batismo nas Águas pelo link oficial:\n${publicLink}\n\n` +
+      `Dica para iPhone: se o navegador do WhatsApp pedir permissão de segurança, toque no ícone da bússola (canto inferior direito) para abrir no Safari.`;
     const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
     const link = document.createElement('a');
     link.href = url;
@@ -578,6 +586,19 @@ export const BaptismView: React.FC = () => {
             </button>
           </div>
         </div>
+
+        <p className="text-[11px] text-neutral-400 leading-relaxed">
+          {runningOnDevPreview ? (
+            <>
+              <strong className="text-amber-300">Link público protegido contra bloqueios:</strong>{' '}
+              o botão &quot;Copiar Link&quot; e o QR Code já usam o endereço público compartilhável (em vez do link privado de edição). No iPhone, caso o navegador interno do WhatsApp exiba aviso de cookie, oriente tocar no ícone da bússola para abrir no <strong>Safari</strong>.
+            </>
+          ) : (
+            <>
+              No iPhone, se o navegador interno do WhatsApp bloquear cookies de segurança, oriente o candidato a tocar no ícone da bússola para abrir o link diretamente no <strong>Safari</strong>.
+            </>
+          )}
+        </p>
       </div>
 
       {/* Sub-navigation inside Batismo */}

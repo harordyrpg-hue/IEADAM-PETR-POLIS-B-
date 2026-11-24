@@ -169,6 +169,13 @@ export const PublicBaptismPage: React.FC = () => {
 
   useEffect(() => {
     let active = true;
+    const safetyTimer = window.setTimeout(() => {
+      if (active) {
+        setSettings((prev) => prev || api.getDefaultBaptismSettings());
+        setLoading(false);
+      }
+    }, 2500);
+
     api
       .getBaptismFormSettings()
       .then((initial) => {
@@ -193,6 +200,7 @@ export const PublicBaptismPage: React.FC = () => {
 
     return () => {
       active = false;
+      window.clearTimeout(safetyTimer);
       unsub();
     };
   }, []);
@@ -231,13 +239,18 @@ export const PublicBaptismPage: React.FC = () => {
     };
   }, [step, phonePhase]);
 
-  // Keep latest message scrolled into view inside the phone chat viewport
+  // Keep latest message scrolled into view inside the phone chat viewport (iOS-safe)
   useEffect(() => {
     if (step === 'animation' && phonePhase === 'chat' && chatScrollRef.current) {
-      chatScrollRef.current.scrollTo({
-        top: chatScrollRef.current.scrollHeight,
-        behavior: 'smooth',
-      });
+      const el = chatScrollRef.current;
+      try {
+        el.scrollTo({
+          top: el.scrollHeight,
+          behavior: 'smooth',
+        });
+      } catch {
+        el.scrollTop = el.scrollHeight;
+      }
     }
   }, [visibleCount, step, phonePhase]);
 
@@ -355,7 +368,11 @@ export const PublicBaptismPage: React.FC = () => {
     setVisibleCount(0);
     setChatPlaybackSeed((prev) => prev + 1);
     setStep('animation');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    try {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch {
+      window.scrollTo(0, 0);
+    }
   };
 
   // Passo 2 -> Clicar em Finalizar salva pro administrador automaticamente e encerra na confirmação
@@ -379,7 +396,11 @@ export const PublicBaptismPage: React.FC = () => {
       });
       setSubmittedRecord(created);
       setStep('confirmed');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      try {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch {
+        window.scrollTo(0, 0);
+      }
     } catch (err: any) {
       setFinishError(
         err?.message || 'Não foi possível finalizar sua inscrição. Tente novamente.'
@@ -399,7 +420,7 @@ export const PublicBaptismPage: React.FC = () => {
   // ==========================================
   if (loading) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-6 text-neutral-100">
+      <div className="min-h-screen min-h-[100dvh] bg-neutral-950 flex flex-col items-center justify-center p-6 text-neutral-100">
         <div className="w-12 h-12 rounded-xl bg-amber-500/20 text-amber-500 font-bold text-lg flex items-center justify-center border border-amber-500/30 animate-pulse mb-3">
           PTB
         </div>
@@ -416,7 +437,7 @@ export const PublicBaptismPage: React.FC = () => {
   // ==========================================
   if (settings?.status === 'pausado') {
     return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex items-center justify-center">
+      <div className="min-h-screen min-h-[100dvh] bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex items-center justify-center overflow-x-hidden">
         <div className="w-full max-w-xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
           <div className="h-3 w-full bg-amber-400" />
           <div className="p-6 sm:p-8 space-y-5 text-center">
@@ -451,7 +472,7 @@ export const PublicBaptismPage: React.FC = () => {
   // ==========================================
   if (settings?.status === 'fechado') {
     return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex items-center justify-center">
+      <div className="min-h-screen min-h-[100dvh] bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex items-center justify-center overflow-x-hidden">
         <div className="w-full max-w-xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
           <div className="h-3 w-full bg-red-600" />
           <div className="p-6 sm:p-8 space-y-5 text-center">
@@ -507,7 +528,7 @@ export const PublicBaptismPage: React.FC = () => {
     ];
 
     return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-8 px-4 sm:px-6 flex items-center justify-center relative overflow-hidden">
+      <div className="min-h-screen min-h-[100dvh] bg-neutral-950 text-neutral-100 pt-5 pb-[max(2rem,env(safe-area-inset-bottom))] sm:py-8 px-4 sm:px-6 flex items-center justify-center relative overflow-x-hidden overflow-y-auto">
         {/* Ambient Water Animation across the screen */}
         <WaterAnimationBackdrop fullHeight />
 
@@ -817,7 +838,7 @@ export const PublicBaptismPage: React.FC = () => {
   // ==========================================
   if (step === 'confirmed' && submittedRecord) {
     return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 py-8 sm:py-10 px-4 sm:px-6 flex items-center justify-center">
+      <div className="min-h-screen min-h-[100dvh] bg-neutral-950 text-neutral-100 pt-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:py-10 px-4 sm:px-6 flex items-center justify-center overflow-x-hidden">
         <div className="w-full max-w-xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
           <div className="h-3 w-full bg-amber-400" />
 
@@ -925,7 +946,7 @@ export const PublicBaptismPage: React.FC = () => {
   // 5. FORMULÁRIO PÚBLICO PADRÃO DO SITE (ETAPA 1)
   // ==========================================
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 py-6 sm:py-10 px-4 sm:px-6 flex flex-col items-center">
+    <div className="min-h-screen min-h-[100dvh] bg-neutral-950 text-neutral-100 pt-5 pb-[max(2rem,env(safe-area-inset-bottom))] sm:py-10 px-3 sm:px-6 flex flex-col items-center overflow-x-hidden">
       <div className="w-full max-w-2xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
         {/* Top Gradient Banner — idêntico ao padrão de Inscrição de Eventos */}
         <div className="p-6 sm:p-8 bg-gradient-to-br from-amber-950/80 via-neutral-900 to-neutral-950 border-b border-neutral-800">
@@ -1016,7 +1037,7 @@ export const PublicBaptismPage: React.FC = () => {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Seu nome completo"
-                  className="w-full pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-xs"
+                  className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
                 />
               </div>
             </div>
@@ -1034,7 +1055,7 @@ export const PublicBaptismPage: React.FC = () => {
                     required
                     value={birthDate}
                     onChange={(e) => handleBirthDateChange(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 text-xs"
+                    className="w-full min-h-[44px] appearance-none pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
                   />
                 </div>
               </div>
@@ -1045,13 +1066,14 @@ export const PublicBaptismPage: React.FC = () => {
                 </label>
                 <input
                   type="number"
+                  inputMode="numeric"
                   required
                   min={1}
                   max={120}
                   value={age}
                   onChange={(e) => setAge(e.target.value)}
                   placeholder="Ex: 18"
-                  className="w-full px-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-xs font-mono tabular-nums"
+                  className="w-full min-h-[44px] px-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs font-mono tabular-nums"
                 />
               </div>
 
@@ -1065,7 +1087,7 @@ export const PublicBaptismPage: React.FC = () => {
                       key={opt}
                       type="button"
                       onClick={() => setGender(opt)}
-                      className={`min-h-[38px] px-3 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
+                      className={`min-h-[44px] px-3 rounded-xl border text-sm sm:text-xs font-semibold transition-colors cursor-pointer ${
                         gender === opt
                           ? 'bg-amber-400 border-amber-400 text-neutral-950 font-bold'
                           : 'bg-neutral-950 border-neutral-700 text-neutral-300 hover:border-neutral-600'
@@ -1088,12 +1110,13 @@ export const PublicBaptismPage: React.FC = () => {
                   <Phone className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="tel"
+                    inputMode="tel"
                     required
                     maxLength={40}
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="(92) 99999-9999"
-                    className="w-full pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-xs font-mono tabular-nums"
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs font-mono tabular-nums"
                   />
                 </div>
               </div>
@@ -1111,7 +1134,7 @@ export const PublicBaptismPage: React.FC = () => {
                     value={congregation}
                     onChange={(e) => setCongregation(e.target.value)}
                     placeholder="Ex: IEADAM Petrópolis B"
-                    className="w-full pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-xs"
+                    className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
                   />
                 </div>
               </div>
@@ -1131,7 +1154,7 @@ export const PublicBaptismPage: React.FC = () => {
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   placeholder="Rua, número, bairro..."
-                  className="w-full pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-xs"
+                  className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
                 />
               </div>
             </div>
@@ -1154,7 +1177,7 @@ export const PublicBaptismPage: React.FC = () => {
                       ? 'Obrigatório para candidatos menores de 18 anos'
                       : 'Preencha caso o candidato seja menor de 18 anos'
                   }
-                  className="w-full pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-xs"
+                  className="w-full min-h-[44px] pl-9 pr-3 py-2.5 bg-neutral-950 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base sm:text-xs"
                 />
               </div>
             </div>

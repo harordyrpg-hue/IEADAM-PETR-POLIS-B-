@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { api } from '../../services/api.js';
+import { buildPublicUrl, copyTextSafely } from '../../utils/publicUrl.js';
 
 export const ShareModal: React.FC = () => {
   const { shareTarget, setShareTarget, notify } = useApp();
@@ -50,7 +51,7 @@ export const ShareModal: React.FC = () => {
         expiresAt,
       });
 
-      const fullUrl = `${window.location.origin}/#share=${share.token}`;
+      const fullUrl = buildPublicUrl(`/#share=${share.token}`);
       setGeneratedLink(fullUrl);
       notify('Link seguro gerado com sucesso!', 'success');
     } catch {
@@ -60,9 +61,9 @@ export const ShareModal: React.FC = () => {
     }
   };
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!generatedLink) return;
-    navigator.clipboard.writeText(generatedLink);
+    await copyTextSafely(generatedLink);
     setCopied(true);
     notify('Link copiado para a área de transferência', 'success');
     setTimeout(() => setCopied(false), 2000);

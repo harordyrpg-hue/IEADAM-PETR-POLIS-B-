@@ -37,6 +37,7 @@ import {
   Copy,
   Upload,
 } from 'lucide-react';
+import { buildPublicUrl, copyTextSafely } from '../../utils/publicUrl.js';
 
 type AdminChurchSubTab = 'profile' | 'announcements' | 'events' | 'articles' | 'gallery' | 'downloads';
 
@@ -475,16 +476,16 @@ export const ChurchAdminView: React.FC = () => {
         <div className="min-w-0">
           <span className="text-xs font-semibold text-amber-400 block">Link Público da Igreja</span>
           <span className="text-xs text-neutral-300 font-mono select-all truncate block mt-0.5">
-            {typeof window !== 'undefined' ? `${window.location.origin}/?site` : '/?site'}
+            {typeof window !== 'undefined' ? buildPublicUrl('/?site') : '/?site'}
           </span>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => {
-              const url = `${window.location.origin}/?site`;
-              navigator.clipboard.writeText(url);
+            onClick={async () => {
+              const url = buildPublicUrl('/?site');
+              await copyTextSafely(url);
               notifySuccess('Link copiado! Envie pelo WhatsApp ou redes sociais.');
             }}
             className="flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 text-xs font-bold transition-all cursor-pointer"

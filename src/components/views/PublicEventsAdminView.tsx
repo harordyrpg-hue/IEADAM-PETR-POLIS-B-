@@ -57,6 +57,7 @@ import { api } from '../../services/api.js';
 import { exportRegistrationTicketPDF, formatDateBR } from '../../utils/registrationTicketPdf.js';
 import { QrCheckInScannerModal } from '../events/QrCheckInScannerModal.js';
 import { jsPDF } from 'jspdf';
+import { buildPublicUrl, copyTextSafely } from '../../utils/publicUrl.js';
 
 export const PublicEventsAdminView: React.FC = () => {
   const {
@@ -175,11 +176,14 @@ export const PublicEventsAdminView: React.FC = () => {
   }, [selectedEventForAttendees?.id]);
 
   // Copy Public Form Link to Clipboard
-  const handleCopyLink = (event: PublicRegistrationEvent) => {
-    const origin = window.location.origin;
-    const publicUrl = `${origin}/?inscricao=${event.id}`;
-    navigator.clipboard.writeText(publicUrl);
-    notify('Link de inscrição copiado para a área de transferência!', 'success');
+  const handleCopyLink = async (event: PublicRegistrationEvent) => {
+    const publicUrl = buildPublicUrl(`/?inscricao=${event.id}`);
+    const copied = await copyTextSafely(publicUrl);
+    if (copied) {
+      notify('Link de inscrição copiado para a área de transferência!', 'success');
+    } else {
+      notify(`Copie o link: ${publicUrl}`, 'info');
+    }
   };
 
   // Open Form Preview inside the platform

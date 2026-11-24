@@ -342,6 +342,38 @@ export function drawBaptismFichaPage(
   );
 }
 
+function savePdfSafely(doc: jsPDF, filename: string): void {
+  const isIOS =
+    typeof navigator !== 'undefined' &&
+    (/iPad|iPhone|iPod/.test(navigator.userAgent || '') ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+  if (!isIOS) {
+    doc.save(filename);
+    return;
+  }
+
+  try {
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      try {
+        link.remove();
+        URL.revokeObjectURL(url);
+      } catch {}
+    }, 8000);
+  } catch {
+    doc.save(filename);
+  }
+}
+
 export function exportSingleBaptismFichaPDF(
   reg: BaptismRegistration,
   settings?: BaptismFormSettings | null
@@ -358,7 +390,7 @@ export function exportSingleBaptismFichaPDF(
     .replace(/[^a-zA-Z0-9_-]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 60);
-  doc.save(`Ficha_Batismo_${safeName || reg.id}.pdf`);
+  savePdfSafely(doc, `Ficha_Batismo_${safeName || reg.id}.pdf`);
 }
 
 export function exportGeneralBaptismFichasPDF(
@@ -380,5 +412,5 @@ export function exportGeneralBaptismFichasPDF(
   });
 
   const dateStr = new Date().toISOString().slice(0, 10);
-  doc.save(`Fichas_Batismo_${filenameSuffix}_${dateStr}.pdf`);
+  savePdfSafely(doc, `Fichas_Batismo_${filenameSuffix}_${dateStr}.pdf`);
 }

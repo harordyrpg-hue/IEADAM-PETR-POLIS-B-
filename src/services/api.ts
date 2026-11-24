@@ -795,15 +795,13 @@ function subscribeCollection<T>(
     },
     async (error) => {
       notifyQuotaIfNeeded(error);
-      if (isQuotaError(error)) {
-        console.warn(`Firestore onSnapshot quota fallback on ${col}:`, error?.message || error);
-        if (MIRRORED_COLLECTIONS.has(col)) {
+      console.warn(`Firestore onSnapshot warning on ${col}:`, error?.message || error);
+      if (MIRRORED_COLLECTIONS.has(col)) {
+        try {
           latestServerItems = await fetchServerCollection<any>(col);
           hasServerSnapshot = true;
           emitCombined();
-        }
-      } else {
-        console.error(`Firestore onSnapshot error on ${col}:`, error);
+        } catch {}
       }
     }
   );
@@ -5308,9 +5306,27 @@ export const api = {
 
   async getBaptismFormSettings(): Promise<BaptismFormSettings> {
     const defaults = api.getDefaultBaptismSettings();
+    const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T | null> =>
+      Promise.race([
+        promise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+      ]);
+
     try {
-      const existing = await getDocById<BaptismFormSettings>('baptism_settings', 'default');
-      return existing ? { ...defaults, ...existing } : defaults;
+      const serverPromise = fetchServerDoc<BaptismFormSettings>('baptism_settings', 'default').catch(
+        () => null
+      );
+      const fbPromise = getDocById<BaptismFormSettings>('baptism_settings', 'default').catch(
+        () => null
+      );
+
+      const existing = await withTimeout(fbPromise, 2500);
+      if (existing) {
+        return { ...defaults, ...existing };
+      }
+
+      const srv = await withTimeout(serverPromise, 1500);
+      return srv ? { ...defaults, ...srv } : defaults;
     } catch {
       return defaults;
     }
@@ -5445,8 +5461,24 @@ export const api = {
       updatedAt: now,
     };
 
-    await setDocById('baptism_registrations', id, record);
-    return record;
+    try {
+      await Promise.race([
+        setDocById('baptism_registrations', id, record),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('FIRESTORE_WRITE_TIMEOUT')), 7000)
+        ),
+      ]);
+      return record;
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      // Preserve permission-denied / Firestore security diagnostics verbatim
+      if (msg.includes('permission') || msg.includes('PERMISSION_DENIED')) {
+        throw err;
+      }
+      // On iOS/mobile network timeout or offline WebChannel stall, save to built-in app server so no registration is lost
+      await putServerDoc('baptism_registrations', id, { ...record, localOnly: true }, false);
+      return { ...record, localOnly: true } as BaptismRegistration;
+    }
   },
 
   subscribeBaptismRegistrations(callback: (list: BaptismRegistration[]) => void): () => void {
