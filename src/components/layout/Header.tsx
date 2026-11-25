@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Search, Menu, X, Tv, Square } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
+import { getDefaultTabForUser, isSecretariaRole } from '../../utils/accessControl.js';
 
 export const Header: React.FC = () => {
   const {
@@ -15,6 +16,7 @@ export const Header: React.FC = () => {
   } = useApp();
 
   const [avatarError, setAvatarError] = useState(false);
+  const isSecretaria = isSecretariaRole(user?.role);
 
   const initials = (user?.name || 'PT')
     .split(' ')
@@ -39,7 +41,7 @@ export const Header: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => setActiveTab('dashboard')}
+          onClick={() => setActiveTab(getDefaultTabForUser(user))}
           className="flex items-center gap-2 cursor-pointer text-left"
           title="Ir para a tela inicial"
         >
@@ -52,80 +54,102 @@ export const Header: React.FC = () => {
         </button>
       </div>
 
-      {/* Center: Global Search */}
-      <div className="flex-1 min-w-0 max-w-md mx-1 sm:mx-4">
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Pesquisar arquivos, eventos..."
-            className="w-full h-10 pl-9 pr-8 text-xs sm:text-sm bg-neutral-800/80 border border-neutral-700/70 rounded-xl text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-amber-500/80 focus:ring-1 focus:ring-amber-500/30 transition-colors truncate"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              aria-label="Limpar pesquisa"
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-200 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
+      {/* Center: Global Search (only for media workspace roles) */}
+      {!isSecretaria ? (
+        <div className="flex-1 min-w-0 max-w-md mx-1 sm:mx-4">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Pesquisar arquivos, eventos..."
+              className="w-full h-10 pl-9 pr-8 text-xs sm:text-sm bg-neutral-800/80 border border-neutral-700/70 rounded-xl text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-amber-500/80 focus:ring-1 focus:ring-amber-500/30 transition-colors truncate"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Limpar pesquisa"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-200 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex-1" />
+      )}
 
       {/* Right: Actions */}
       <div className="flex items-center gap-2 shrink-0">
         {/* Mobile Profile Avatar */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('profile')}
-          className="md:hidden w-9 h-9 rounded-full ring-1 ring-amber-500/40 hover:ring-amber-400 overflow-hidden bg-neutral-800 flex items-center justify-center transition-all cursor-pointer shrink-0"
-          title="Meu perfil"
-          aria-label="Abrir perfil"
-        >
-          {user?.avatar && !avatarError ? (
-            <img
-              src={user.avatar}
-              alt={user?.name || 'Perfil'}
-              onError={() => setAvatarError(true)}
-              referrerPolicy="no-referrer"
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <span className="text-xs font-bold text-amber-400">{initials}</span>
-          )}
-        </button>
+        {isSecretaria ? (
+          <div className="md:hidden w-9 h-9 rounded-full ring-1 ring-amber-500/40 overflow-hidden bg-neutral-800 flex items-center justify-center shrink-0">
+            {user?.avatar && !avatarError ? (
+              <img
+                src={user.avatar}
+                alt={user?.name || 'Perfil'}
+                onError={() => setAvatarError(true)}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-xs font-bold text-amber-400">{initials}</span>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setActiveTab('profile')}
+            className="md:hidden w-9 h-9 rounded-full ring-1 ring-amber-500/40 hover:ring-amber-400 overflow-hidden bg-neutral-800 flex items-center justify-center transition-all cursor-pointer shrink-0"
+            title="Meu perfil"
+            aria-label="Abrir perfil"
+          >
+            {user?.avatar && !avatarError ? (
+              <img
+                src={user.avatar}
+                alt={user?.name || 'Perfil'}
+                onError={() => setAvatarError(true)}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-xs font-bold text-amber-400">{initials}</span>
+            )}
+          </button>
+        )}
 
         {/* Desktop Screen transmission */}
-        <button
-          type="button"
-          onClick={toggleTransmission}
-          className={`hidden md:flex items-center gap-2 px-3.5 h-9 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-            isTransmitting
-              ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-400/60'
-              : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700'
-          }`}
-          title={
-            isTransmitting
-              ? 'Parar transmissão para o telão'
-              : 'Transmitir tela para o telão/projetor'
-          }
-        >
-          {isTransmitting ? (
-            <>
-              <Square className="w-3.5 h-3.5 fill-current" />
-              <span>Parar transmissão</span>
-            </>
-          ) : (
-            <>
-              <Tv className="w-4 h-4 text-amber-400" />
-              <span>Transmitir tela</span>
-            </>
-          )}
-        </button>
+        {!isSecretaria && (
+          <button
+            type="button"
+            onClick={toggleTransmission}
+            className={`hidden md:flex items-center gap-2 px-3.5 h-9 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              isTransmitting
+                ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-400/60'
+                : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700'
+            }`}
+            title={
+              isTransmitting
+                ? 'Parar transmissão para o telão'
+                : 'Transmitir tela para o telão/projetor'
+            }
+          >
+            {isTransmitting ? (
+              <>
+                <Square className="w-3.5 h-3.5 fill-current" />
+                <span>Parar transmissão</span>
+              </>
+            ) : (
+              <>
+                <Tv className="w-4 h-4 text-amber-400" />
+                <span>Transmitir tela</span>
+              </>
+            )}
+          </button>
+        )}
       </div>
     </header>
   );

@@ -35,6 +35,7 @@ import { PublicEventsAdminView } from '../views/PublicEventsAdminView.js';
 import { SecretariatView } from '../views/SecretariatView.js';
 import { PublicEventRegistrationPage } from '../public/PublicEventRegistrationPage.js';
 import { LoginView } from '../auth/LoginView.js';
+import { isSecretariaRole, sanitizeTabForUser } from '../../utils/accessControl.js';
 import {
   X,
   CheckCircle2,
@@ -303,8 +304,11 @@ const MainLayout: React.FC = () => {
     );
   }
 
+  const isSecretaria = isSecretariaRole(user?.role);
+
   const renderActiveView = () => {
-    switch (activeTab) {
+    const safeTab = sanitizeTabForUser(activeTab, user);
+    switch (safeTab) {
       case 'dashboard':
         return (
           <DashboardView
@@ -411,7 +415,9 @@ const MainLayout: React.FC = () => {
       case 'attendance':
         return <SecretariatView initialSubTab="attendance" />;
       default:
-        return (
+        return isSecretaria ? (
+          <SecretariatView />
+        ) : (
           <DashboardView
             onNewFolderClick={() => {
               setActiveTab('files');
@@ -436,12 +442,16 @@ const MainLayout: React.FC = () => {
 
       <MobileNav />
 
-      <UploadModal />
-      <FileDetailModal />
-      <PhotoLightbox />
-      <VideoPlayerModal />
-      <AudioPlayerModal />
-      <ShareModal />
+      {!isSecretaria && (
+        <>
+          <UploadModal />
+          <FileDetailModal />
+          <PhotoLightbox />
+          <VideoPlayerModal />
+          <AudioPlayerModal />
+          <ShareModal />
+        </>
+      )}
       <ScreenTransmissionWidget />
 
       {confirmDialog && (

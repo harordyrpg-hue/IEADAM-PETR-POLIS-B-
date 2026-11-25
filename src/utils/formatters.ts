@@ -73,6 +73,12 @@ export function getRoleBadgeStyle(role: string): { label: string; textClass: str
         textClass: 'text-blue-500 dark:text-blue-400',
         borderClass: 'border-blue-500/30',
       };
+    case 'secretaria':
+      return {
+        label: 'Secretaria',
+        textClass: 'text-cyan-500 dark:text-cyan-400',
+        borderClass: 'border-cyan-500/30',
+      };
     case 'media_member':
     default:
       return {

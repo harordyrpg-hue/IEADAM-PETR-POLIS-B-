@@ -15,6 +15,7 @@ import {
 } from '../types.js';
 import { api, onFirestoreQuotaAlert } from '../services/api.js';
 import { testConnection } from '../services/firebase.js';
+import { sanitizeTabForUser } from '../utils/accessControl.js';
 
 interface Toast {
   id: string;
@@ -135,7 +136,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [authLoading, setAuthLoading] = useState(true);
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [activeTab, setActiveTab] = useState<ViewTab>('dashboard');
+  const [activeTab, setActiveTabState] = useState<ViewTab>('dashboard');
+  const setActiveTab = useCallback(
+    (nextTab: ViewTab) => {
+      setActiveTabState(sanitizeTabForUser(nextTab, user));
+    },
+    [user]
+  );
+
+  useEffect(() => {
+    if (!user) return;
+    setActiveTabState((prev) => sanitizeTabForUser(prev, user));
+  }, [user]);
   const [allFiles, setAllFiles] = useState<FileRecord[]>([]);
   const [filesLoading, setFilesLoading] = useState<boolean>(true);
   const [isRealtimeActive, setIsRealtimeActive] = useState<boolean>(true);
@@ -409,6 +421,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (
       user.role === 'super_admin' ||
       (user.role === 'media_admin' && user.canManageFinances !== false) ||
+      (user.role === 'secretaria' && user.canManageFinances !== false) ||
       user.email?.toLowerCase().includes('pedro.martinss225') ||
       user.email?.toLowerCase().includes('emillycampos308')
     ) {
@@ -670,6 +683,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     user &&
     (user.role === 'super_admin' ||
       (user.role === 'media_admin' && user.canManageFinances !== false) ||
+      (user.role === 'secretaria' && user.canManageFinances !== false) ||
       user.email?.toLowerCase().includes('pedro.martinss225') ||
       user.email?.toLowerCase().includes('emillycampos308'))
   );

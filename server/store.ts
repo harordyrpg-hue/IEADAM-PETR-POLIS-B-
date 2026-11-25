@@ -36,7 +36,7 @@ export interface StoredUserRecord {
   id: string;
   name: string;
   email: string;
-  role: 'super_admin' | 'media_admin' | 'media_member';
+  role: 'super_admin' | 'media_admin' | 'media_member' | 'secretaria';
   roleLabel: string;
   avatar: string;
   status: 'active' | 'blocked';

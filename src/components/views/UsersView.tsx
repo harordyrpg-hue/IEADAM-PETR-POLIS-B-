@@ -179,7 +179,7 @@ export const UsersView: React.FC = () => {
       </div>
 
       {/* Hairline Permissions Legend */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-neutral-800 border border-neutral-800 rounded-2xl overflow-hidden">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-neutral-800 border border-neutral-800 rounded-2xl overflow-hidden">
         <div className="p-4 bg-neutral-900">
           <div className="text-amber-400 font-semibold text-xs mb-1">
             Super Administrador
@@ -195,6 +195,15 @@ export const UsersView: React.FC = () => {
           </div>
           <p className="text-[11px] text-neutral-400">
             Criação de eventos, pastas e organização de arquivos.
+          </p>
+        </div>
+
+        <div className="p-4 bg-neutral-900">
+          <div className="text-cyan-400 font-semibold text-xs mb-1">
+            Secretaria
+          </div>
+          <p className="text-[11px] text-neutral-400">
+            Acesso exclusivo a Secretaria, Eventos &amp; Inscrições e Agenda &amp; Escalas.
           </p>
         </div>
 
@@ -256,6 +265,7 @@ export const UsersView: React.FC = () => {
                       >
                         <option value="super_admin">Super Administrador</option>
                         <option value="media_admin">Administrador de Mídia</option>
+                        <option value="secretaria">Secretaria</option>
                         <option value="media_member">Membro da Mídia</option>
                       </select>
                       <button
@@ -277,17 +287,24 @@ export const UsersView: React.FC = () => {
                         <span className={`text-xs font-medium ${roleBadge.textClass}`}>
                           {u.roleLabel}
                         </span>
-                        {u.role !== 'super_admin' && isSuperAdmin && (
-                          <button
-                            onClick={() => handleToggleChurchPermission(u)}
-                            className={`px-2 py-1 rounded-lg text-[11px] font-medium border cursor-pointer ${
-                              u.canManageChurchPage
-                                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
-                                : 'bg-neutral-800 border-neutral-700 text-neutral-400'
-                            }`}
-                          >
-                            {u.canManageChurchPage ? 'Site: Sim' : 'Site: Não'}
-                          </button>
+                        {u.role === 'secretaria' ? (
+                          <span className="px-2 py-1 rounded-lg text-[11px] font-medium border bg-cyan-500/10 border-cyan-500/30 text-cyan-300">
+                            Acesso: 3 abas
+                          </span>
+                        ) : (
+                          u.role !== 'super_admin' &&
+                          isSuperAdmin && (
+                            <button
+                              onClick={() => handleToggleChurchPermission(u)}
+                              className={`px-2 py-1 rounded-lg text-[11px] font-medium border cursor-pointer ${
+                                u.canManageChurchPage
+                                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                                  : 'bg-neutral-800 border-neutral-700 text-neutral-400'
+                              }`}
+                            >
+                              {u.canManageChurchPage ? 'Site: Sim' : 'Site: Não'}
+                            </button>
+                          )
                         )}
                       </div>
 
@@ -385,6 +402,7 @@ export const UsersView: React.FC = () => {
                             >
                               <option value="super_admin">Super Administrador</option>
                               <option value="media_admin">Administrador de Mídia</option>
+                              <option value="secretaria">Secretaria</option>
                               <option value="media_member">Membro da Mídia</option>
                             </select>
                             <button
@@ -410,6 +428,10 @@ export const UsersView: React.FC = () => {
                         {u.role === 'super_admin' ? (
                           <span className="text-[11px] text-amber-300 font-medium">
                             Super Admin
+                          </span>
+                        ) : u.role === 'secretaria' ? (
+                          <span className="text-[11px] text-cyan-300 font-medium">
+                            Sem acesso (Secretaria)
                           </span>
                         ) : isSuperAdmin ? (
                           <button
@@ -548,6 +570,7 @@ export const UsersView: React.FC = () => {
                   className="w-full bg-neutral-800 border border-neutral-700 rounded-lg p-2.5 text-neutral-200 focus:outline-none focus:border-amber-500"
                 >
                   <option value="media_member">Membro da Mídia (Upload e visualização)</option>
+                  <option value="secretaria">Secretaria (Secretaria, Eventos e Agenda)</option>
                   <option value="media_admin">Administrador de Mídia (Organização e eventos)</option>
                   <option value="super_admin">Super Administrador (Controle irrestrito)</option>
                 </select>

@@ -96,7 +96,10 @@ export const ChurchCalendarView: React.FC<ChurchCalendarViewProps> = ({ teamMemb
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Role permissions
-  const isAuthorized = user?.role === 'super_admin' || user?.role === 'media_admin';
+  const isAuthorized =
+    user?.role === 'super_admin' ||
+    user?.role === 'media_admin' ||
+    user?.role === 'secretaria';
 
   // Holidays calculation for the current year
   const allHolidaysForYear = useMemo(() => {

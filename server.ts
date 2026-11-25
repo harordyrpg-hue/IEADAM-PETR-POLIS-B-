@@ -70,8 +70,15 @@ function verifyV1Credential(password: string, storedHash?: string | null): boole
   return actualDigest === expectedDigest;
 }
 
+const ELINES_SECRETARIA_EMAIL = 'elinesaraujo46@gmail.com';
+
 function sanitizeFirestoreUser(raw: any, docId: string) {
-  const { passwordHash: _ph, initialPasswordHash: _iph, ...rest } = raw || {};
+  const {
+    passwordHash: _ph,
+    initialPasswordHash: _iph,
+    secretariaRoleAssigned: _sra,
+    ...rest
+  } = raw || {};
   const passwordSetOnce = Boolean(raw?.passwordSetOnce);
   const mustChangePassword =
     typeof raw?.mustChangePassword === 'boolean' ? raw.mustChangePassword : !passwordSetOnce;
@@ -439,7 +446,10 @@ app.post('/api/auth/users', async (req, res) => {
   }
 
   const resolvedRole =
-    role === 'super_admin' || role === 'media_admin' || role === 'media_member'
+    role === 'super_admin' ||
+    role === 'media_admin' ||
+    role === 'media_member' ||
+    role === 'secretaria'
       ? role
       : 'media_member';
 
@@ -447,6 +457,7 @@ app.post('/api/auth/users', async (req, res) => {
     super_admin: 'Super Administrador',
     media_admin: 'Administrador de Mídia',
     media_member: 'Membro da Mídia',
+    secretaria: 'Secretaria',
   };
 
   try {
@@ -471,8 +482,11 @@ app.post('/api/auth/users', async (req, res) => {
           avatar ||
           'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
         status: 'active',
-        canManageChurchPage: resolvedRole === 'super_admin',
-        canManageFinances: resolvedRole === 'super_admin' || resolvedRole === 'media_admin',
+        canManageChurchPage: resolvedRole === 'super_admin' || resolvedRole === 'media_admin',
+        canManageFinances:
+          resolvedRole === 'super_admin' ||
+          resolvedRole === 'media_admin' ||
+          resolvedRole === 'secretaria',
         passwordHash: hashPassword(pass),
         createdAt: now,
         updatedAt: now,
@@ -567,9 +581,30 @@ app.post('/api/firestore-auth/login', async (req, res) => {
       }
     }
 
+    let effectiveRecord = record;
+    if (
+      cleanEmail === ELINES_SECRETARIA_EMAIL &&
+      !record.secretariaRoleAssigned &&
+      record.role !== 'secretaria'
+    ) {
+      const now = new Date().toISOString();
+      const migrationPatch = {
+        role: 'secretaria',
+        roleLabel: 'Secretaria',
+        canManageChurchPage: false,
+        canManageFinances: true,
+        secretariaRoleAssigned: true,
+        updatedAt: now,
+      };
+      effectiveRecord = { ...record, ...migrationPatch };
+      for (const m of matched) {
+        await fbSetDoc(fbDoc(db, 'users', m.id), migrationPatch, { merge: true }).catch(() => {});
+      }
+    }
+
     const user = sanitizeFirestoreUser(
       {
-        ...record,
+        ...effectiveRecord,
         email: cleanEmail,
         ...(SUPER_ADMIN_EMAIL_SET.has(cleanEmail)
           ? {

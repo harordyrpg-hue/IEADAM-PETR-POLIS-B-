@@ -8,7 +8,7 @@
         "uid": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "maxLength": 120 },
         "email": { "type": "string", "maxLength": 150 },
-        "role": { "type": "string", "enum": ["super_admin", "media_admin", "media_member"] },
+        "role": { "type": "string", "enum": ["super_admin", "media_admin", "media_member", "secretaria"] },
         "roleLabel": { "type": "string", "maxLength": 50 },
         "status": { "type": "string", "enum": ["active", "blocked"] },
         "avatar": { "type": "string", "maxLength": 1000 },

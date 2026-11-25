@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.js';
 import { ViewTab } from '../../types.js';
+import { isSecretariaRole, isTabAllowedForUser } from '../../utils/accessControl.js';
 
 interface NavItem {
   id: ViewTab;
@@ -68,6 +69,7 @@ export const Sidebar: React.FC = () => {
 
   const isSuperAdmin = user?.role === 'super_admin';
   const isMediaAdmin = user?.role === 'super_admin' || user?.role === 'media_admin';
+  const isSecretaria = isSecretariaRole(user?.role);
   const canManageChurch = isSuperAdmin || user?.canManageChurchPage === true;
 
   const pendingTasksCount = teamTasks.filter((t) => t.status !== 'concluido').length;
@@ -174,30 +176,52 @@ export const Sidebar: React.FC = () => {
         {/* Top Section: User + Upload + Theme */}
         <div className="p-3 border-b border-neutral-800 space-y-2.5">
           <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-neutral-800/50 border border-neutral-800">
-            <button
-              type="button"
-              onClick={() => handleNavClick('profile')}
-              className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition-opacity"
-              title="Abrir perfil"
-            >
-              <div className="w-9 h-9 rounded-full overflow-hidden bg-neutral-800 border border-amber-500/30 flex items-center justify-center shrink-0">
-                {user?.avatar && !avatarError ? (
-                  <img
-                    src={user.avatar}
-                    alt={user?.name || 'Perfil'}
-                    onError={() => setAvatarError(true)}
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="text-xs font-bold text-amber-400">{initials}</span>
-                )}
+            {isSecretaria ? (
+              <div className="flex items-center gap-2.5 min-w-0 flex-1 text-left">
+                <div className="w-9 h-9 rounded-full overflow-hidden bg-neutral-800 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  {user?.avatar && !avatarError ? (
+                    <img
+                      src={user.avatar}
+                      alt={user?.name || 'Perfil'}
+                      onError={() => setAvatarError(true)}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-xs font-bold text-amber-400">{initials}</span>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-neutral-100 truncate">{user?.name}</p>
+                  <p className="text-[11px] text-amber-400/90 truncate">{user?.roleLabel}</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-xs font-semibold text-neutral-100 truncate">{user?.name}</p>
-                <p className="text-[11px] text-amber-400/90 truncate">{user?.roleLabel}</p>
-              </div>
-            </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleNavClick('profile')}
+                className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition-opacity"
+                title="Abrir perfil"
+              >
+                <div className="w-9 h-9 rounded-full overflow-hidden bg-neutral-800 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  {user?.avatar && !avatarError ? (
+                    <img
+                      src={user.avatar}
+                      alt={user?.name || 'Perfil'}
+                      onError={() => setAvatarError(true)}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-xs font-bold text-amber-400">{initials}</span>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-neutral-100 truncate">{user?.name}</p>
+                  <p className="text-[11px] text-amber-400/90 truncate">{user?.roleLabel}</p>
+                </div>
+              </button>
+            )}
 
             <button
               type="button"
@@ -218,14 +242,16 @@ export const Sidebar: React.FC = () => {
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={handleUploadClick}
-            className="w-full flex items-center justify-center gap-2 min-h-[40px] py-2 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold text-xs transition-colors active:scale-[0.98] cursor-pointer"
-          >
-            <Upload className="w-4 h-4" />
-            <span>Enviar arquivos</span>
-          </button>
+          {!isSecretaria && (
+            <button
+              type="button"
+              onClick={handleUploadClick}
+              className="w-full flex items-center justify-center gap-2 min-h-[40px] py-2 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold text-xs transition-colors active:scale-[0.98] cursor-pointer"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Enviar arquivos</span>
+            </button>
+          )}
         </div>
 
         {/* Navigation list */}
@@ -234,6 +260,7 @@ export const Sidebar: React.FC = () => {
             if (section.superAdminOnly && !isSuperAdmin) return null;
 
             const visibleItems = section.items.filter((item) => {
+              if (!isTabAllowedForUser(item.id, user)) return false;
               if (item.superAdminOnly && !isSuperAdmin) return false;
               if (item.adminOnly && !isSuperAdmin && !isMediaAdmin) return false;
               if (item.churchAdminOnly && !canManageChurch) return false;

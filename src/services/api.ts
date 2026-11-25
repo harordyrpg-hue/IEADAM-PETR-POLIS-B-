@@ -1079,6 +1079,8 @@ const SUPER_ADMIN_EMAILS = new Set([
   'emillycampos308@gmail.com',
 ]);
 
+const ELINES_SECRETARIA_EMAIL = 'elinesaraujo46@gmail.com';
+
 function sha256HexFallback(input: string): string {
   const bytes = new TextEncoder().encode(input);
   const K = new Uint32Array([
@@ -1192,6 +1194,7 @@ type StoredUserRecord = User & {
   firestoreDocId?: string;
   passwordHash?: string;
   initialPasswordHash?: string;
+  secretariaRoleAssigned?: boolean;
 };
 
 function sanitizeUserRecord(raw: StoredUserRecord): User {
@@ -1199,6 +1202,7 @@ function sanitizeUserRecord(raw: StoredUserRecord): User {
     passwordHash: _ph,
     initialPasswordHash: _iph,
     firestoreDocId: _fid,
+    secretariaRoleAssigned: _sra,
     ...rest
   } = raw;
   const passwordSetOnce = Boolean(raw.passwordSetOnce);
@@ -1211,6 +1215,49 @@ function sanitizeUserRecord(raw: StoredUserRecord): User {
     passwordSetOnce,
     mustChangePassword: passwordSetOnce ? false : mustChangePassword,
   };
+}
+
+async function applyElinesSecretariaMigration(
+  record: StoredUserRecord,
+  targetIds: string[]
+): Promise<StoredUserRecord> {
+  const clean = (record.email || '').trim().toLowerCase();
+  if (
+    clean === ELINES_SECRETARIA_EMAIL &&
+    !record.secretariaRoleAssigned &&
+    record.role !== 'secretaria'
+  ) {
+    const now = new Date().toISOString();
+    const migrated: StoredUserRecord = {
+      ...record,
+      role: 'secretaria',
+      roleLabel: 'Secretaria',
+      canManageChurchPage: false,
+      canManageFinances: true,
+      secretariaRoleAssigned: true,
+      updatedAt: now,
+    };
+    const uniqueIds = Array.from(new Set(targetIds.filter(Boolean)));
+    await Promise.all(
+      uniqueIds.map((docId) =>
+        setDocById(
+          'users',
+          docId,
+          {
+            role: 'secretaria',
+            roleLabel: 'Secretaria',
+            canManageChurchPage: false,
+            canManageFinances: true,
+            secretariaRoleAssigned: true,
+            updatedAt: now,
+          },
+          true
+        ).catch(() => {})
+      )
+    );
+    return migrated;
+  }
+  return record;
 }
 
 function pickCanonicalUserDoc(docs: { id: string; data: StoredUserRecord }[]): { id: string; data: StoredUserRecord } | null {
@@ -1300,17 +1347,18 @@ function getInitialAdminDefaults(email: string, uid: string, displayName?: strin
       updatedAt: now,
     };
   }
-  if (clean === 'elinesaraujo46@gmail.com') {
+  if (clean === ELINES_SECRETARIA_EMAIL) {
     return {
       uid,
       id: uid,
       name: displayName || 'Elines Araujo',
       email: clean,
-      role: 'media_admin',
-      roleLabel: 'Administrador',
+      role: 'secretaria',
+      roleLabel: 'Secretaria',
       avatar: photoUrl || '',
       status: 'active',
       canManageChurchPage: false,
+      canManageFinances: true,
       mustChangePassword: true,
       passwordSetOnce: false,
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -1535,13 +1583,14 @@ export const api = {
     // 1. Direct lookup by Firebase Auth UID / Document ID
     const direct = await getDocById<StoredUserRecord>('users', uid).catch(() => null);
     if (direct) {
+      const migratedDirect = await applyElinesSecretariaMigration(direct, [uid]);
       const normalized = sanitizeUserRecord({
-        ...direct,
+        ...migratedDirect,
         uid,
         id: uid,
-        name: direct.name || displayName || cleanEmail || 'Membro',
-        email: direct.email || cleanEmail,
-        avatar: direct.avatar || photoUrl || '',
+        name: migratedDirect.name || displayName || cleanEmail || 'Membro',
+        email: migratedDirect.email || cleanEmail,
+        avatar: migratedDirect.avatar || photoUrl || '',
         ...(SUPER_ADMIN_EMAILS.has(cleanEmail)
           ? {
               role: 'super_admin' as UserRole,
@@ -1561,7 +1610,10 @@ export const api = {
         const matchedDocs = await findUserDocsByEmail(cleanEmail);
         const canonical = pickCanonicalUserDoc(matchedDocs);
         if (canonical) {
-          const data = canonical.data;
+          const data = await applyElinesSecretariaMigration(
+            canonical.data,
+            matchedDocs.map((m) => m.id)
+          );
           const targetUid = canonical.id || uid;
           const sanitized = sanitizeUserRecord({
             ...data,
@@ -1625,10 +1677,11 @@ export const api = {
       }
       if (!record) return null;
 
+      const migratedRecord = await applyElinesSecretariaMigration(record, [targetId]);
       const sanitized = sanitizeUserRecord({
-        ...record,
-        uid: record.uid || targetId,
-        id: record.id || targetId,
+        ...migratedRecord,
+        uid: migratedRecord.uid || targetId,
+        id: migratedRecord.id || targetId,
       });
       persistSessionUser(sanitized);
       return sanitized;
@@ -1755,10 +1808,15 @@ export const api = {
         }
       }
 
+      const migratedRecord = await applyElinesSecretariaMigration(
+        record,
+        matchedDocs.map((m) => m.id)
+      );
+
       const sanitized = sanitizeUserRecord({
-        ...record,
-        uid: record.uid || canonical.id,
-        id: record.id || canonical.id,
+        ...migratedRecord,
+        uid: migratedRecord.uid || canonical.id,
+        id: migratedRecord.id || canonical.id,
         email: cleanEmail,
         ...(SUPER_ADMIN_EMAILS.has(cleanEmail)
           ? {
@@ -2045,7 +2103,8 @@ export const api = {
       const byKey = new Map<string, User>();
       for (const raw of list) {
         const docId = raw.firestoreDocId || raw.uid || raw.id || '';
-        const item = sanitizeUserRecord(raw);
+        const migrated = await applyElinesSecretariaMigration(raw, [docId]);
+        const item = sanitizeUserRecord(migrated);
         const key = (item.email || item.uid).toLowerCase();
         const existing = byKey.get(key);
         const isLegacy = docId.startsWith('admin_') || docId.startsWith('user_');
@@ -2088,6 +2147,7 @@ export const api = {
       super_admin: 'Super Administrador',
       media_admin: 'Administrador de Mídia',
       media_member: 'Membro da Mídia',
+      secretaria: 'Secretaria',
     };
 
     const createdUid = `member_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -2107,7 +2167,8 @@ export const api = {
         'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
       status: 'active',
       canManageChurchPage: data.role === 'super_admin' || data.role === 'media_admin',
-      canManageFinances: data.role === 'super_admin' || data.role === 'media_admin',
+      canManageFinances:
+        data.role === 'super_admin' || data.role === 'media_admin' || data.role === 'secretaria',
       mustChangePassword: true,
       passwordSetOnce: false,
       ...(initialPasswordHash ? { initialPasswordHash } : {}),
@@ -2161,6 +2222,7 @@ export const api = {
       super_admin: 'Super Administrador',
       media_admin: 'Administrador de Mídia',
       media_member: 'Membro da Mídia',
+      secretaria: 'Secretaria',
     };
     const now = new Date().toISOString();
     const docData = await getDocById<StoredUserRecord>('users', uid).catch(() => null);
@@ -2174,6 +2236,9 @@ export const api = {
         role,
         roleLabel: roleLabels[role],
         canManageChurchPage: role === 'super_admin' || role === 'media_admin',
+        canManageFinances:
+          role === 'super_admin' || role === 'media_admin' || role === 'secretaria',
+        secretariaRoleAssigned: true,
         updatedAt: now,
       }).catch(() => {});
     }
