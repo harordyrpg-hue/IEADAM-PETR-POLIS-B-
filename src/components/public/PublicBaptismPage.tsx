@@ -1,42 +1,26 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
-  ArrowLeft,
-  BatteryFull,
-  Bell,
-  BookOpen,
   Building,
   Calendar,
-  Camera,
-  CheckCheck,
   CheckCircle2,
   ChevronRight,
   Clock,
   CreditCard,
   Download,
-  Droplets,
   Heart,
   Home,
-  Image as ImageIcon,
   Lock,
   MapPin,
-  MessageCircle,
-  Music,
   Phone,
-  RotateCcw,
-  Settings,
   ShieldCheck,
-  Signal,
-  Sparkles,
   User,
   UserPlus,
   Users,
-  Wifi,
 } from 'lucide-react';
 import { BaptismFormSettings, BaptismRegistration } from '../../types.js';
 import { api } from '../../services/api.js';
 import { exportSingleBaptismFichaPDF } from '../../utils/baptismPdf.js';
-import { PixelBaptismAnimation } from './PixelBaptismAnimation.js';
 
 function formatCPF(raw: string): string {
   const digits = raw.replace(/\D/g, '').slice(0, 11);
@@ -70,88 +54,7 @@ function formatDateBR(dateStr?: string | null): string {
   return dateStr;
 }
 
-const WaterAnimationBackdrop: React.FC<{ fullHeight?: boolean }> = ({
-  fullHeight = false,
-}) => (
-  <div
-    aria-hidden="true"
-    className="pointer-events-none absolute inset-0 overflow-hidden select-none"
-  >
-    {/* Deep baptism water gradient glow */}
-    <div className="absolute inset-0 bg-gradient-to-b from-sky-950/40 via-cyan-950/25 to-sky-900/45" />
-
-    {/* Rising water droplets */}
-    <div
-      className="animate-water-droplet absolute bottom-10 left-[10%] w-2 h-2 rounded-full bg-sky-300/65"
-      style={{ animationDelay: '0s' }}
-    />
-    <div
-      className="animate-water-droplet absolute bottom-16 left-[24%] w-1.5 h-1.5 rounded-full bg-cyan-200/55"
-      style={{ animationDelay: '0.9s' }}
-    />
-    <div
-      className="animate-water-droplet absolute bottom-8 left-[45%] w-2.5 h-2.5 rounded-full bg-sky-400/50"
-      style={{ animationDelay: '1.6s' }}
-    />
-    <div
-      className="animate-water-droplet absolute bottom-14 left-[68%] w-1.5 h-1.5 rounded-full bg-cyan-300/60"
-      style={{ animationDelay: '0.5s' }}
-    />
-    <div
-      className="animate-water-droplet absolute bottom-6 left-[85%] w-2 h-2 rounded-full bg-sky-200/55"
-      style={{ animationDelay: '2.2s' }}
-    />
-
-    {/* Multi-layer flowing SVG waves */}
-    <div
-      className={`absolute bottom-0 left-0 right-0 ${
-        fullHeight ? 'h-28 sm:h-36' : 'h-16 sm:h-20'
-      } overflow-hidden`}
-    >
-      <svg
-        viewBox="0 0 1200 120"
-        preserveAspectRatio="none"
-        className="animate-water-wave absolute bottom-0 left-0 w-[200%] h-full opacity-40"
-      >
-        <path
-          d="M0,48 C150,92 300,8 450,52 C600,96 750,12 900,52 C1050,92 1150,24 1200,48 L1200,120 L0,120 Z"
-          fill="#0284c7"
-        />
-      </svg>
-      <svg
-        viewBox="0 0 1200 120"
-        preserveAspectRatio="none"
-        className="animate-water-wave-reverse absolute bottom-0 left-0 w-[200%] h-[82%] opacity-45"
-      >
-        <path
-          d="M0,64 C160,18 320,104 480,58 C640,12 800,100 960,56 C1080,22 1160,76 1200,64 L1200,120 L0,120 Z"
-          fill="#06b6d4"
-        />
-      </svg>
-      <svg
-        viewBox="0 0 1200 120"
-        preserveAspectRatio="none"
-        className="animate-water-wave absolute bottom-0 left-0 w-[200%] h-[58%] opacity-35"
-        style={{ animationDuration: '8.5s' }}
-      >
-        <path
-          d="M0,72 C180,32 340,106 540,68 C740,30 920,102 1200,72 L1200,120 L0,120 Z"
-          fill="#38bdf8"
-        />
-      </svg>
-    </div>
-  </div>
-);
-
-interface ChatLine {
-  id: number;
-  sender: 'espirito' | 'candidato';
-  speaker: string;
-  text: string;
-}
-
-type FormStep = 'form' | 'animation' | 'confirmed';
-type PhonePhase = 'homescreen' | 'notification' | 'chat';
+type FormStep = 'form' | 'confirmed';
 
 export const PublicBaptismPage: React.FC = () => {
   const [settings, setSettings] = useState<BaptismFormSettings | null>(null);
@@ -178,17 +81,7 @@ export const PublicBaptismPage: React.FC = () => {
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [finishError, setFinishError] = useState<string | null>(null);
   const [submittedRecord, setSubmittedRecord] = useState<BaptismRegistration | null>(null);
-
-  // Animação da tela de celular + notificação + app de mensagens (executado APÓS "Enviar Inscrição")
-  const [phonePhase, setPhonePhase] = useState<PhonePhase>('homescreen');
-  const [visibleCount, setVisibleCount] = useState(0);
-  const [chatPlaybackSeed, setChatPlaybackSeed] = useState(0);
-  const [chatTimeLabel] = useState(() =>
-    new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  );
-  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -228,55 +121,6 @@ export const PublicBaptismPage: React.FC = () => {
     };
   }, []);
 
-  // Show smartphone home screen briefly, then drop in "Mensagem de um amigo" notification
-  useEffect(() => {
-    if (step !== 'animation') return;
-    setPhonePhase('homescreen');
-    setVisibleCount(0);
-
-    const notifTimer = window.setTimeout(() => {
-      setPhonePhase('notification');
-    }, 1300);
-
-    return () => window.clearTimeout(notifTimer);
-  }, [step, chatPlaybackSeed]);
-
-  // Sequential messaging-app playback with slower, comfortable reading pace after tapping "Abrir Mensagem"
-  useEffect(() => {
-    if (step !== 'animation' || phonePhase !== 'chat') return;
-
-    setVisibleCount(0);
-    const timers: number[] = [];
-    // Delays cumulativos em ms: leitura confortável e cadência natural de digitação
-    const delays = [600, 3200, 6400, 10400, 15200, 19200];
-
-    delays.forEach((delay, idx) => {
-      const t = window.setTimeout(() => {
-        setVisibleCount(idx + 1);
-      }, delay);
-      timers.push(t);
-    });
-
-    return () => {
-      timers.forEach((t) => window.clearTimeout(t));
-    };
-  }, [step, phonePhase]);
-
-  // Keep latest message scrolled into view inside the phone chat viewport (iOS-safe)
-  useEffect(() => {
-    if (step === 'animation' && phonePhase === 'chat' && chatScrollRef.current) {
-      const el = chatScrollRef.current;
-      try {
-        el.scrollTo({
-          top: el.scrollHeight,
-          behavior: 'smooth',
-        });
-      } catch {
-        el.scrollTop = el.scrollHeight;
-      }
-    }
-  }, [visibleCount, step, phonePhase]);
-
   const numericAge = Number(age);
   const isMinor = Boolean(age !== '' && !Number.isNaN(numericAge) && numericAge < 18);
 
@@ -304,59 +148,14 @@ export const PublicBaptismPage: React.FC = () => {
     setGuardianName('');
     setDeclarationAccepted(false);
     setFormError(null);
-    setFinishError(null);
     setSubmittedRecord(null);
-    setVisibleCount(0);
-    setPhonePhase('homescreen');
     setStep('form');
   };
 
-  const candidateFirstName = fullName.trim().split(/\s+/)[0] || 'amigo(a)';
-  const candidateDisplayName = fullName.trim() || 'Candidato(a)';
-  const chatMessages: ChatLine[] = [
-    {
-      id: 1,
-      sender: 'espirito',
-      speaker: 'Espírito Santo',
-      text: `Olá, ${candidateFirstName}! Qual é a boa? 😁`,
-    },
-    {
-      id: 2,
-      sender: 'candidato',
-      speaker: candidateFirstName,
-      text: 'Tenho uma novidade! Vou me batizar nas águas!',
-    },
-    {
-      id: 3,
-      sender: 'espirito',
-      speaker: 'Espírito Santo',
-      text: 'Que daora! ❤️ Estou muito feliz com essa notícia incrível! Quando será?',
-    },
-    {
-      id: 4,
-      sender: 'candidato',
-      speaker: candidateFirstName,
-      text: 'Será no dia 06 de dezembro, na Congregação Canaã. Você é meu convidado de honra! Quero ter você ao meu lado durante todo esse momento especial. 😁',
-    },
-    {
-      id: 5,
-      sender: 'espirito',
-      speaker: 'Espírito Santo',
-      text: 'Pode deixar! Estarei com você o tempo todo, nunca sairei do seu lado. Você vai nascer de novo e viver uma nova vida com Deus! ❤️',
-    },
-    {
-      id: 6,
-      sender: 'candidato',
-      speaker: candidateFirstName,
-      text: 'Te vejo lá, meu melhor amigo! ❤️',
-    },
-  ];
-
-  // Passo 1 -> Validar formulário e abrir tela da animação + chat
-  const handleProceedToAnimation = (e: React.FormEvent) => {
+  // Validar e salvar inscrição diretamente, abrindo a tela de confirmação
+  const handleSubmitRegistration = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    setFinishError(null);
 
     if (!fullName.trim()) {
       setFormError('Por favor, informe seu Nome Completo.');
@@ -421,20 +220,6 @@ export const PublicBaptismPage: React.FC = () => {
       return;
     }
 
-    setVisibleCount(0);
-    setChatPlaybackSeed((prev) => prev + 1);
-    setStep('animation');
-    try {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch {
-      window.scrollTo(0, 0);
-    }
-  };
-
-  // Passo 2 -> Clicar em Finalizar salva pro administrador automaticamente e encerra na confirmação
-  const handleFinalizeRegistration = async () => {
-    if (!gender) return;
-    setFinishError(null);
     try {
       setSubmitting(true);
       const created = await api.submitPublicBaptismRegistration({
@@ -465,8 +250,8 @@ export const PublicBaptismPage: React.FC = () => {
         window.scrollTo(0, 0);
       }
     } catch (err: any) {
-      setFinishError(
-        err?.message || 'Não foi possível finalizar sua inscrição. Tente novamente.'
+      setFormError(
+        err?.message || 'Não foi possível enviar sua inscrição. Tente novamente.'
       );
     } finally {
       setSubmitting(false);
@@ -569,338 +354,7 @@ export const PublicBaptismPage: React.FC = () => {
   }
 
   // ==========================================
-  // 3. TELA DA ANIMAÇÃO DE CELULAR + NOTIFICAÇÃO + APP DE MENSAGENS
-  // ==========================================
-  if (step === 'animation') {
-    const isTypingNext = phonePhase === 'chat' && visibleCount < chatMessages.length;
-    const nextSenderIsSpirit = chatMessages[visibleCount]?.sender === 'espirito';
-    const chatFinished = phonePhase === 'chat' && visibleCount >= chatMessages.length;
-
-    const phoneApps = [
-      { id: 'biblia', name: 'Bíblia', icon: BookOpen, bg: 'bg-sky-500/20 text-sky-300 border-sky-400/30' },
-      { id: 'fotos', name: 'Fotos', icon: ImageIcon, bg: 'bg-rose-500/20 text-rose-300 border-rose-400/30' },
-      { id: 'louvor', name: 'Louvor', icon: Music, bg: 'bg-violet-500/20 text-violet-300 border-violet-400/30' },
-      { id: 'agenda', name: 'Agenda', icon: Calendar, bg: 'bg-amber-500/20 text-amber-300 border-amber-400/30' },
-      { id: 'camera', name: 'Câmera', icon: Camera, bg: 'bg-neutral-800 text-neutral-200 border-neutral-700' },
-      { id: 'igreja', name: 'Igreja', icon: Building, bg: 'bg-indigo-500/20 text-indigo-300 border-indigo-400/30' },
-      { id: 'ajustes', name: 'Ajustes', icon: Settings, bg: 'bg-neutral-800 text-neutral-300 border-neutral-700' },
-      {
-        id: 'mensagens',
-        name: 'Mensagens',
-        icon: MessageCircle,
-        bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40',
-        hasUnread: phonePhase === 'notification',
-      },
-    ];
-
-    return (
-      <div className="min-h-screen min-h-[100dvh] bg-neutral-950 text-neutral-100 pt-5 pb-[max(2rem,env(safe-area-inset-bottom))] sm:py-8 px-4 sm:px-6 flex items-center justify-center relative overflow-x-hidden overflow-y-auto">
-        {/* Ambient Water Animation across the screen */}
-        <WaterAnimationBackdrop fullHeight />
-
-        <div className="relative z-10 w-full max-w-md space-y-5 flex flex-col items-center">
-          {/* Top Title & Replay Pill */}
-          <div className="w-full flex items-center justify-between gap-3 px-1">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-sky-500/20 border border-sky-400/40 text-sky-300 flex items-center justify-center shrink-0">
-                <Droplets className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 shrink-0" />
-                  <span className="truncate">Batismo nas Águas</span>
-                </div>
-                <p className="text-xs font-semibold text-neutral-200 truncate">
-                  {candidateDisplayName}
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setChatPlaybackSeed((prev) => prev + 1)}
-              className="inline-flex items-center gap-1.5 px-3 min-h-[34px] rounded-xl bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-700 text-[11px] font-semibold text-neutral-200 cursor-pointer shrink-0 transition-colors"
-              title="Rever animação do celular"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-sky-300" />
-              <span>Rever</span>
-            </button>
-          </div>
-
-          {/* SMARTPHONE FRAME */}
-          <div className="w-full max-w-[360px] rounded-[2.5rem] p-2.5 bg-neutral-900 border-[4px] border-neutral-700/80 shadow-[0_24px_60px_rgba(0,0,0,0.75)]">
-            <div className="relative rounded-[2rem] bg-neutral-950 border border-neutral-800 overflow-hidden flex flex-col min-h-[540px]">
-              {/* Smartphone Status Bar & Dynamic Notch */}
-              <div className="relative px-5 pt-3 pb-2 bg-neutral-950/95 flex items-center justify-between text-[11px] font-mono tabular-nums text-neutral-200 z-20 shrink-0">
-                <span>{chatTimeLabel}</span>
-                <div className="w-20 h-4 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
-                  <span className="w-2 h-2 rounded-full bg-neutral-700" />
-                </div>
-                <div className="flex items-center gap-1.5 text-neutral-300">
-                  <Signal className="w-3 h-3" />
-                  <Wifi className="w-3 h-3" />
-                  <BatteryFull className="w-3.5 h-3.5 text-emerald-400" />
-                </div>
-              </div>
-
-              {/* PHASE A & B: PHONE HOME SCREEN WITH ICONS + NOTIFICATION */}
-              {phonePhase !== 'chat' ? (
-                <div className="relative flex-1 flex flex-col justify-between p-5 bg-gradient-to-b from-sky-950/70 via-neutral-950 to-neutral-950 overflow-hidden">
-                  {/* Subtle animated water glow behind phone icons */}
-                  <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute -bottom-16 -left-10 -right-10 h-44 rounded-full bg-sky-500/10 blur-2xl"
-                  />
-
-                  {/* Incoming Push Notification Banner ("Mensagem de um amigo") */}
-                  {phonePhase === 'notification' ? (
-                    <div className="animate-in slide-in-from-top-5 fade-in duration-300 rounded-2xl bg-neutral-900/95 backdrop-blur-md border border-sky-400/50 p-3.5 shadow-2xl space-y-2.5 z-20">
-                      <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-emerald-500 text-neutral-950 flex items-center justify-center shrink-0 shadow-md animate-bounce">
-                          <Bell className="w-4 h-4 stroke-[2.5]" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                              Nova Notificação
-                            </span>
-                            <span className="text-[10px] text-neutral-400">agora</span>
-                          </div>
-                          <p className="text-xs font-bold text-neutral-100 mt-0.5">
-                            Mensagem de um amigo
-                          </p>
-                          <p className="text-[11px] text-neutral-300 mt-0.5">
-                            Alguém especial acabou de te mandar uma mensagem...
-                          </p>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setPhonePhase('chat')}
-                        className="w-full min-h-[38px] px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition-transform active:scale-95 cursor-pointer"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5 stroke-[2.5]" />
-                        <span>Abrir Mensagem</span>
-                      </button>
-                    </div>
-                  ) : (
-                    /* Lock/Home Clock Display while waiting for notification */
-                    <div className="pt-4 text-center space-y-1 animate-in fade-in duration-300">
-                      <div className="text-4xl font-bold font-mono tabular-nums tracking-tight text-neutral-100">
-                        {chatTimeLabel}
-                      </div>
-                      <p className="text-[11px] text-sky-300/80 font-medium">
-                        IEADAM Petrópolis B · Batismo nas Águas
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Phone App Icons Grid */}
-                  <div className="relative z-10 py-4">
-                    <div className="grid grid-cols-4 gap-3.5">
-                      {phoneApps.map((app) => {
-                        const Icon = app.icon;
-                        const clickable = app.id === 'mensagens' && phonePhase === 'notification';
-                        return (
-                          <button
-                            key={app.id}
-                            type="button"
-                            onClick={() => {
-                              if (clickable) setPhonePhase('chat');
-                            }}
-                            disabled={!clickable}
-                            className={`flex flex-col items-center gap-1.5 ${
-                              clickable ? 'cursor-pointer group' : 'cursor-default'
-                            }`}
-                          >
-                            <div
-                              className={`relative w-12 h-12 rounded-2xl border flex items-center justify-center transition-transform ${
-                                app.bg
-                              } ${clickable ? 'group-hover:scale-105 ring-2 ring-amber-400/70' : ''}`}
-                            >
-                              <Icon className="w-5 h-5" />
-                              {app.hasUnread && (
-                                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow">
-                                  1
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-[10px] text-neutral-300 font-medium truncate max-w-full">
-                              {app.name}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Phone Home Indicator Bar */}
-                  <div className="flex justify-center pt-1">
-                    <div className="w-28 h-1 rounded-full bg-neutral-700" />
-                  </div>
-                </div>
-              ) : (
-                /* PHASE C: MESSAGING APP OPENED */
-                <div className="flex-1 flex flex-col bg-neutral-950 animate-in fade-in duration-300">
-                  {/* Messaging App Header */}
-                  <div className="px-4 py-3 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between gap-2 shrink-0">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="relative w-9 h-9 rounded-full bg-gradient-to-br from-sky-400 to-cyan-500 text-neutral-950 font-extrabold text-xs flex items-center justify-center shrink-0 shadow-sm">
-                        ES
-                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-neutral-900" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-neutral-100 truncate">
-                          Espírito Santo
-                        </p>
-                        <p className="text-[10px] text-emerald-400 font-medium truncate">
-                          {isTypingNext && nextSenderIsSpirit
-                            ? 'digitando...'
-                            : 'online agora'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <span className="text-[10px] font-mono tabular-nums text-neutral-500 shrink-0">
-                      Hoje
-                    </span>
-                  </div>
-
-                  {/* Chat Messages Feed */}
-                  <div
-                    ref={chatScrollRef}
-                    className="flex-1 p-3.5 space-y-3 overflow-y-auto max-h-[395px] bg-[radial-gradient(ellipse_at_top,_rgba(14,165,233,0.1),_transparent_75%)]"
-                  >
-                    {chatMessages.slice(0, visibleCount).map((msg) => {
-                      const isSpirit = msg.sender === 'espirito';
-                      return (
-                        <div
-                          key={msg.id}
-                          className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${
-                            isSpirit ? 'items-start' : 'items-end'
-                          }`}
-                        >
-                          <span
-                            className={`text-[10px] font-bold mb-1 px-1 ${
-                              isSpirit ? 'text-sky-300' : 'text-amber-300'
-                            }`}
-                          >
-                            {msg.speaker}
-                          </span>
-                          <div
-                            className={`max-w-[88%] px-3 py-2 rounded-2xl text-xs leading-relaxed shadow-sm ${
-                              isSpirit
-                                ? 'bg-neutral-900 border border-sky-500/35 text-neutral-100 rounded-tl-sm'
-                                : 'bg-amber-400 text-neutral-950 font-semibold rounded-tr-sm'
-                            }`}
-                          >
-                            <p>{msg.text}</p>
-                            <div
-                              className={`mt-1 flex items-center justify-end gap-1 text-[10px] font-mono tabular-nums ${
-                                isSpirit ? 'text-neutral-500' : 'text-neutral-900/70'
-                              }`}
-                            >
-                              <span>{chatTimeLabel}</span>
-                              {!isSpirit && <CheckCheck className="w-3.5 h-3.5 text-sky-800" />}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {isTypingNext && (
-                      <div
-                        className={`flex flex-col ${
-                          nextSenderIsSpirit ? 'items-start' : 'items-end'
-                        }`}
-                      >
-                        <span className="text-[10px] text-neutral-500 mb-1 px-1">
-                          {nextSenderIsSpirit ? 'Espírito Santo' : candidateFirstName}
-                        </span>
-                        <div
-                          className={`px-3.5 py-2.5 rounded-2xl border flex items-center gap-1.5 ${
-                            nextSenderIsSpirit
-                              ? 'bg-neutral-900 border-sky-500/25 rounded-tl-sm'
-                              : 'bg-amber-400/20 border-amber-400/35 rounded-tr-sm'
-                          }`}
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce" />
-                          <span
-                            className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce"
-                            style={{ animationDelay: '0.15s' }}
-                          />
-                          <span
-                            className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce"
-                            style={{ animationDelay: '0.3s' }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Fake Chat Input Bar at Bottom of Phone */}
-                  <div className="px-3 py-2.5 bg-neutral-900 border-t border-neutral-800 flex items-center gap-2 shrink-0">
-                    <div className="flex-1 px-3 py-1.5 rounded-full bg-neutral-950 border border-neutral-800 text-[11px] text-neutral-500 truncate">
-                      {chatFinished
-                        ? 'Conversa concluída — clique em Finalizar abaixo'
-                        : 'Mensagem chegando...'}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {finishError && (
-            <div className="w-full p-3 bg-red-500/15 border border-red-500/30 rounded-xl flex items-start gap-2 text-xs text-red-300">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <span>{finishError}</span>
-            </div>
-          )}
-
-          {/* Action Buttons Below the Smartphone Animation */}
-          <div className="w-full flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => {
-                setStep('form');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="py-3 px-4 rounded-2xl bg-neutral-900/95 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span>Revisar Dados</span>
-            </button>
-
-            <button
-              type="button"
-              disabled={submitting || !chatFinished}
-              onClick={handleFinalizeRegistration}
-              className="flex-1 py-3.5 px-5 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-2xl text-xs sm:text-sm shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer touch-manipulation"
-            >
-              {submitting ? (
-                <span>Finalizando e salvando...</span>
-              ) : phonePhase !== 'chat' ? (
-                <span>Toque em &quot;Abrir Mensagem&quot; no celular</span>
-              ) : !chatFinished ? (
-                <span>Aguarde as mensagens...</span>
-              ) : (
-                <>
-                  <span>Finalizar</span>
-                  <ChevronRight className="w-4 h-4 stroke-[2.5]" />
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ==========================================
-  // 4. TELA DE CONFIRMAÇÃO E ENCERRAMENTO DO FORMULÁRIO
+  // 3. TELA DE CONFIRMAÇÃO E ENCERRAMENTO DO FORMULÁRIO
   // ==========================================
   if (step === 'confirmed' && submittedRecord) {
     return (
@@ -908,14 +362,14 @@ export const PublicBaptismPage: React.FC = () => {
         <div className="w-full max-w-xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl">
           <div className="h-3 w-full bg-amber-400" />
 
-          <div className="relative overflow-hidden border-b border-neutral-800 px-5 sm:px-6 py-7 text-center">
-            <WaterAnimationBackdrop />
-            <div className="relative z-10 space-y-4">
-              <div className="flex items-center justify-center gap-2 text-emerald-400">
-                <CheckCircle2 className="w-5 h-5 shrink-0" />
-                <span className="text-xs font-bold tracking-wider uppercase">
-                  Inscrição Confirmada com Sucesso!
-                </span>
+          <div className="bg-gradient-to-br from-emerald-950/50 via-neutral-900 to-neutral-950 border-b border-neutral-800 px-5 sm:px-6 py-7 text-center">
+            <div className="space-y-3">
+              <div className="w-14 h-14 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 mx-auto flex items-center justify-center">
+                <CheckCircle2 className="w-7 h-7" />
+              </div>
+
+              <div className="text-xs font-bold tracking-wider uppercase text-emerald-400">
+                Inscrição Confirmada com Sucesso!
               </div>
 
               <div>
@@ -925,13 +379,6 @@ export const PublicBaptismPage: React.FC = () => {
                 <p className="text-xs text-neutral-300 mt-1.5 leading-relaxed max-w-md mx-auto">
                   Sua inscrição foi finalizada e enviada automaticamente para a direção da igreja e Secretaria. Em breve a equipe entrará em contato!
                 </p>
-              </div>
-
-              <div className="pt-1">
-                <PixelBaptismAnimation
-                  gender={submittedRecord.gender}
-                  candidateName={submittedRecord.fullName}
-                />
               </div>
             </div>
           </div>
@@ -1125,7 +572,7 @@ export const PublicBaptismPage: React.FC = () => {
           </div>
 
           {/* FORM */}
-          <form onSubmit={handleProceedToAnimation} className="space-y-4 pt-1">
+          <form onSubmit={handleSubmitRegistration} className="space-y-4 pt-1">
             <div className="border-t border-neutral-800 pt-4">
               <h2 className="text-base font-bold text-neutral-100 mb-1">
                 Dados do Candidato(a)
@@ -1474,14 +921,21 @@ export const PublicBaptismPage: React.FC = () => {
               </div>
             )}
 
-            {/* Submit Button -> Enviar Inscrição (abre a tela da animação) */}
+            {/* Submit Button -> Enviar Inscrição */}
             <div className="pt-2">
               <button
                 type="submit"
-                className="w-full py-3.5 px-4 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-2xl text-xs sm:text-sm shadow-xl transition-transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer touch-manipulation"
+                disabled={submitting}
+                className="w-full py-3.5 px-4 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold rounded-2xl text-xs sm:text-sm shadow-xl transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer touch-manipulation"
               >
-                <span>Enviar Inscrição</span>
-                <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                {submitting ? (
+                  <span>Enviando inscrição...</span>
+                ) : (
+                  <>
+                    <span>Enviar Inscrição</span>
+                    <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                  </>
+                )}
               </button>
             </div>
           </form>
